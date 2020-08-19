@@ -195,7 +195,7 @@ const Connection* BasicIceController::FindNextPingableConnection() {
         if (conn1 == conn2) {
           return false;
         }
-        return MorePingable(conn1, conn2) == conn2;
+        return MorePingable(std::min(conn1, conn2), std::max(conn1, conn2)) == conn2;
       });
   if (iter != pingable_connections.end()) {
     return *iter;
