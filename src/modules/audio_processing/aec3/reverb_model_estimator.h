@@ -14,6 +14,7 @@
 #include <array>
 #include <memory>
 #include <vector>
+#include <memory>
 
 #include "absl/types/optional.h"
 #include "api/array_view.h"
