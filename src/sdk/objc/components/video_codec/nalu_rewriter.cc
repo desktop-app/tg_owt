@@ -269,8 +269,14 @@ bool H265CMSampleBufferToAnnexBBuffer(
   // Get parameter set information.
   int nalu_header_size = 0;
   size_t param_set_count = 0;
-  OSStatus status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-      description, 0, nullptr, nullptr, &param_set_count, &nalu_header_size);
+  OSStatus status = noErr;
+  if (__builtin_available(macOS 10.13, *)) {
+    status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+        description, 0, nullptr, nullptr, &param_set_count, &nalu_header_size);
+  } else {
+    RTC_LOG(LS_ERROR) << "Not supported.";
+    return false;
+  }
   if (status != noErr) {
     RTC_LOG(LS_ERROR) << "Failed to get parameter set.";
     return false;
@@ -290,8 +296,13 @@ bool H265CMSampleBufferToAnnexBBuffer(
     size_t param_set_size = 0;
     const uint8_t* param_set = nullptr;
     for (size_t i = 0; i < param_set_count; ++i) {
-      status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-          description, i, &param_set, &param_set_size, nullptr, nullptr);
+      if (__builtin_available(macOS 10.13, *)) {
+        status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            description, i, &param_set, &param_set_size, nullptr, nullptr);
+      } else {
+        RTC_LOG(LS_ERROR) << "Not supported.";
+        return false;
+      }
       if (status != noErr) {
         RTC_LOG(LS_ERROR) << "Failed to get parameter set.";
         return false;
@@ -527,9 +538,15 @@ CMVideoFormatDescriptionRef CreateH265VideoFormatDescription(
 
   // Parse the SPS and PPS into a CMVideoFormatDescription.
   CMVideoFormatDescriptionRef description = nullptr;
-  OSStatus status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
-      kCFAllocatorDefault, 3, param_set_ptrs, param_set_sizes, 4, nullptr,
-      &description);
+  OSStatus status = noErr;
+  if (__builtin_available(macOS 10.13, *)) {
+    status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+        kCFAllocatorDefault, 3, param_set_ptrs, param_set_sizes, 4, nullptr,
+        &description);
+  } else {
+    RTC_LOG(LS_ERROR) << "Not supported.";
+    return nullptr;
+  }
   if (status != noErr) {
     RTC_LOG(LS_ERROR) << "Failed to create video format description.";
     return nullptr;
