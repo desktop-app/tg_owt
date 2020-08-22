@@ -68,6 +68,12 @@ function(init_target target_name) # init_target(my_target folder_name)
                 -Wno-narrowing
                 -Wno-return-type
             )
+            if (CMAKE_SIZEOF_VOID_P EQUAL 4)
+                target_compile_options(${target_name}
+                PRIVATE
+                    -g0
+                )
+            endif()
         endif()
 
         target_compile_options(${target_name}
