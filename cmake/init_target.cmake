@@ -41,7 +41,6 @@ function(init_target target_name) # init_target(my_target folder_name)
 
         target_compile_options(${target_name}
         PRIVATE
-            /arch:AVX2
             /W1
             /wd4715 # not all control paths return a value.
             /wd4244 # 'initializing' conversion from .. to .., possible loss of data.
@@ -74,15 +73,47 @@ function(init_target target_name) # init_target(my_target folder_name)
         target_compile_options(${target_name}
         PRIVATE
             -msse2
-            -mssse3
-            -msse4.1
-            -mmmx
-            -mavx
-            -mavx2
         )
         target_compile_definitions(${target_name}
         PRIVATE
             HAVE_NETINET_IN_H
+        )
+    endif()
+endfunction()
+
+function(init_feature_target target_name feature)
+    init_target(${target_name})
+
+    set(option "")
+    if (WIN32)
+        if (${feature} STREQUAL "avx")
+            set(option /arch:AVX)
+        elseif (${feature} STREQUAL "avx2")
+            set(option /arch:AVX2)
+        endif()
+    else()
+        if (${feature} STREQUAL "mmx")
+            set(option -mmmx)
+        elseif (${feature} STREQUAL "sse2")
+            set(option -msse2)
+        elseif (${feature} STREQUAL "ssse3")
+            set(option -mssse3)
+        elseif (${feature} STREQUAL "sse4")
+            set(option -msse4.1)
+        elseif (${feature} STREQUAL "avx")
+            set(option -mavx)
+        elseif (${feature} STREQUAL "avx2")
+            set(option -mavx2)
+        endif()
+        target_compile_options(${target_name}
+        PRIVATE
+            ${posix_option}
+        )
+    endif()
+    if (NOT "${option}" STREQUAL "")
+        target_compile_options(${target_name}
+        PRIVATE
+            ${option}
         )
     endif()
 endfunction()

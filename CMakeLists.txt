@@ -61,6 +61,12 @@ PUBLIC
     tg_owt::libsrtp
     tg_owt::libusrsctp
     tg_owt::libvpx
+    tg_owt::libvpx_mmx
+    tg_owt::libvpx_sse2
+    tg_owt::libvpx_ssse3
+    tg_owt::libvpx_sse4
+    tg_owt::libvpx_avx
+    tg_owt::libvpx_avx2
     tg_owt::libwebrtcbuild
     tg_owt::libyuv
 )

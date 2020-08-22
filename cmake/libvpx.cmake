@@ -4,6 +4,59 @@ add_library(tg_owt::libvpx ALIAS libvpx)
 
 set(libvpx_loc ${third_party_loc}/libvpx)
 
+set(include_directories
+    ${libvpx_loc}/source/libvpx
+    ${libvpx_loc}/source/config
+)
+
+if (WIN32)
+    if (is_x86)
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/win/ia32
+        )
+    else()
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/win/x64
+        )
+    endif()
+elseif (APPLE)
+    if (is_x86)
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/mac/ia32
+        )
+    else()
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/mac/x64
+        )
+    endif()
+else()
+    if (is_x86)
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/linux/ia32
+        )
+    else()
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/linux/x64
+        )
+    endif()
+endif()
+
+function(add_sublibrary postfix)
+    add_library(libvpx_${postfix} OBJECT)
+    init_feature_target(libvpx_${postfix} ${postfix})
+    add_library(tg_owt::libvpx_${postfix} ALIAS libvpx_${postfix})
+    target_include_directories(libvpx_${postfix}
+    PRIVATE
+        ${include_directories}
+    )
+    set(sources_list ${ARGV})
+    list(REMOVE_AT sources_list 0)
+    nice_target_sources(libvpx_${postfix} ${libvpx_loc}
+    PRIVATE
+        ${sources_list}
+    )
+endfunction()
+
 nice_target_sources(libvpx ${libvpx_loc}
 PRIVATE
     include/elf.h
@@ -366,12 +419,14 @@ PRIVATE
     source/libvpx/vpx_util/vpx_timestamp.h
     source/libvpx/vpx_util/vpx_write_yuv_frame.c
     source/libvpx/vpx_util/vpx_write_yuv_frame.h
+)
 
-    # MMX
+add_sublibrary(mmx
     source/libvpx/vp8/common/x86/idct_blk_mmx.c
     source/libvpx/vpx_ports/emms_mmx.c
+)
 
-    # SSE2
+add_sublibrary(sse2
     source/libvpx/vp8/common/x86/bilinear_filter_sse2.c
     source/libvpx/vp8/common/x86/idct_blk_sse2.c
     source/libvpx/vp8/encoder/x86/denoising_sse2.c
@@ -400,16 +455,18 @@ PRIVATE
     source/libvpx/vpx_dsp/x86/sum_squares_sse2.c
     source/libvpx/vpx_dsp/x86/variance_sse2.c
     source/libvpx/vpx_dsp/x86/vpx_subpixel_4t_intrin_sse2.c
+)
 
-    # SSSE2
+add_sublibrary(ssse3
     source/libvpx/vp8/encoder/x86/vp8_quantize_ssse3.c
     source/libvpx/vp9/encoder/x86/vp9_frame_scale_ssse3.c
     source/libvpx/vpx_dsp/x86/highbd_intrapred_intrin_ssse3.c
     source/libvpx/vpx_dsp/x86/inv_txfm_ssse3.c
     source/libvpx/vpx_dsp/x86/quantize_ssse3.c
     source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_intrin_ssse3.c
+)
 
-    # SSE4
+add_sublibrary(sse4
     source/libvpx/vp8/encoder/x86/quantize_sse4.c
     source/libvpx/vp9/common/x86/vp9_highbd_iht16x16_add_sse4.c
     source/libvpx/vp9/common/x86/vp9_highbd_iht4x4_add_sse4.c
@@ -418,12 +475,14 @@ PRIVATE
     source/libvpx/vpx_dsp/x86/highbd_idct32x32_add_sse4.c
     source/libvpx/vpx_dsp/x86/highbd_idct4x4_add_sse4.c
     source/libvpx/vpx_dsp/x86/highbd_idct8x8_add_sse4.c
+)
 
-    # AVX
+add_sublibrary(avx
     source/libvpx/vp9/encoder/x86/vp9_diamond_search_sad_avx.c
     source/libvpx/vpx_dsp/x86/quantize_avx.c
+)
 
-    # AVX2
+add_sublibrary(avx2
     source/libvpx/vp9/encoder/x86/vp9_error_avx2.c
     source/libvpx/vp9/encoder/x86/vp9_quantize_avx2.c
     source/libvpx/vpx_dsp/x86/avg_intrin_avx2.c
@@ -483,13 +542,13 @@ set(yasm_sources
 )
 
 if (APPLE)
-    remove_target_sources(libvpx ${libvpx_loc}
+    remove_target_sources(libvpx_avx2 ${libvpx_loc}
         source/libvpx/vpx_dsp/x86/fwd_txfm_avx2.c
     )
 endif()
 
 if (is_x64)
-    remove_target_sources(libvpx ${libvpx_loc}
+    remove_target_sources(libvpx_mmx ${libvpx_loc}
         source/libvpx/vpx_ports/emms_mmx.c
     )
     list(APPEND yasm_sources
@@ -501,43 +560,6 @@ if (is_x64)
         source/libvpx/vpx_ports/emms_mmx.asm
         source/libvpx/vpx_ports/float_control_word.asm
     )
-endif()
-
-set(include_directories
-    ${libvpx_loc}/source/libvpx
-    ${libvpx_loc}/source/config
-)
-
-if (WIN32)
-    if (is_x86)
-        list(APPEND include_directories
-            ${libvpx_loc}/source/config/win/ia32
-        )
-    else()
-        list(APPEND include_directories
-            ${libvpx_loc}/source/config/win/x64
-        )
-    endif()
-elseif (APPLE)
-    if (is_x86)
-        list(APPEND include_directories
-            ${libvpx_loc}/source/config/mac/ia32
-        )
-    else()
-        list(APPEND include_directories
-            ${libvpx_loc}/source/config/mac/x64
-        )
-    endif()
-else()
-    if (is_x86)
-        list(APPEND include_directories
-            ${libvpx_loc}/source/config/linux/ia32
-        )
-    else()
-        list(APPEND include_directories
-            ${libvpx_loc}/source/config/linux/x64
-        )
-    endif()
 endif()
 
 target_yasm_sources(libvpx ${libvpx_loc}
