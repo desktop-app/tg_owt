@@ -4,7 +4,6 @@ set(TG_OWT_OPENSSL_INCLUDE_PATH "" CACHE STRING "Include path for openssl.")
 function(link_openssl target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(OpenSSL REQUIRED)
-        target_include_directories(${target_name} PUBLIC ${OPENSSL_INCLUDE_DIR})
         target_link_libraries(${target_name} PUBLIC OpenSSL::Crypto OpenSSL::SSL)
     else()
         if (TG_OWT_OPENSSL_INCLUDE_PATH STREQUAL "")
@@ -24,7 +23,6 @@ function(link_opus target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
-        target_include_directories(${target_name} PUBLIC ${OPUS_INCLUDE_DIRS})
         target_link_libraries(${target_name} PUBLIC PkgConfig::OPUS)
     else()
         if (TG_OWT_OPUS_INCLUDE_PATH STREQUAL "")
@@ -48,13 +46,6 @@ function(link_ffmpeg target_name)
         pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
         pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
         pkg_check_modules(SWRESAMPLE REQUIRED IMPORTED_TARGET libswresample)
-        target_include_directories(${target_name} PUBLIC
-            ${AVCODEC_INCLUDE_DIRS}
-            ${AVFORMAT_INCLUDE_DIRS}
-            ${AVUTIL_INCLUDE_DIRS}
-            ${SWSCALE_INCLUDE_DIRS}
-            ${SWRESAMPLE_INCLUDE_DIRS}
-        )
         target_link_libraries(${target_name} PUBLIC
             PkgConfig::AVCODEC
             PkgConfig::AVFORMAT
@@ -79,7 +70,6 @@ set(TG_OWT_LIBJPEG_INCLUDE_PATH "" CACHE STRING "Include path for libjpeg.")
 function(link_libjpeg target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(JPEG REQUIRED)
-        target_include_directories(${target_name} PUBLIC ${JPEG_INCLUDE_DIR})
         target_link_libraries(${target_name} PUBLIC JPEG::JPEG)
     else()
         if (TG_OWT_LIBJPEG_INCLUDE_PATH STREQUAL "")
