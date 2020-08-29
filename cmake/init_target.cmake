@@ -75,10 +75,13 @@ function(init_target target_name) # init_target(my_target folder_name)
             endif()
         endif()
 
-        target_compile_options(${target_name}
-        PRIVATE
-            -msse2
-        )
+        if (CMAKE_SYSTEM_PROCESSOR MATCHES "i686.*|i386.*|x86.*")
+            target_compile_options(${target_name}
+            PRIVATE
+                -msse2
+            )
+        endif()
+
         target_compile_definitions(${target_name}
         PRIVATE
             HAVE_NETINET_IN_H
