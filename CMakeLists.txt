@@ -54,6 +54,8 @@ init_target(tg_owt)
 
 target_link_libraries(tg_owt
 PUBLIC
+    tg_owt::libwebrtcbuild
+PRIVATE
     tg_owt::libabsl
     tg_owt::libopenh264
     tg_owt::libpffft
@@ -67,21 +69,20 @@ PUBLIC
     tg_owt::libvpx_sse4
     tg_owt::libvpx_avx
     tg_owt::libvpx_avx2
-    tg_owt::libwebrtcbuild
     tg_owt::libyuv
 )
 
 target_sources(tg_owt
-PUBLIC
+PRIVATE
     ${libvpx_yasm_objects}
     ${libopenh264_yasm_objects}
 )
 
 if (NOT WIN32 AND NOT APPLE)
-    target_link_libraries(tg_owt PUBLIC tg_owt::libevent)
+    target_link_libraries(tg_owt PRIVATE tg_owt::libevent)
 endif()
 if (APPLE)
-    target_link_libraries(tg_owt PUBLIC tg_owt::libsdkmacos)
+    target_link_libraries(tg_owt PRIVATE tg_owt::libsdkmacos)
 endif()
 
 link_openssl(tg_owt)
@@ -1736,3 +1737,45 @@ if (WIN32)
     )
 else()
 endif()
+
+set(platform_export)
+if (NOT WIN32 AND NOT APPLE)
+    set(platform_export
+        libevent
+    )
+elseif (APPLE)
+    set(platform_export
+        libsdkmacos
+    )
+endif()
+
+export(
+TARGETS
+    tg_owt
+    libabsl
+    libopenh264
+    libpffft
+    librnnoise
+    libsrtp
+    libusrsctp
+    libvpx
+    libvpx_mmx
+    libvpx_sse2
+    libvpx_ssse3
+    libvpx_sse4
+    libvpx_avx
+    libvpx_avx2
+    libwebrtcbuild
+    libyuv
+    ${platform_export}
+NAMESPACE
+    tg_owt::
+FILE
+    "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
+)
+
+configure_file(
+    "cmake/tg_owtConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/tg_owtConfig.cmake"
+    COPYONLY
+)
