@@ -105,3 +105,23 @@ function(link_libjpeg target_name)
         )
     endif()
 endfunction()
+
+# alsa
+set(TG_OWT_ALSA_INCLUDE_PATH "" CACHE STRING "Include path for alsa-lib.")
+function(link_libalsa target_name)
+    if (TG_OWT_PACKAGED_BUILD)
+        find_package(ALSA REQUIRED)
+        target_include_directories(${target_name} PRIVATE ${ALSA_INCLUDE_DIRS})
+        target_link_libraries(${target_name} PRIVATE ${ALSA_LIBRARIES})
+    endif()
+endfunction()
+
+# pulseaudio
+set(TG_OWT_LIBPULSE_INCLUDE_PATH "" CACHE STRING "Include path for pulse-audio.")
+function(link_libpulse target_name)
+    if (TG_OWT_PACKAGED_BUILD)
+        find_package(PulseAudio REQUIRED)
+        target_include_directories(${target_name} PRIVATE ${PULSEAUDIO_INCLUDE_DIRS})
+        target_link_libraries(${target_name} PRIVATE ${PULSEAUDIO_LIBRARIES})
+    endif()
+endfunction()
