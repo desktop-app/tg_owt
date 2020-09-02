@@ -16,6 +16,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <cstdint>
 
 #include "absl/types/optional.h"
 #include "modules/include/module_common_types_public.h"

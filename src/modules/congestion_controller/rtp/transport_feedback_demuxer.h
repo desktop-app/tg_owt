@@ -13,6 +13,7 @@
 #include <map>
 #include <utility>
 #include <vector>
+#include <cstdint>
 
 #include "modules/include/module_common_types_public.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
