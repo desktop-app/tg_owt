@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <map>
+#include <cstdint>
 
 #include "call/rtp_packet_sink_interface.h"
 
