@@ -255,8 +255,9 @@ PRIVATE
 )
 
 target_include_directories(libsdkmacos
-PRIVATE
+PUBLIC
     ${webrtc_loc}
     ${libsdkmacos_loc}
     ${libsdkmacos_loc}/base
+    ${libsdkmacos_loc}/components/video_codec
 )

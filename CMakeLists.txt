@@ -82,7 +82,7 @@ if (NOT WIN32 AND NOT APPLE)
     target_link_libraries(tg_owt PRIVATE tg_owt::libevent)
 endif()
 if (APPLE)
-    target_link_libraries(tg_owt PRIVATE tg_owt::libsdkmacos)
+    target_link_libraries(tg_owt PUBLIC tg_owt::libsdkmacos)
 endif()
 
 link_openssl(tg_owt)
