@@ -39,7 +39,6 @@ include(cmake/libpffft.cmake)
 include(cmake/librnnoise.cmake)
 include(cmake/libsrtp.cmake)
 include(cmake/libusrsctp.cmake)
-include(cmake/libvpx.cmake)
 include(cmake/libwebrtcbuild.cmake)
 include(cmake/libyuv.cmake)
 if (NOT WIN32 AND NOT APPLE)
@@ -62,13 +61,6 @@ PRIVATE
     tg_owt::librnnoise
     tg_owt::libsrtp
     tg_owt::libusrsctp
-    tg_owt::libvpx
-    tg_owt::libvpx_mmx
-    tg_owt::libvpx_sse2
-    tg_owt::libvpx_ssse3
-    tg_owt::libvpx_sse4
-    tg_owt::libvpx_avx
-    tg_owt::libvpx_avx2
     tg_owt::libyuv
 )
 
@@ -85,6 +77,7 @@ if (APPLE)
     target_link_libraries(tg_owt PUBLIC tg_owt::libsdkmacos)
 endif()
 
+link_vpx(tg_owt)
 link_openssl(tg_owt)
 link_ffmpeg(tg_owt)
 link_opus(tg_owt)
@@ -1751,6 +1744,19 @@ elseif (APPLE)
     )
 endif()
 
+set(libvpx_export)
+if (NOT VPX_FOUND)
+    set(libvpx_export
+        libvpx
+        libvpx_mmx
+        libvpx_sse2
+        libvpx_ssse3
+        libvpx_sse4
+        libvpx_avx
+        libvpx_avx2
+    )
+endif()
+
 export(
 TARGETS
     tg_owt
@@ -1760,15 +1766,9 @@ TARGETS
     librnnoise
     libsrtp
     libusrsctp
-    libvpx
-    libvpx_mmx
-    libvpx_sse2
-    libvpx_ssse3
-    libvpx_sse4
-    libvpx_avx
-    libvpx_avx2
     libwebrtcbuild
     libyuv
+    ${libvpx_export}
     ${platform_export}
 NAMESPACE
     tg_owt::
