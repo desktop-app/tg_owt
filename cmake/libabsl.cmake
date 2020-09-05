@@ -52,7 +52,7 @@ PRIVATE
     # absl/flags/usage_config.cc
     # absl/hash/internal/city.cc
     # absl/hash/internal/hash.cc
-    # absl/numeric/int128.cc
+    absl/numeric/int128.cc
     # absl/random/discrete_distribution.cc
     # absl/random/gaussian_distribution.cc
     # absl/random/internal/chi_square.cc
