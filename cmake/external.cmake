@@ -149,3 +149,21 @@ function(link_vpx target_name)
         )
     endif()
 endfunction()
+
+# libvpx
+function(link_openh264 target_name)
+    if (TG_OWT_PACKAGED_BUILD)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(OPENH264 openh264)
+    endif()
+    if (OPENH264_FOUND)
+        target_include_directories(${target_name} PRIVATE ${OPENH264_INCLUDE_DIRS})
+        target_link_libraries(${target_name} PRIVATE ${OPENH264_LINK_LIBRARIES})
+    else()
+        include("${CMAKE_CURRENT_LIST_DIR}/cmake/libopenh264.cmake")
+        target_link_libraries(${target_name}
+            PRIVATE
+            tg_owt::libopenh264
+        )
+    endif()
+endfunction()

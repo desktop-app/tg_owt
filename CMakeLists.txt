@@ -34,7 +34,6 @@ include(cmake/init_target.cmake)
 include(cmake/target_yasm_sources.cmake)
 include(cmake/external.cmake)
 include(cmake/libabsl.cmake)
-include(cmake/libopenh264.cmake)
 include(cmake/libpffft.cmake)
 include(cmake/librnnoise.cmake)
 include(cmake/libsrtp.cmake)
@@ -56,7 +55,6 @@ PUBLIC
     tg_owt::libwebrtcbuild
 PRIVATE
     tg_owt::libabsl
-    tg_owt::libopenh264
     tg_owt::libpffft
     tg_owt::librnnoise
     tg_owt::libsrtp
@@ -77,6 +75,7 @@ if (APPLE)
     target_link_libraries(tg_owt PUBLIC tg_owt::libsdkmacos)
 endif()
 
+link_openh264(tg_owt)
 link_vpx(tg_owt)
 link_openssl(tg_owt)
 link_ffmpeg(tg_owt)
@@ -1757,17 +1756,24 @@ if (NOT VPX_FOUND)
     )
 endif()
 
+set(openh264_export)
+if (NOT OPENH264_FOUND)
+    set(openh264_export
+        libopenh264
+    )
+endif()
+
 export(
 TARGETS
     tg_owt
     libabsl
-    libopenh264
     libpffft
     librnnoise
     libsrtp
     libusrsctp
     libwebrtcbuild
     libyuv
+    ${openh264_export}
     ${libvpx_export}
     ${platform_export}
 NAMESPACE
