@@ -19,7 +19,7 @@ else()
 endif()
 
 project(tg_owt
-    LANGUAGES C CXX
+    LANGUAGES C CXX ASM
     DESCRIPTION "WebRTC build for Telegram"
     HOMEPAGE_URL "https://github.com/desktop-app/tg_owt.git"
 )
@@ -52,25 +52,41 @@ endif()
 add_library(tg_owt STATIC)
 init_target(tg_owt)
 
-target_link_libraries(tg_owt
-PUBLIC
-    tg_owt::libwebrtcbuild
-PRIVATE
-    tg_owt::libabsl
-    tg_owt::libopenh264
-    tg_owt::libpffft
-    tg_owt::librnnoise
-    tg_owt::libsrtp
-    tg_owt::libusrsctp
-    tg_owt::libvpx
-    tg_owt::libvpx_mmx
-    tg_owt::libvpx_sse2
-    tg_owt::libvpx_ssse3
-    tg_owt::libvpx_sse4
-    tg_owt::libvpx_avx
-    tg_owt::libvpx_avx2
-    tg_owt::libyuv
-)
+if (is_x86 OR is_x64)
+    target_link_libraries(tg_owt
+    PUBLIC
+        tg_owt::libwebrtcbuild
+    PRIVATE
+        tg_owt::libabsl
+        tg_owt::libopenh264
+        tg_owt::libpffft
+        tg_owt::librnnoise
+        tg_owt::libsrtp
+        tg_owt::libusrsctp
+        tg_owt::libvpx
+        tg_owt::libvpx_mmx
+        tg_owt::libvpx_sse2
+        tg_owt::libvpx_ssse3
+        tg_owt::libvpx_sse4
+        tg_owt::libvpx_avx
+        tg_owt::libvpx_avx2
+        tg_owt::libyuv
+    )
+else()
+    target_link_libraries(tg_owt
+    PUBLIC
+        tg_owt::libwebrtcbuild
+    PRIVATE
+        tg_owt::libabsl
+        tg_owt::libopenh264
+        tg_owt::libpffft
+        tg_owt::librnnoise
+        tg_owt::libsrtp
+        tg_owt::libusrsctp
+        tg_owt::libvpx
+        tg_owt::libyuv
+    )
+endif()
 
 target_sources(tg_owt
 PRIVATE
@@ -1754,30 +1770,51 @@ elseif (APPLE)
     )
 endif()
 
-export(
-TARGETS
-    tg_owt
-    libabsl
-    libopenh264
-    libpffft
-    librnnoise
-    libsrtp
-    libusrsctp
-    libvpx
-    libvpx_mmx
-    libvpx_sse2
-    libvpx_ssse3
-    libvpx_sse4
-    libvpx_avx
-    libvpx_avx2
-    libwebrtcbuild
-    libyuv
-    ${platform_export}
-NAMESPACE
-    tg_owt::
-FILE
-    "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
-)
+if (is_x86 OR is_x64)
+    export(
+    TARGETS
+        tg_owt
+        libabsl
+        libopenh264
+        libpffft
+        librnnoise
+        libsrtp
+        libusrsctp
+        libvpx
+        libvpx_mmx
+        libvpx_sse2
+        libvpx_ssse3
+        libvpx_sse4
+        libvpx_avx
+        libvpx_avx2
+        libwebrtcbuild
+        libyuv
+        ${platform_export}
+    NAMESPACE
+        tg_owt::
+    FILE
+        "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
+    )
+else()
+    export(
+    TARGETS
+        tg_owt
+        libabsl
+        libopenh264
+        libpffft
+        librnnoise
+        libsrtp
+        libusrsctp
+        libvpx
+        libwebrtcbuild
+        libyuv
+        ${platform_export}
+    NAMESPACE
+        tg_owt::
+    FILE
+        "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
+    )
+endif()
 
 configure_file(
     "cmake/tg_owtConfig.cmake"

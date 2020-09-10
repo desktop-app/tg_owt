@@ -14,31 +14,56 @@ if (WIN32)
         list(APPEND include_directories
             ${libvpx_loc}/source/config/win/ia32
         )
-    else()
+    elseif (is_x64)
         list(APPEND include_directories
             ${libvpx_loc}/source/config/win/x64
         )
+    elseif (is_aarch64)
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/win/arm64
+        )
+    else()
+        message(FATAL_ERROR "Unsupported CPU architecture on Windows.")
     endif()
+    set(ASM_SUFFIX ".asm")
 elseif (APPLE)
     if (is_x86)
         list(APPEND include_directories
             ${libvpx_loc}/source/config/mac/ia32
         )
-    else()
+    elseif (is_x64)
         list(APPEND include_directories
             ${libvpx_loc}/source/config/mac/x64
         )
+    else()
+        message(FATAL_ERROR "Unsupported CPU architecture on Apple devices.")
     endif()
 else()
     if (is_x86)
         list(APPEND include_directories
             ${libvpx_loc}/source/config/linux/ia32
         )
-    else()
+    elseif (is_x64)
         list(APPEND include_directories
             ${libvpx_loc}/source/config/linux/x64
         )
+    elseif (is_aarch64)
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/linux/arm64
+        )
+    elseif (is_arm AND arm_use_neon)
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/linux/arm-neon
+        )
+    elseif (is_arm)
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/linux/arm
+        )
+    else()
+        message(FATAL_ERROR "Unsupported CPU architecture (consider updating the build system).")
     endif()
+
+    set(ASM_SUFFIX ".asm.S")
 endif()
 
 function(add_sublibrary postfix)
@@ -121,8 +146,6 @@ PRIVATE
     source/libvpx/vp8/common/vp8_loopfilter.c
     source/libvpx/vp8/common/vp8_skin_detection.c
     source/libvpx/vp8/common/vp8_skin_detection.h
-    source/libvpx/vp8/common/x86/loopfilter_x86.c
-    source/libvpx/vp8/common/x86/vp8_asm_stubs.c
     source/libvpx/vp8/decoder/dboolhuff.c
     source/libvpx/vp8/decoder/dboolhuff.h
     source/libvpx/vp8/decoder/decodeframe.c
@@ -371,31 +394,11 @@ PRIVATE
     source/libvpx/vpx_dsp/vpx_dsp_common.h
     source/libvpx/vpx_dsp/vpx_dsp_rtcd.c
     source/libvpx/vpx_dsp/vpx_filter.h
-    source/libvpx/vpx_dsp/x86/bitdepth_conversion_avx2.h
-    source/libvpx/vpx_dsp/x86/bitdepth_conversion_sse2.h
-    source/libvpx/vpx_dsp/x86/convolve.h
-    source/libvpx/vpx_dsp/x86/convolve_avx2.h
-    source/libvpx/vpx_dsp/x86/convolve_sse2.h
-    source/libvpx/vpx_dsp/x86/convolve_ssse3.h
-    source/libvpx/vpx_dsp/x86/fwd_dct32x32_impl_avx2.h
-    source/libvpx/vpx_dsp/x86/fwd_dct32x32_impl_sse2.h
-    source/libvpx/vpx_dsp/x86/fwd_txfm_impl_sse2.h
-    source/libvpx/vpx_dsp/x86/fwd_txfm_sse2.h
-    source/libvpx/vpx_dsp/x86/highbd_inv_txfm_sse2.h
-    source/libvpx/vpx_dsp/x86/highbd_inv_txfm_sse4.h
-    source/libvpx/vpx_dsp/x86/inv_txfm_sse2.h
-    source/libvpx/vpx_dsp/x86/inv_txfm_ssse3.h
-    source/libvpx/vpx_dsp/x86/mem_sse2.h
-    source/libvpx/vpx_dsp/x86/quantize_sse2.h
-    source/libvpx/vpx_dsp/x86/quantize_ssse3.h
-    source/libvpx/vpx_dsp/x86/transpose_sse2.h
-    source/libvpx/vpx_dsp/x86/txfm_common_sse2.h
     source/libvpx/vpx_mem/include/vpx_mem_intrnl.h
     source/libvpx/vpx_mem/vpx_mem.c
     source/libvpx/vpx_mem/vpx_mem.h
     source/libvpx/vpx_ports/bitops.h
     source/libvpx/vpx_ports/compiler_attributes.h
-    source/libvpx/vpx_ports/emmintrin_compat.h
     source/libvpx/vpx_ports/mem.h
     source/libvpx/vpx_ports/mem_ops.h
     source/libvpx/vpx_ports/mem_ops_aligned.h
@@ -404,7 +407,6 @@ PRIVATE
     source/libvpx/vpx_ports/system_state.h
     source/libvpx/vpx_ports/vpx_once.h
     source/libvpx/vpx_ports/vpx_timer.h
-    source/libvpx/vpx_ports/x86.h
     source/libvpx/vpx_scale/generic/gen_scalers.c
     source/libvpx/vpx_scale/generic/vpx_scale.c
     source/libvpx/vpx_scale/generic/yv12config.c
@@ -421,155 +423,302 @@ PRIVATE
     source/libvpx/vpx_util/vpx_write_yuv_frame.h
 )
 
-add_sublibrary(mmx
-    source/libvpx/vp8/common/x86/idct_blk_mmx.c
-    source/libvpx/vpx_ports/emms_mmx.c
-)
+if (is_x86 OR is_x64)
+    nice_target_sources(libvpx ${libvpx_loc}
+    PRIVATE
 
-add_sublibrary(sse2
-    source/libvpx/vp8/common/x86/bilinear_filter_sse2.c
-    source/libvpx/vp8/common/x86/idct_blk_sse2.c
-    source/libvpx/vp8/encoder/x86/denoising_sse2.c
-    source/libvpx/vp8/encoder/x86/vp8_enc_stubs_sse2.c
-    source/libvpx/vp8/encoder/x86/vp8_quantize_sse2.c
-    source/libvpx/vp9/common/x86/vp9_idct_intrin_sse2.c
-    source/libvpx/vp9/encoder/x86/vp9_dct_intrin_sse2.c
-    source/libvpx/vp9/encoder/x86/vp9_denoiser_sse2.c
-    source/libvpx/vp9/encoder/x86/vp9_highbd_block_error_intrin_sse2.c
-    source/libvpx/vp9/encoder/x86/vp9_quantize_sse2.c
-    source/libvpx/vpx_dsp/x86/avg_intrin_sse2.c
-    source/libvpx/vpx_dsp/x86/avg_pred_sse2.c
-    source/libvpx/vpx_dsp/x86/fwd_txfm_sse2.c
-    source/libvpx/vpx_dsp/x86/highbd_idct16x16_add_sse2.c
-    source/libvpx/vpx_dsp/x86/highbd_idct32x32_add_sse2.c
-    source/libvpx/vpx_dsp/x86/highbd_idct4x4_add_sse2.c
-    source/libvpx/vpx_dsp/x86/highbd_idct8x8_add_sse2.c
-    source/libvpx/vpx_dsp/x86/highbd_intrapred_intrin_sse2.c
-    source/libvpx/vpx_dsp/x86/highbd_loopfilter_sse2.c
-    source/libvpx/vpx_dsp/x86/highbd_quantize_intrin_sse2.c
-    source/libvpx/vpx_dsp/x86/highbd_variance_sse2.c
-    source/libvpx/vpx_dsp/x86/inv_txfm_sse2.c
-    source/libvpx/vpx_dsp/x86/loopfilter_sse2.c
-    source/libvpx/vpx_dsp/x86/post_proc_sse2.c
-    source/libvpx/vpx_dsp/x86/quantize_sse2.c
-    source/libvpx/vpx_dsp/x86/sum_squares_sse2.c
-    source/libvpx/vpx_dsp/x86/variance_sse2.c
-    source/libvpx/vpx_dsp/x86/vpx_subpixel_4t_intrin_sse2.c
-)
-
-add_sublibrary(ssse3
-    source/libvpx/vp8/encoder/x86/vp8_quantize_ssse3.c
-    source/libvpx/vp9/encoder/x86/vp9_frame_scale_ssse3.c
-    source/libvpx/vpx_dsp/x86/highbd_intrapred_intrin_ssse3.c
-    source/libvpx/vpx_dsp/x86/inv_txfm_ssse3.c
-    source/libvpx/vpx_dsp/x86/quantize_ssse3.c
-    source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_intrin_ssse3.c
-)
-
-add_sublibrary(sse4
-    source/libvpx/vp8/encoder/x86/quantize_sse4.c
-    source/libvpx/vp9/common/x86/vp9_highbd_iht16x16_add_sse4.c
-    source/libvpx/vp9/common/x86/vp9_highbd_iht4x4_add_sse4.c
-    source/libvpx/vp9/common/x86/vp9_highbd_iht8x8_add_sse4.c
-    source/libvpx/vpx_dsp/x86/highbd_idct16x16_add_sse4.c
-    source/libvpx/vpx_dsp/x86/highbd_idct32x32_add_sse4.c
-    source/libvpx/vpx_dsp/x86/highbd_idct4x4_add_sse4.c
-    source/libvpx/vpx_dsp/x86/highbd_idct8x8_add_sse4.c
-)
-
-add_sublibrary(avx
-    source/libvpx/vp9/encoder/x86/vp9_diamond_search_sad_avx.c
-    source/libvpx/vpx_dsp/x86/quantize_avx.c
-)
-
-add_sublibrary(avx2
-    source/libvpx/vp9/encoder/x86/vp9_error_avx2.c
-    source/libvpx/vp9/encoder/x86/vp9_quantize_avx2.c
-    source/libvpx/vpx_dsp/x86/avg_intrin_avx2.c
-    source/libvpx/vpx_dsp/x86/fwd_txfm_avx2.c
-    source/libvpx/vpx_dsp/x86/highbd_convolve_avx2.c
-    source/libvpx/vpx_dsp/x86/loopfilter_avx2.c
-    source/libvpx/vpx_dsp/x86/sad4d_avx2.c
-    source/libvpx/vpx_dsp/x86/sad_avx2.c
-    source/libvpx/vpx_dsp/x86/variance_avx2.c
-    source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_intrin_avx2.c
-)
-
-set(yasm_sources
-    source/libvpx/vp8/common/x86/dequantize_mmx.asm
-    source/libvpx/vp8/common/x86/idctllm_mmx.asm
-    source/libvpx/vp8/common/x86/idctllm_sse2.asm
-    source/libvpx/vp8/common/x86/iwalsh_sse2.asm
-    source/libvpx/vp8/common/x86/loopfilter_sse2.asm
-    source/libvpx/vp8/common/x86/mfqe_sse2.asm
-    source/libvpx/vp8/common/x86/recon_mmx.asm
-    source/libvpx/vp8/common/x86/recon_sse2.asm
-    source/libvpx/vp8/common/x86/subpixel_mmx.asm
-    source/libvpx/vp8/common/x86/subpixel_sse2.asm
-    source/libvpx/vp8/common/x86/subpixel_ssse3.asm
-    source/libvpx/vp8/encoder/x86/block_error_sse2.asm
-    source/libvpx/vp8/encoder/x86/copy_sse2.asm
-    source/libvpx/vp8/encoder/x86/copy_sse3.asm
-    source/libvpx/vp8/encoder/x86/dct_sse2.asm
-    source/libvpx/vp8/encoder/x86/fwalsh_sse2.asm
-    source/libvpx/vp9/common/x86/vp9_mfqe_sse2.asm
-    source/libvpx/vp9/encoder/x86/vp9_dct_sse2.asm
-    source/libvpx/vp9/encoder/x86/vp9_error_sse2.asm
-    source/libvpx/vpx_dsp/x86/add_noise_sse2.asm
-    source/libvpx/vpx_dsp/x86/deblock_sse2.asm
-    source/libvpx/vpx_dsp/x86/highbd_intrapred_sse2.asm
-    source/libvpx/vpx_dsp/x86/highbd_sad4d_sse2.asm
-    source/libvpx/vpx_dsp/x86/highbd_sad_sse2.asm
-    source/libvpx/vpx_dsp/x86/highbd_subpel_variance_impl_sse2.asm
-    source/libvpx/vpx_dsp/x86/highbd_variance_impl_sse2.asm
-    source/libvpx/vpx_dsp/x86/intrapred_sse2.asm
-    source/libvpx/vpx_dsp/x86/intrapred_ssse3.asm
-    source/libvpx/vpx_dsp/x86/inv_wht_sse2.asm
-    source/libvpx/vpx_dsp/x86/sad4d_sse2.asm
-    source/libvpx/vpx_dsp/x86/sad_sse2.asm
-    source/libvpx/vpx_dsp/x86/sad_sse3.asm
-    source/libvpx/vpx_dsp/x86/sad_sse4.asm
-    source/libvpx/vpx_dsp/x86/sad_ssse3.asm
-    source/libvpx/vpx_dsp/x86/subpel_variance_sse2.asm
-    source/libvpx/vpx_dsp/x86/subtract_sse2.asm
-    source/libvpx/vpx_dsp/x86/vpx_convolve_copy_sse2.asm
-    source/libvpx/vpx_dsp/x86/vpx_high_subpixel_8t_sse2.asm
-    source/libvpx/vpx_dsp/x86/vpx_high_subpixel_bilinear_sse2.asm
-    source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_sse2.asm
-    source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_ssse3.asm
-    source/libvpx/vpx_dsp/x86/vpx_subpixel_bilinear_sse2.asm
-    source/libvpx/vpx_dsp/x86/vpx_subpixel_bilinear_ssse3.asm
-)
-
-if (APPLE)
-    remove_target_sources(libvpx_avx2 ${libvpx_loc}
-        source/libvpx/vpx_dsp/x86/fwd_txfm_avx2.c
+        source/libvpx/vp8/common/x86/loopfilter_x86.c
+        source/libvpx/vp8/common/x86/vp8_asm_stubs.c
+        source/libvpx/vpx_dsp/x86/bitdepth_conversion_avx2.h
+        source/libvpx/vpx_dsp/x86/bitdepth_conversion_sse2.h
+        source/libvpx/vpx_dsp/x86/convolve.h
+        source/libvpx/vpx_dsp/x86/convolve_avx2.h
+        source/libvpx/vpx_dsp/x86/convolve_sse2.h
+        source/libvpx/vpx_dsp/x86/convolve_ssse3.h
+        source/libvpx/vpx_dsp/x86/fwd_dct32x32_impl_avx2.h
+        source/libvpx/vpx_dsp/x86/fwd_dct32x32_impl_sse2.h
+        source/libvpx/vpx_dsp/x86/fwd_txfm_impl_sse2.h
+        source/libvpx/vpx_dsp/x86/fwd_txfm_sse2.h
+        source/libvpx/vpx_dsp/x86/highbd_inv_txfm_sse2.h
+        source/libvpx/vpx_dsp/x86/highbd_inv_txfm_sse4.h
+        source/libvpx/vpx_dsp/x86/inv_txfm_sse2.h
+        source/libvpx/vpx_dsp/x86/inv_txfm_ssse3.h
+        source/libvpx/vpx_dsp/x86/mem_sse2.h
+        source/libvpx/vpx_dsp/x86/quantize_sse2.h
+        source/libvpx/vpx_dsp/x86/quantize_ssse3.h
+        source/libvpx/vpx_dsp/x86/transpose_sse2.h
+        source/libvpx/vpx_dsp/x86/txfm_common_sse2.h
+        source/libvpx/vpx_ports/emmintrin_compat.h
+        source/libvpx/vpx_ports/x86.h
     )
-endif()
 
-if (is_x64)
-    remove_target_sources(libvpx_mmx ${libvpx_loc}
+    add_sublibrary(mmx
+        source/libvpx/vp8/common/x86/idct_blk_mmx.c
         source/libvpx/vpx_ports/emms_mmx.c
     )
-    list(APPEND yasm_sources
-        source/libvpx/vp8/common/x86/loopfilter_block_sse2_x86_64.asm
-        source/libvpx/vp9/encoder/x86/vp9_quantize_ssse3_x86_64.asm
-        source/libvpx/vpx_dsp/x86/avg_ssse3_x86_64.asm
-        source/libvpx/vpx_dsp/x86/fwd_txfm_ssse3_x86_64.asm
-        source/libvpx/vpx_dsp/x86/ssim_opt_x86_64.asm
-        source/libvpx/vpx_ports/emms_mmx.asm
-        source/libvpx/vpx_ports/float_control_word.asm
-    )
-endif()
 
-target_yasm_sources(libvpx ${libvpx_loc}
-INCLUDE_DIRECTORIES
-    ${include_directories}
-DEFINES
-    CHROMIUM
-SOURCES
-    ${yasm_sources}
-)
+    add_sublibrary(sse2
+        source/libvpx/vp8/common/x86/bilinear_filter_sse2.c
+        source/libvpx/vp8/common/x86/idct_blk_sse2.c
+        source/libvpx/vp8/encoder/x86/denoising_sse2.c
+        source/libvpx/vp8/encoder/x86/vp8_enc_stubs_sse2.c
+        source/libvpx/vp8/encoder/x86/vp8_quantize_sse2.c
+        source/libvpx/vp9/common/x86/vp9_idct_intrin_sse2.c
+        source/libvpx/vp9/encoder/x86/vp9_dct_intrin_sse2.c
+        source/libvpx/vp9/encoder/x86/vp9_denoiser_sse2.c
+        source/libvpx/vp9/encoder/x86/vp9_highbd_block_error_intrin_sse2.c
+        source/libvpx/vp9/encoder/x86/vp9_quantize_sse2.c
+        source/libvpx/vpx_dsp/x86/avg_intrin_sse2.c
+        source/libvpx/vpx_dsp/x86/avg_pred_sse2.c
+        source/libvpx/vpx_dsp/x86/fwd_txfm_sse2.c
+        source/libvpx/vpx_dsp/x86/highbd_idct16x16_add_sse2.c
+        source/libvpx/vpx_dsp/x86/highbd_idct32x32_add_sse2.c
+        source/libvpx/vpx_dsp/x86/highbd_idct4x4_add_sse2.c
+        source/libvpx/vpx_dsp/x86/highbd_idct8x8_add_sse2.c
+        source/libvpx/vpx_dsp/x86/highbd_intrapred_intrin_sse2.c
+        source/libvpx/vpx_dsp/x86/highbd_loopfilter_sse2.c
+        source/libvpx/vpx_dsp/x86/highbd_quantize_intrin_sse2.c
+        source/libvpx/vpx_dsp/x86/highbd_variance_sse2.c
+        source/libvpx/vpx_dsp/x86/inv_txfm_sse2.c
+        source/libvpx/vpx_dsp/x86/loopfilter_sse2.c
+        source/libvpx/vpx_dsp/x86/post_proc_sse2.c
+        source/libvpx/vpx_dsp/x86/quantize_sse2.c
+        source/libvpx/vpx_dsp/x86/sum_squares_sse2.c
+        source/libvpx/vpx_dsp/x86/variance_sse2.c
+        source/libvpx/vpx_dsp/x86/vpx_subpixel_4t_intrin_sse2.c
+    )
+
+    add_sublibrary(ssse3
+        source/libvpx/vp8/encoder/x86/vp8_quantize_ssse3.c
+        source/libvpx/vp9/encoder/x86/vp9_frame_scale_ssse3.c
+        source/libvpx/vpx_dsp/x86/highbd_intrapred_intrin_ssse3.c
+        source/libvpx/vpx_dsp/x86/inv_txfm_ssse3.c
+        source/libvpx/vpx_dsp/x86/quantize_ssse3.c
+        source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_intrin_ssse3.c
+    )
+
+    add_sublibrary(sse4
+        source/libvpx/vp8/encoder/x86/quantize_sse4.c
+        source/libvpx/vp9/common/x86/vp9_highbd_iht16x16_add_sse4.c
+        source/libvpx/vp9/common/x86/vp9_highbd_iht4x4_add_sse4.c
+        source/libvpx/vp9/common/x86/vp9_highbd_iht8x8_add_sse4.c
+        source/libvpx/vpx_dsp/x86/highbd_idct16x16_add_sse4.c
+        source/libvpx/vpx_dsp/x86/highbd_idct32x32_add_sse4.c
+        source/libvpx/vpx_dsp/x86/highbd_idct4x4_add_sse4.c
+        source/libvpx/vpx_dsp/x86/highbd_idct8x8_add_sse4.c
+    )
+
+    add_sublibrary(avx
+        source/libvpx/vp9/encoder/x86/vp9_diamond_search_sad_avx.c
+        source/libvpx/vpx_dsp/x86/quantize_avx.c
+    )
+
+    add_sublibrary(avx2
+        source/libvpx/vp9/encoder/x86/vp9_error_avx2.c
+        source/libvpx/vp9/encoder/x86/vp9_quantize_avx2.c
+        source/libvpx/vpx_dsp/x86/avg_intrin_avx2.c
+        source/libvpx/vpx_dsp/x86/fwd_txfm_avx2.c
+        source/libvpx/vpx_dsp/x86/highbd_convolve_avx2.c
+        source/libvpx/vpx_dsp/x86/loopfilter_avx2.c
+        source/libvpx/vpx_dsp/x86/sad4d_avx2.c
+        source/libvpx/vpx_dsp/x86/sad_avx2.c
+        source/libvpx/vpx_dsp/x86/variance_avx2.c
+        source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_intrin_avx2.c
+    )
+
+    set(yasm_sources
+        source/libvpx/vp8/common/x86/dequantize_mmx.asm
+        source/libvpx/vp8/common/x86/idctllm_mmx.asm
+        source/libvpx/vp8/common/x86/idctllm_sse2.asm
+        source/libvpx/vp8/common/x86/iwalsh_sse2.asm
+        source/libvpx/vp8/common/x86/loopfilter_sse2.asm
+        source/libvpx/vp8/common/x86/mfqe_sse2.asm
+        source/libvpx/vp8/common/x86/recon_mmx.asm
+        source/libvpx/vp8/common/x86/recon_sse2.asm
+        source/libvpx/vp8/common/x86/subpixel_mmx.asm
+        source/libvpx/vp8/common/x86/subpixel_sse2.asm
+        source/libvpx/vp8/common/x86/subpixel_ssse3.asm
+        source/libvpx/vp8/encoder/x86/block_error_sse2.asm
+        source/libvpx/vp8/encoder/x86/copy_sse2.asm
+        source/libvpx/vp8/encoder/x86/copy_sse3.asm
+        source/libvpx/vp8/encoder/x86/dct_sse2.asm
+        source/libvpx/vp8/encoder/x86/fwalsh_sse2.asm
+        source/libvpx/vp9/common/x86/vp9_mfqe_sse2.asm
+        source/libvpx/vp9/encoder/x86/vp9_dct_sse2.asm
+        source/libvpx/vp9/encoder/x86/vp9_error_sse2.asm
+        source/libvpx/vpx_dsp/x86/add_noise_sse2.asm
+        source/libvpx/vpx_dsp/x86/deblock_sse2.asm
+        source/libvpx/vpx_dsp/x86/highbd_intrapred_sse2.asm
+        source/libvpx/vpx_dsp/x86/highbd_sad4d_sse2.asm
+        source/libvpx/vpx_dsp/x86/highbd_sad_sse2.asm
+        source/libvpx/vpx_dsp/x86/highbd_subpel_variance_impl_sse2.asm
+        source/libvpx/vpx_dsp/x86/highbd_variance_impl_sse2.asm
+        source/libvpx/vpx_dsp/x86/intrapred_sse2.asm
+        source/libvpx/vpx_dsp/x86/intrapred_ssse3.asm
+        source/libvpx/vpx_dsp/x86/inv_wht_sse2.asm
+        source/libvpx/vpx_dsp/x86/sad4d_sse2.asm
+        source/libvpx/vpx_dsp/x86/sad_sse2.asm
+        source/libvpx/vpx_dsp/x86/sad_sse3.asm
+        source/libvpx/vpx_dsp/x86/sad_sse4.asm
+        source/libvpx/vpx_dsp/x86/sad_ssse3.asm
+        source/libvpx/vpx_dsp/x86/subpel_variance_sse2.asm
+        source/libvpx/vpx_dsp/x86/subtract_sse2.asm
+        source/libvpx/vpx_dsp/x86/vpx_convolve_copy_sse2.asm
+        source/libvpx/vpx_dsp/x86/vpx_high_subpixel_8t_sse2.asm
+        source/libvpx/vpx_dsp/x86/vpx_high_subpixel_bilinear_sse2.asm
+        source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_sse2.asm
+        source/libvpx/vpx_dsp/x86/vpx_subpixel_8t_ssse3.asm
+        source/libvpx/vpx_dsp/x86/vpx_subpixel_bilinear_sse2.asm
+        source/libvpx/vpx_dsp/x86/vpx_subpixel_bilinear_ssse3.asm
+    )
+
+    if (APPLE)
+        remove_target_sources(libvpx_avx2 ${libvpx_loc}
+            source/libvpx/vpx_dsp/x86/fwd_txfm_avx2.c
+        )
+    endif()
+
+    if (is_x64)
+        remove_target_sources(libvpx_mmx ${libvpx_loc}
+            source/libvpx/vpx_ports/emms_mmx.c
+        )
+        list(APPEND yasm_sources
+            source/libvpx/vp8/common/x86/loopfilter_block_sse2_x86_64.asm
+            source/libvpx/vp9/encoder/x86/vp9_quantize_ssse3_x86_64.asm
+            source/libvpx/vpx_dsp/x86/avg_ssse3_x86_64.asm
+            source/libvpx/vpx_dsp/x86/fwd_txfm_ssse3_x86_64.asm
+            source/libvpx/vpx_dsp/x86/ssim_opt_x86_64.asm
+            source/libvpx/vpx_ports/emms_mmx.asm
+            source/libvpx/vpx_ports/float_control_word.asm
+        )
+    endif()
+
+    target_yasm_sources(libvpx ${libvpx_loc}
+    INCLUDE_DIRECTORIES
+        ${include_directories}
+    DEFINES
+        CHROMIUM
+    SOURCES
+        ${yasm_sources}
+    )
+
+elseif (is_arm OR is_aarch64)
+
+    # General ARM source files
+    nice_target_sources(libvpx ${libvpx_loc}
+    PRIVATE
+        source/libvpx/vpx_ports/arm.h
+    )
+
+    # C with NEON intrinsics
+    if (arm_use_neon)
+        nice_target_sources(libvpx ${libvpx_loc}
+        PRIVATE
+
+            source/libvpx/vp8/common/arm/loopfilter_arm.c
+            source/libvpx/vp8/common/arm/loopfilter_arm.h
+            source/libvpx/vp8/common/arm/neon/bilinearpredict_neon.c
+            source/libvpx/vp8/common/arm/neon/copymem_neon.c
+            source/libvpx/vp8/common/arm/neon/dc_only_idct_add_neon.c
+            source/libvpx/vp8/common/arm/neon/dequant_idct_neon.c
+            source/libvpx/vp8/common/arm/neon/dequantizeb_neon.c
+            source/libvpx/vp8/common/arm/neon/idct_blk_neon.c
+            source/libvpx/vp8/common/arm/neon/iwalsh_neon.c
+            source/libvpx/vp8/common/arm/neon/loopfiltersimplehorizontaledge_neon.c
+            source/libvpx/vp8/common/arm/neon/loopfiltersimpleverticaledge_neon.c
+            source/libvpx/vp8/common/arm/neon/mbloopfilter_neon.c
+            source/libvpx/vp8/common/arm/neon/shortidct4x4llm_neon.c
+            source/libvpx/vp8/common/arm/neon/sixtappredict_neon.c
+            source/libvpx/vp8/common/arm/neon/vp8_loopfilter_neon.c
+            source/libvpx/vp8/encoder/arm/neon/denoising_neon.c
+            source/libvpx/vp8/encoder/arm/neon/fastquantizeb_neon.c
+            source/libvpx/vp8/encoder/arm/neon/shortfdct_neon.c
+            source/libvpx/vp8/encoder/arm/neon/vp8_shortwalsh4x4_neon.c
+            source/libvpx/vp9/common/arm/neon/vp9_iht16x16_add_neon.c
+            source/libvpx/vp9/common/arm/neon/vp9_iht4x4_add_neon.c
+            source/libvpx/vp9/common/arm/neon/vp9_iht8x8_add_neon.c
+            source/libvpx/vp9/common/arm/neon/vp9_iht_neon.h
+            source/libvpx/vp9/encoder/arm/neon/vp9_denoiser_neon.c
+            source/libvpx/vp9/encoder/arm/neon/vp9_error_neon.c
+            source/libvpx/vp9/encoder/arm/neon/vp9_frame_scale_neon.c
+            source/libvpx/vp9/encoder/arm/neon/vp9_quantize_neon.c
+            source/libvpx/vpx_dsp/arm/deblock_neon.c
+            source/libvpx/vpx_dsp/arm/intrapred_neon.c
+            source/libvpx/vpx_dsp/arm/vpx_scaled_convolve8_neon.c
+            source/libvpx/vpx_dsp/arm/fdct_neon.c
+            source/libvpx/vpx_dsp/arm/fdct16x16_neon.c
+            source/libvpx/vpx_dsp/arm/fdct32x32_neon.c
+            source/libvpx/vpx_dsp/arm/fdct_partial_neon.c
+            source/libvpx/vpx_dsp/arm/fwd_txfm_neon.c
+            source/libvpx/vpx_dsp/arm/idct_neon.h
+            source/libvpx/vpx_dsp/arm/idct8x8_1_add_neon.c
+            source/libvpx/vpx_dsp/arm/idct8x8_add_neon.c
+            source/libvpx/vpx_dsp/arm/idct16x16_1_add_neon.c
+            source/libvpx/vpx_dsp/arm/idct16x16_add_neon.c
+            source/libvpx/vpx_dsp/arm/idct32x32_1_add_neon.c
+            source/libvpx/vpx_dsp/arm/idct32x32_34_add_neon.c
+            source/libvpx/vpx_dsp/arm/idct32x32_135_add_neon.c
+            source/libvpx/vpx_dsp/arm/idct32x32_add_neon.c
+            source/libvpx/vpx_dsp/arm/quantize_neon.c
+            source/libvpx/vpx_dsp/arm/avg_neon.c
+            source/libvpx/vpx_dsp/arm/hadamard_neon.c
+            source/libvpx/vpx_dsp/arm/sum_squares_neon.c
+            source/libvpx/vpx_dsp/arm/sad4d_neon.c
+            source/libvpx/vpx_dsp/arm/sad_neon.c
+            source/libvpx/vpx_dsp/arm/subtract_neon.c
+            source/libvpx/vpx_dsp/arm/avg_pred_neon.c
+            source/libvpx/vpx_dsp/arm/subpel_variance_neon.c
+            source/libvpx/vpx_dsp/arm/variance_neon.c
+            source/libvpx/vpx_dsp/arm/mem_neon.h
+            source/libvpx/vpx_dsp/arm/sum_neon.h
+            source/libvpx/vpx_dsp/arm/transpose_neon.h
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_neon.h
+        )
+    endif()
+
+    # 32-bit assembly with NEON instructions
+    if (arm_use_neon AND NOT(is_aarch64))
+        nice_target_sources(libvpx ${libvpx_loc}
+        PRIVATE
+
+            source/libvpx/vpx_dsp/arm/intrapred_neon_asm${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve_copy_neon_asm${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_horiz_filter_type2_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_vert_filter_type2_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_horiz_filter_type1_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_vert_filter_type1_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_avg_horiz_filter_type2_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_avg_vert_filter_type2_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_avg_horiz_filter_type1_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_avg_vert_filter_type1_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve_avg_neon_asm${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_neon_asm.c
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_neon_asm.h
+            source/libvpx/vpx_dsp/arm/vpx_convolve_neon.c
+            source/libvpx/vpx_dsp/arm/loopfilter_16_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/loopfilter_8_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/loopfilter_4_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/save_reg_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/idct_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/idct4x4_1_add_neon${ASM_SUFFIX}
+            source/libvpx/vpx_dsp/arm/idct4x4_add_neon${ASM_SUFFIX}
+    )
+
+    # C versions of the above hand-optimized files, when available
+    elseif (arm_use_neon AND is_aarch64)
+        nice_target_sources(libvpx ${libvpx_loc}
+        PRIVATE
+
+            source/libvpx/vpx_dsp/arm/vpx_convolve_copy_neon.c
+            source/libvpx/vpx_dsp/arm/vpx_convolve8_neon.c
+            source/libvpx/vpx_dsp/arm/vpx_convolve_avg_neon.c
+            source/libvpx/vpx_dsp/arm/vpx_convolve_neon.c
+            source/libvpx/vpx_dsp/arm/loopfilter_neon.c
+            source/libvpx/vpx_dsp/arm/idct4x4_1_add_neon.c
+            source/libvpx/vpx_dsp/arm/idct4x4_add_neon.c
+    )
+    endif()
+endif()
 
 target_include_directories(libvpx
 PUBLIC
