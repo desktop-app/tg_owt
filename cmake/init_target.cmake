@@ -75,7 +75,7 @@ function(init_target target_name) # init_target(my_target folder_name)
             endif()
         endif()
 
-        if (is_x86 AND CMAKE_SYSTEM_PROCESSOR MATCHES "i686.*|i386.*|x86.*")
+        if (is_x86)
             target_compile_options(${target_name}
             PRIVATE
                 -msse2
