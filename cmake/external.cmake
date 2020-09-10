@@ -107,7 +107,6 @@ function(link_libjpeg target_name)
 endfunction()
 
 # alsa
-set(TG_OWT_ALSA_INCLUDE_PATH "" CACHE STRING "Include path for alsa-lib.")
 function(link_libalsa target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(ALSA REQUIRED)
@@ -116,7 +115,6 @@ function(link_libalsa target_name)
 endfunction()
 
 # pulseaudio
-set(TG_OWT_LIBPULSE_INCLUDE_PATH "" CACHE STRING "Include path for pulse-audio.")
 function(link_libpulse target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(PulseAudio REQUIRED)

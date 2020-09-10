@@ -88,8 +88,11 @@ endif()
 link_openssl(tg_owt)
 link_ffmpeg(tg_owt)
 link_opus(tg_owt)
-link_libalsa(tg_owt)
-link_libpulse(tg_owt)
+
+if (UNIX AND NOT APPLE)
+    link_libalsa(tg_owt)
+    link_libpulse(tg_owt)
+endif()
 
 nice_target_sources(tg_owt ${webrtc_loc}
 PRIVATE
