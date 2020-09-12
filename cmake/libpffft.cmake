@@ -15,6 +15,13 @@ PRIVATE
     _USE_MATH_DEFINES
 )
 
+if ((is_arm OR is_aarch64) AND (NOT arm_use_neon))
+    target_compile_definitions(libpffft
+    PRIVATE
+        PFFFT_SIMD_DISABLE
+    )
+endif()
+
 target_include_directories(libpffft
 PUBLIC
     ${libpffft_loc}
