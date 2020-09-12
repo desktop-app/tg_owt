@@ -678,7 +678,6 @@ PRIVATE
     modules/audio_coding/codecs/isac/empty.cc
     modules/audio_coding/codecs/isac/fix/source/audio_decoder_isacfix.cc
     modules/audio_coding/codecs/isac/fix/source/audio_encoder_isacfix.cc
-    modules/audio_coding/codecs/isac/fix/source/isacfix.c
     modules/audio_coding/codecs/isac/fix/source/arith_routines.c
     modules/audio_coding/codecs/isac/fix/source/arith_routines_hist.c
     modules/audio_coding/codecs/isac/fix/source/arith_routines_logist.c
@@ -688,13 +687,18 @@ PRIVATE
     modules/audio_coding/codecs/isac/fix/source/decode_plc.c
     modules/audio_coding/codecs/isac/fix/source/encode.c
     modules/audio_coding/codecs/isac/fix/source/entropy_coding.c
+    modules/audio_coding/codecs/isac/fix/source/entropy_coding_neon.c
+    modules/audio_coding/codecs/isac/fix/source/filterbanks_neon.c
+    modules/audio_coding/codecs/isac/fix/source/filters_neon.c
     modules/audio_coding/codecs/isac/fix/source/fft.c
     modules/audio_coding/codecs/isac/fix/source/filterbank_tables.c
     modules/audio_coding/codecs/isac/fix/source/filterbanks.c
     modules/audio_coding/codecs/isac/fix/source/filters.c
     modules/audio_coding/codecs/isac/fix/source/initialize.c
+    modules/audio_coding/codecs/isac/fix/source/isacfix.c
     modules/audio_coding/codecs/isac/fix/source/lattice.c
     modules/audio_coding/codecs/isac/fix/source/lattice_c.c
+    modules/audio_coding/codecs/isac/fix/source/lattice_neon.c
     modules/audio_coding/codecs/isac/fix/source/lpc_masking_model.c
     modules/audio_coding/codecs/isac/fix/source/lpc_tables.c
     modules/audio_coding/codecs/isac/fix/source/pitch_estimator.c
@@ -705,6 +709,7 @@ PRIVATE
     modules/audio_coding/codecs/isac/fix/source/pitch_lag_tables.c
     modules/audio_coding/codecs/isac/fix/source/spectrum_ar_model_tables.c
     modules/audio_coding/codecs/isac/fix/source/transform.c
+    modules/audio_coding/codecs/isac/fix/source/transform_neon.c
     modules/audio_coding/codecs/isac/fix/source/transform_tables.c
     modules/audio_coding/codecs/isac/main/source/audio_decoder_isac.cc
     modules/audio_coding/codecs/isac/main/source/audio_encoder_isac.cc
@@ -950,6 +955,7 @@ PRIVATE
     modules/audio_processing/aec_dump/null_aec_dump_factory.cc
     modules/audio_processing/aecm/aecm_core.cc
     modules/audio_processing/aecm/aecm_core_c.cc
+    modules/audio_processing/aecm/aecm_core_neon.cc
     modules/audio_processing/aecm/echo_control_mobile.cc
     modules/audio_processing/agc/agc.cc
     modules/audio_processing/agc/agc_manager_direct.cc
@@ -1064,6 +1070,7 @@ PRIVATE
     modules/audio_processing/utility/ooura_fft.cc
     modules/audio_processing/utility/ooura_fft.h
     modules/audio_processing/utility/ooura_fft_tables_common.h
+    modules/audio_processing/utility/ooura_fft_neon.cc
     modules/audio_processing/utility/ooura_fft_sse2.cc
     modules/audio_processing/utility/ooura_fft_tables_neon_sse2.h
     modules/audio_processing/vad/gmm.cc
@@ -1361,6 +1368,7 @@ PRIVATE
     modules/video_coding/codecs/vp9/vp9_impl.cc
     modules/video_processing/util/denoiser_filter.cc
     modules/video_processing/util/denoiser_filter_c.cc
+    modules/video_processing/util/denoiser_filter_neon.cc
     modules/video_processing/util/denoiser_filter_sse2.cc
     modules/video_processing/util/noise_estimation.cc
     modules/video_processing/util/skin_detection.cc
@@ -1394,8 +1402,10 @@ PRIVATE
     common_audio/audio_converter.cc
     common_audio/audio_util.cc
     common_audio/channel_buffer.cc
-    common_audio/fir_filter_c.cc
     common_audio/fir_filter_factory.cc
+    common_audio/fir_filter_c.cc
+    common_audio/fir_filter_neon.cc
+    common_audio/fir_filter_neon.h
     common_audio/fir_filter_sse.cc
     common_audio/fir_filter_sse.h
     common_audio/real_fourier.cc
@@ -1403,6 +1413,7 @@ PRIVATE
     common_audio/resampler/push_resampler.cc
     common_audio/resampler/push_sinc_resampler.cc
     common_audio/resampler/resampler.cc
+    common_audio/resampler/sinc_resampler_neon.cc
     common_audio/resampler/sinc_resampler_sse.cc
     common_audio/resampler/sinc_resampler.cc
     common_audio/resampler/sinusoidal_linear_chirp_source.cc
@@ -1420,8 +1431,10 @@ PRIVATE
     common_audio/signal_processing/filter_ar_fast_q12.c
     common_audio/signal_processing/copy_set_operations.c
     common_audio/signal_processing/cross_correlation.c
+    common_audio/signal_processing/cross_correlation_neon.c
     common_audio/signal_processing/division_operations.c
     common_audio/signal_processing/downsample_fast.c
+    common_audio/signal_processing/downsample_fast_neon.c
     common_audio/signal_processing/energy.c
     common_audio/signal_processing/filter_ar.c
     common_audio/signal_processing/filter_ma_fast_q12.c
@@ -1431,6 +1444,7 @@ PRIVATE
     common_audio/signal_processing/levinson_durbin.c
     common_audio/signal_processing/lpc_to_refl_coef.c
     common_audio/signal_processing/min_max_operations.c
+    common_audio/signal_processing/min_max_operations_neon.c
     common_audio/signal_processing/randomization_functions.c
     common_audio/signal_processing/real_fft.c
     common_audio/signal_processing/refl_coef_to_lpc.c
@@ -1719,6 +1733,40 @@ if (NOT WIN32)
         rtc_base/task_queue_win.cc
         rtc_base/task_queue_win.h
         api/task_queue/default_task_queue_factory_win.cc
+    )
+endif()
+
+if ((NOT is_x86) AND (NOT is_x64))
+    remove_target_sources(tg_owt ${webrtc_loc}
+        common_audio/fir_filter_sse.cc
+        common_audio/fir_filter_sse.h
+        common_audio/resampler/sinc_resampler_sse.cc
+        modules/audio_processing/utility/ooura_fft_sse2.cc
+        modules/video_processing/util/denoiser_filter_sse2.cc
+    )
+endif()
+
+if (arm_use_neon)
+    target_compile_definitions(tg_owt
+    PRIVATE
+        WEBRTC_HAS_NEON
+    )
+else()
+    remove_target_sources(tg_owt ${webrtc_loc}
+        common_audio/fir_filter_neon.cc
+        common_audio/fir_filter_neon.h
+        common_audio/resampler/sinc_resampler_neon.cc
+        common_audio/signal_processing/cross_correlation_neon.c
+        common_audio/signal_processing/downsample_fast_neon.c
+        common_audio/signal_processing/min_max_operations_neon.c
+        modules/audio_coding/codecs/isac/fix/source/entropy_coding_neon.c
+        modules/audio_coding/codecs/isac/fix/source/filterbanks_neon.c
+        modules/audio_coding/codecs/isac/fix/source/filters_neon.c
+        modules/audio_coding/codecs/isac/fix/source/lattice_neon.c
+        modules/audio_coding/codecs/isac/fix/source/transform_neon.c
+        modules/audio_processing/utility/ooura_fft_neon.cc
+        modules/video_processing/util/denoiser_filter_neon.cc
+        modules/audio_processing/aecm/aecm_core_neon.cc
     )
 endif()
 
