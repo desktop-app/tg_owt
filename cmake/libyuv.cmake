@@ -86,15 +86,6 @@ PRIVATE
 )
 
 remove_target_sources(libyuv ${libyuv_loc}
-    # ARM neon
-    source/compare_neon.cc
-    source/compare_neon64.cc
-    source/rotate_neon.cc
-    source/rotate_neon64.cc
-    source/row_neon.cc
-    source/row_neon64.cc
-    source/scale_neon.cc
-    source/scale_neon64.cc
 
     # MSA Source Files
     source/compare_msa.cc
@@ -108,6 +99,30 @@ remove_target_sources(libyuv ${libyuv_loc}
     source/row_mmi.cc
     source/scale_mmi.cc
 )
+
+if (arm_use_neon)
+    target_compile_definitions(libyuv
+    PRIVATE
+        LIBYUV_NEON
+    )
+else()
+    target_compile_definitions(libyuv
+    PRIVATE
+        LIBYUV_DISABLE_NEON
+    )
+    remove_target_sources(libyuv ${libyuv_loc}
+
+        # ARM neon
+        source/compare_neon.cc
+        source/compare_neon64.cc
+        source/rotate_neon.cc
+        source/rotate_neon64.cc
+        source/row_neon.cc
+        source/row_neon64.cc
+        source/scale_neon.cc
+        source/scale_neon64.cc
+    )
+endif()
 
 target_include_directories(libyuv
 PUBLIC
