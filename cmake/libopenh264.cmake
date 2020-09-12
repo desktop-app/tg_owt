@@ -9,6 +9,16 @@ if (is_x86 OR is_x64)
     PRIVATE
         X86_ASM
     )
+elseif (is_arm AND arm_use_neon)
+    target_compile_definitions(libopenh264
+    PRIVATE
+        HAVE_NEON
+    )
+elseif (is_aarch64 AND arm_use_neon)
+    target_compile_definitions(libopenh264
+    PRIVATE
+        HAVE_NEON_AARCH64
+    )
 endif()
 
 nice_target_sources(libopenh264 ${libopenh264_loc}
@@ -176,10 +186,8 @@ PRIVATE
 set(include_directories
     ${libopenh264_loc}
     ${libopenh264_loc}/codec/api/svc
-    ${libopenh264_loc}/codec/common/arm
     ${libopenh264_loc}/codec/common/inc
     ${libopenh264_loc}/codec/common/src
-    ${libopenh264_loc}/codec/common/x86
     ${libopenh264_loc}/codec/encoder/core/inc
     ${libopenh264_loc}/codec/encoder/core/src
     ${libopenh264_loc}/codec/encoder/plus/inc
@@ -212,6 +220,11 @@ else()
 endif()
 
 if (is_x86 OR is_x64)
+
+    target_include_directories(libopenh264
+    PRIVATE
+        ${libopenh264_loc}/codec/common/x86
+    )
     set(yasm_sources
         codec/common/x86/cpuid.asm
         codec/common/x86/dct.asm
@@ -244,9 +257,65 @@ if (is_x86 OR is_x64)
     target_yasm_sources(libopenh264 ${libopenh264_loc}
     INCLUDE_DIRECTORIES
         ${include_directories}
+        ${libopenh264_loc}/codec/common/x86
     DEFINES
         ${yasm_defines}
     SOURCES
         ${yasm_sources}
     )
+
+elseif (is_arm)
+
+    target_include_directories(libopenh264
+    PRIVATE
+        ${libopenh264_loc}/codec/common/arm
+    )
+    if (arm_use_neon)
+        nice_target_sources(libopenh264 ${libopenh264_loc}
+        PRIVATE
+            codec/common/arm/copy_mb_neon.S
+            codec/common/arm/deblocking_neon.S
+            codec/common/arm/expand_picture_neon.S
+            codec/common/arm/intra_pred_common_neon.S
+            codec/common/arm/mc_neon.S
+            codec/processing/src/arm/adaptive_quantization.S
+            codec/processing/src/arm/down_sample_neon.S
+            codec/processing/src/arm/pixel_sad_neon.S
+            codec/processing/src/arm/vaa_calc_neon.S
+            codec/encoder/core/arm/intra_pred_neon.S
+            codec/encoder/core/arm/intra_pred_sad_3_opt_neon.S
+            codec/encoder/core/arm/memory_neon.S
+            codec/encoder/core/arm/pixel_neon.S
+            codec/encoder/core/arm/reconstruct_neon.S
+            codec/encoder/core/arm/svc_motion_estimation.S
+        )
+    endif()
+
+elseif (is_aarch64)
+
+    target_include_directories(libopenh264
+    PRIVATE
+        ${libopenh264_loc}/codec/common/arm64
+    )
+    if (arm_use_neon)
+        nice_target_sources(libopenh264 ${libopenh264_loc}
+        PRIVATE
+            codec/common/arm64/copy_mb_aarch64_neon.S
+            codec/common/arm64/deblocking_aarch64_neon.S
+            codec/common/arm64/expand_picture_aarch64_neon.S
+            codec/common/arm64/intra_pred_common_aarch64_neon.S
+            codec/common/arm64/mc_aarch64_neon.S
+            codec/processing/src/arm64/adaptive_quantization_aarch64_neon.S
+            codec/processing/src/arm64/down_sample_aarch64_neon.S
+            codec/processing/src/arm64/pixel_sad_aarch64_neon.S
+            codec/processing/src/arm64/vaa_calc_aarch64_neon.S
+            codec/encoder/core/arm64/intra_pred_aarch64_neon.S
+            codec/encoder/core/arm64/intra_pred_sad_3_opt_aarch64_neon.S
+            codec/encoder/core/arm64/memory_aarch64_neon.S
+            codec/encoder/core/arm64/pixel_aarch64_neon.S
+            codec/encoder/core/arm64/reconstruct_aarch64_neon.S
+            codec/encoder/core/arm64/svc_motion_estimation_aarch64_neon.S
+        )
+    endif()
+
 endif()
