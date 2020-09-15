@@ -121,3 +121,10 @@ function(link_libpulse target_name)
         target_include_directories(${target_name} PRIVATE ${PULSEAUDIO_INCLUDE_DIRS})
     endif()
 endfunction()
+
+# dl
+function(link_dl target_name)
+    if (TG_OWT_PACKAGED_BUILD)
+        target_link_libraries(${target_name} PRIVATE ${CMAKE_DL_LIBS})
+    endif()
+endfunction()

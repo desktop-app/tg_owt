@@ -108,6 +108,7 @@ link_opus(tg_owt)
 if (UNIX AND NOT APPLE)
     link_libalsa(tg_owt)
     link_libpulse(tg_owt)
+    link_dl(tg_owt)
 endif()
 
 nice_target_sources(tg_owt ${webrtc_loc}
