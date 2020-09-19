@@ -111,7 +111,7 @@ if ((HAVE_ARM_DEF1 OR HAVE_ARM_DEF2) OR HAVE_ARM_DEF3)
 
 # TODO: Add support for other architectures.
 else()
-    message(FATAL_ERROR "Unsupported CPU architecture.")
+    message(WARNING "Unsupported CPU architecture.")
 
 endif() # arm32
 endif() # aarch64

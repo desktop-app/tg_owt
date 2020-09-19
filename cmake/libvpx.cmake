@@ -60,7 +60,9 @@ else()
             ${libvpx_loc}/source/config/linux/arm
         )
     else()
-        message(FATAL_ERROR "Unsupported CPU architecture (consider updating the build system).")
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/linux/generic
+        )
     endif()
 
     set(ASM_SUFFIX ".asm.S")
