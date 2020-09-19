@@ -1818,51 +1818,37 @@ elseif (APPLE)
     )
 endif()
 
+set(vpx_export)
 if (is_x86 OR is_x64)
-    export(
-    TARGETS
-        tg_owt
-        libabsl
-        libopenh264
-        libpffft
-        librnnoise
-        libsrtp
-        libusrsctp
-        libvpx
+    set(vpx_export
         libvpx_mmx
         libvpx_sse2
         libvpx_ssse3
         libvpx_sse4
         libvpx_avx
         libvpx_avx2
-        libwebrtcbuild
-        libyuv
-        ${platform_export}
-    NAMESPACE
-        tg_owt::
-    FILE
-        "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
-    )
-else()
-    export(
-    TARGETS
-        tg_owt
-        libabsl
-        libopenh264
-        libpffft
-        librnnoise
-        libsrtp
-        libusrsctp
-        libvpx
-        libwebrtcbuild
-        libyuv
-        ${platform_export}
-    NAMESPACE
-        tg_owt::
-    FILE
-        "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
     )
 endif()
+
+export(
+TARGETS
+    tg_owt
+    libabsl
+    libopenh264
+    libpffft
+    librnnoise
+    libsrtp
+    libusrsctp
+    libvpx
+    ${vpx_export}
+    libwebrtcbuild
+    libyuv
+    ${platform_export}
+NAMESPACE
+    tg_owt::
+FILE
+    "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
+)
 
 configure_file(
     "cmake/tg_owtConfig.cmake"
