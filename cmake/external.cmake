@@ -117,8 +117,9 @@ endfunction()
 # pulseaudio
 function(link_libpulse target_name)
     if (TG_OWT_PACKAGED_BUILD)
-        find_package(PulseAudio REQUIRED)
-        target_include_directories(${target_name} PRIVATE ${PULSEAUDIO_INCLUDE_DIRS})
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(PULSE REQUIRED libpulse)
+        target_include_directories(${target_name} PRIVATE ${PULSE_INCLUDE_DIRS})
     endif()
 endfunction()
 
