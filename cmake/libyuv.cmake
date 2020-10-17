@@ -126,7 +126,8 @@ endif()
 
 target_include_directories(libyuv
 PUBLIC
-    ${libyuv_loc}/include
+    $<BUILD_INTERFACE:${libyuv_loc}/include>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/third_party/libyuv/include>
 )
 
 target_compile_definitions(libyuv

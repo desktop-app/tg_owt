@@ -44,5 +44,6 @@ endif()
 
 target_include_directories(libwebrtcbuild
 INTERFACE
-    ${webrtc_loc}
+    $<BUILD_INTERFACE:${webrtc_loc}>
+    $<INSTALL_INTERFACE:${webrtc_includedir}>
 )

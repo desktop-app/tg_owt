@@ -68,6 +68,11 @@ else()
     set(ASM_SUFFIX ".asm.S")
 endif()
 
+foreach(dir ${include_directories})
+    string(REPLACE ${libvpx_loc} ${webrtc_includedir}/third_party/libvpx install_include_dir ${dir})
+    list(APPEND install_include_directories ${install_include_dir})
+endforeach()
+
 function(add_sublibrary postfix)
     add_library(libvpx_${postfix} OBJECT)
     init_feature_target(libvpx_${postfix} ${postfix})
@@ -75,6 +80,8 @@ function(add_sublibrary postfix)
     target_include_directories(libvpx_${postfix}
     PRIVATE
         ${include_directories}
+        "$<BUILD_INTERFACE:${include_directories}>"
+        "$<INSTALL_INTERFACE:${install_include_directories}>"
     )
     set(sources_list ${ARGV})
     list(REMOVE_AT sources_list 0)
@@ -725,5 +732,6 @@ endif()
 
 target_include_directories(libvpx
 PUBLIC
-    ${include_directories}
+    "$<BUILD_INTERFACE:${include_directories}>"
+    "$<INSTALL_INTERFACE:${install_include_directories}>"
 )
