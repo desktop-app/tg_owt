@@ -123,5 +123,6 @@ PRIVATE
 
 target_include_directories(libabsl
 PUBLIC
-    ${libabsl_loc}
+    $<BUILD_INTERFACE:${libabsl_loc}>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/third_party/abseil-cpp>
 )

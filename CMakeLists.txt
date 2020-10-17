@@ -28,6 +28,9 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT t
 get_filename_component(webrtc_loc "src" REALPATH)
 set(third_party_loc ${webrtc_loc}/third_party)
 
+include(GNUInstallDirs)
+set(webrtc_includedir ${CMAKE_INSTALL_INCLUDEDIR}/tg_owt)
+
 include(cmake/arch.cmake)
 include(cmake/nice_target_sources.cmake)
 include(cmake/init_target.cmake)
@@ -1831,8 +1834,7 @@ if (is_x86 OR is_x64)
     )
 endif()
 
-export(
-TARGETS
+set(export_targets
     tg_owt
     libabsl
     libopenh264
@@ -1845,14 +1847,46 @@ TARGETS
     libwebrtcbuild
     libyuv
     ${platform_export}
-NAMESPACE
-    tg_owt::
-FILE
-    "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
+)
+
+export(
+    TARGETS ${export_targets}
+    NAMESPACE tg_owt::
+    FILE "${CMAKE_CURRENT_BINARY_DIR}/tg_owtTargets.cmake"
 )
 
 configure_file(
     "cmake/tg_owtConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/tg_owtConfig.cmake"
     COPYONLY
+)
+
+target_include_directories(tg_owt
+PUBLIC
+    $<BUILD_INTERFACE:${webrtc_loc}>
+    $<INSTALL_INTERFACE:${webrtc_includedir}>
+)
+
+install(
+    TARGETS ${export_targets}
+    EXPORT tg_owtTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(
+    DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/src/
+    DESTINATION ${webrtc_includedir}
+    FILES_MATCHING PATTERN "*.h"
+)
+
+install(
+    EXPORT tg_owtTargets
+    NAMESPACE tg_owt::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tg_owt
+)
+
+install(
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/tg_owtConfig.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tg_owt
 )

@@ -67,6 +67,8 @@ endif()
 
 target_include_directories(libusrsctp
 PUBLIC
-    ${third_party_loc}/usrsctp/usrsctplib
-    ${libusrsctp_loc}
+    $<BUILD_INTERFACE:${third_party_loc}/usrsctp/usrsctplib>
+    $<BUILD_INTERFACE:${libusrsctp_loc}>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/third_party/usrsctp/usrsctplib/usrsctplib>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/third_party/usrsctp/usrsctplib>
 )

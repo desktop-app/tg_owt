@@ -30,6 +30,8 @@ PRIVATE
 
 target_include_directories(libsrtp
 PUBLIC
-    ${libsrtp_loc}/include
-    ${libsrtp_loc}/crypto/include
+    $<BUILD_INTERFACE:${libsrtp_loc}/include>
+    $<BUILD_INTERFACE:${libsrtp_loc}/crypto/include>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/third_party/libsrtp/include>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/third_party/libsrtp/crypto/include>
 )

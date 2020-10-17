@@ -24,5 +24,6 @@ endif()
 
 target_include_directories(libpffft
 PUBLIC
-    ${libpffft_loc}
+    $<BUILD_INTERFACE:${libpffft_loc}>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/third_party/pffft/src>
 )
