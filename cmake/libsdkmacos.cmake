@@ -256,8 +256,12 @@ PRIVATE
 
 target_include_directories(libsdkmacos
 PUBLIC
-    ${webrtc_loc}
-    ${libsdkmacos_loc}
-    ${libsdkmacos_loc}/base
-    ${libsdkmacos_loc}/components/video_codec
+    $<BUILD_INTERFACE:${webrtc_loc}>
+    $<BUILD_INTERFACE:${libsdkmacos_loc}>
+    $<BUILD_INTERFACE:${libsdkmacos_loc}/base>
+    $<BUILD_INTERFACE:${libsdkmacos_loc}/components/video_codec>
+    $<INSTALL_INTERFACE:${webrtc_includedir}>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/sdk/objc>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/sdk/objc/base>
+    $<INSTALL_INTERFACE:${webrtc_includedir}/sdk/objc/components/video_codec>
 )
