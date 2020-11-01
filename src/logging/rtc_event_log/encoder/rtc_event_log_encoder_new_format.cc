@@ -67,7 +67,7 @@ RTC_PUSH_IGNORING_WUNDEF()
 #ifdef WEBRTC_ANDROID_PLATFORM_BUILD
 #include "external/webrtc/webrtc/logging/rtc_event_log/rtc_event_log2.pb.h"
 #else
-#include "logging/rtc_event_log/rtc_event_log2.pb.h"
+#include <rtc_event_log2.pb.h>
 #endif
 RTC_POP_IGNORING_WUNDEF()
 
