@@ -168,6 +168,8 @@ PRIVATE
     rtc_base/mdns_responder_interface.h
     rtc_base/memory/aligned_malloc.cc
     rtc_base/memory/aligned_malloc.h
+    rtc_base/memory/fifo_buffer.cc
+    rtc_base/memory/fifo_buffer.h
     rtc_base/message_digest.cc
     rtc_base/message_digest.h
     rtc_base/message_handler.cc
