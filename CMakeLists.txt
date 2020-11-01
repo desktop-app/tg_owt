@@ -5,6 +5,7 @@ cmake_policy(SET CMP0091 NEW)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(TG_OWT_SPECIAL_TARGET "" CACHE STRING "Use special platform target, like 'macstore' for Mac App Store.")
+set(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." OFF)
 
 if (NOT TG_OWT_SPECIAL_TARGET STREQUAL "osx")
     set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "Minimum OS X deployment version" FORCE)
@@ -52,6 +53,12 @@ if (APPLE)
     include(cmake/libsdkmacos.cmake)
 endif()
 
+# Use a separate subdirectory, because it will be exported as an INTERFACE
+# for the generated sources and headers.
+if (TG_OWT_USE_PROTOBUF)
+    add_subdirectory(cmake/protobuf)
+endif()
+
 add_library(tg_owt STATIC)
 init_target(tg_owt)
 
@@ -88,6 +95,13 @@ else()
         tg_owt::libusrsctp
         tg_owt::libvpx
         tg_owt::libyuv
+    )
+endif()
+
+if (TG_OWT_USE_PROTOBUF)
+    target_link_libraries(tg_owt
+    PRIVATE
+        tg_owt::proto
     )
 endif()
 
@@ -1548,6 +1562,8 @@ PRIVATE
     logging/rtc_event_log/encoder/blob_encoding.cc
     logging/rtc_event_log/encoder/delta_encoding.cc
     logging/rtc_event_log/encoder/rtc_event_log_encoder_common.cc
+    logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.cc
+    logging/rtc_event_log/encoder/rtc_event_log_encoder_new_format.cc
     logging/rtc_event_log/encoder/var_int.cc
     logging/rtc_event_log/events/rtc_event_alr_state.cc
     logging/rtc_event_log/events/rtc_event_audio_network_adaptation.cc
@@ -1727,6 +1743,13 @@ PRIVATE
     stats/rtc_stats.cc
     stats/rtcstats_objects.cc
 )
+
+if (NOT TG_OWT_USE_PROTOBUF)
+    remove_target_sources(tg_owt ${webrtc_loc}
+        logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.cc
+        logging/rtc_event_log/encoder/rtc_event_log_encoder_new_format.cc
+    )
+endif()
 
 if (NOT WIN32)
     remove_target_sources(tg_owt ${webrtc_loc}
