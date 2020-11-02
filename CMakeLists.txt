@@ -5,7 +5,6 @@ cmake_policy(SET CMP0091 NEW)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(TG_OWT_SPECIAL_TARGET "" CACHE STRING "Use special platform target, like 'macstore' for Mac App Store.")
-option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." OFF)
 
 if (NOT TG_OWT_SPECIAL_TARGET STREQUAL "osx")
     set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "Minimum OS X deployment version" FORCE)
@@ -18,6 +17,9 @@ if (NOT TG_OWT_SPECIAL_TARGET STREQUAL "")
 else()
     set(TG_OWT_PACKAGED_BUILD 1)
 endif()
+
+option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." ${TG_OWT_PACKAGED_BUILD})
+option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
 
 project(tg_owt
     LANGUAGES C CXX ASM
@@ -59,8 +61,10 @@ if (TG_OWT_USE_PROTOBUF)
     add_subdirectory(cmake/protobuf)
 endif()
 
-add_library(tg_owt STATIC)
+add_library(tg_owt)
 init_target(tg_owt)
+
+set_target_properties(tg_owt PROPERTIES SOVERSION 0 VERSION 0.0.0)
 
 if (is_x86 OR is_x64)
     target_link_libraries(tg_owt
