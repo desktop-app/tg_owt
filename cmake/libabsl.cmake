@@ -12,7 +12,7 @@ PRIVATE
     # absl/base/internal/exponential_biased.cc
     # absl/base/internal/low_level_alloc.cc
     # absl/base/internal/periodic_sampler.cc
-    # absl/base/internal/raw_logging.cc
+    absl/base/internal/raw_logging.cc
     # absl/base/internal/scoped_set_env.cc
     # absl/base/internal/spinlock.cc
     # absl/base/internal/spinlock_wait.cc
