@@ -193,13 +193,15 @@ WebRtcVoiceEngine::WebRtcVoiceEngine(
     const rtc::scoped_refptr<webrtc::AudioEncoderFactory>& encoder_factory,
     const rtc::scoped_refptr<webrtc::AudioDecoderFactory>& decoder_factory,
     rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
-    rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing)
+    rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing,
+    std::function<void(uint32_t)> onUnknownAudioSsrc)
     : task_queue_factory_(task_queue_factory),
       adm_(adm),
       encoder_factory_(encoder_factory),
       decoder_factory_(decoder_factory),
       audio_mixer_(audio_mixer),
-      apm_(audio_processing) {
+      apm_(audio_processing),
+      onUnknownAudioSsrc_(onUnknownAudioSsrc) {
   // This may be called from any thread, so detach thread checkers.
   worker_thread_checker_.Detach();
   signal_thread_checker_.Detach();
@@ -2071,6 +2073,13 @@ void WebRtcVoiceMediaChannel::OnPacketReceived(rtc::CopyOnWriteBuffer packet,
     return;
   }
   RTC_DCHECK(!absl::c_linear_search(unsignaled_recv_ssrcs_, ssrc));
+
+  if (engine()->onUnknownAudioSsrc_) {
+    engine()->onUnknownAudioSsrc_(ssrc);
+  }
+
+  // We don't want to process unsignalled streams
+  return;
 
   // Add new stream.
   StreamParams sp = unsignaled_stream_params_;

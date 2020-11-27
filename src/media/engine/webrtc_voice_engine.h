@@ -49,7 +49,8 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
       const rtc::scoped_refptr<webrtc::AudioEncoderFactory>& encoder_factory,
       const rtc::scoped_refptr<webrtc::AudioDecoderFactory>& decoder_factory,
       rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
-      rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing);
+      rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing,
+      std::function<void(uint32_t)> onUnknownAudioSsrc);
   ~WebRtcVoiceEngine() override;
 
   // Does initialization that needs to occur on the worker thread.
@@ -127,6 +128,8 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
   bool audio_jitter_buffer_fast_accelerate_ = false;
   int audio_jitter_buffer_min_delay_ms_ = 0;
   bool audio_jitter_buffer_enable_rtx_handling_ = false;
+
+  std::function<void(uint32_t)> onUnknownAudioSsrc_ = nullptr;
 
   RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(WebRtcVoiceEngine);
 };
