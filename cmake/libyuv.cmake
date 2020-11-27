@@ -59,6 +59,7 @@ PRIVATE
     source/scale_argb.cc
     source/scale_common.cc
     source/scale_gcc.cc
+    source/scale_uv.cc
     source/scale_win.cc
     source/video_common.cc
 

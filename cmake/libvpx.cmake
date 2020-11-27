@@ -302,6 +302,8 @@ PRIVATE
     source/libvpx/vp9/encoder/vp9_encoder.h
     source/libvpx/vp9/encoder/vp9_ethread.c
     source/libvpx/vp9/encoder/vp9_ethread.h
+    source/libvpx/vp9/encoder/vp9_ext_ratectrl.c
+    source/libvpx/vp9/encoder/vp9_ext_ratectrl.h
     source/libvpx/vp9/encoder/vp9_extend.c
     source/libvpx/vp9/encoder/vp9_extend.h
     source/libvpx/vp9/encoder/vp9_firstpass.h
