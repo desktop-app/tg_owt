@@ -567,6 +567,8 @@ class PeerConnection : public PeerConnectionInternal,
       RTC_RUN_ON(signaling_thread());
   void OnTransportControllerDtlsHandshakeError(rtc::SSLHandshakeError error);
 
+  void OnErrorDemuxingPacket(uint32_t ssrc);
+
   // Invoked when TransportController connection completion is signaled.
   // Reports stats for all transports in use.
   void ReportTransportStats() RTC_RUN_ON(signaling_thread());

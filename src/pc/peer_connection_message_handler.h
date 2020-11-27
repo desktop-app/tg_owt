@@ -43,6 +43,7 @@ class PeerConnectionMessageHandler : public rtc::MessageHandler {
                     StatsCollectorInterface* stats,
                     MediaStreamTrackInterface* track);
   void RequestUsagePatternReport(std::function<void()>, int delay_ms);
+  void PostErrorDemuxingPacket(std::function<void()>);
 
  private:
   rtc::Thread* signaling_thread() const { return signaling_thread_; }

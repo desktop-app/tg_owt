@@ -622,6 +622,8 @@ RTCError PeerConnection::Initialize(
       this, &PeerConnection::OnTransportControllerDtlsHandshakeError);
   transport_controller_->SignalIceCandidatePairChanged.connect(
       this, &PeerConnection::OnTransportControllerCandidateChanged);
+  transport_controller_->SignalErrorDemuxingPacket.connect(
+      this, &PeerConnection::OnErrorDemuxingPacket);
 
   transport_controller_->SignalIceConnectionState.AddReceiver(
       [this](cricket::IceConnectionState s) {
@@ -2164,6 +2166,14 @@ void PeerConnection::OnTransportControllerCandidatesRemoved(
 void PeerConnection::OnTransportControllerCandidateChanged(
     const cricket::CandidatePairChangeEvent& event) {
   OnSelectedCandidatePairChanged(event);
+}
+
+void PeerConnection::OnErrorDemuxingPacket(uint32_t ssrc) {
+  message_handler_.PostErrorDemuxingPacket(
+      [this, ssrc]() {
+        RTC_DCHECK_RUN_ON(signaling_thread());
+        Observer()->OnErrorDemuxingPacket(ssrc);
+      });
 }
 
 void PeerConnection::OnTransportControllerDtlsHandshakeError(
