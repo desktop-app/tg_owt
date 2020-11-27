@@ -90,6 +90,7 @@ void ObjCVideoTrackSource::OnCapturedFrame(RTCVideoFrame *frame) {
     buffer = new rtc::RefCountedObject<ObjCFrameBuffer>(frame.buffer);
   } else if ([frame.buffer isKindOfClass:[RTCCVPixelBuffer class]]) {
     // Adapted CVPixelBuffer frame.
+    @autoreleasepool {
     RTCCVPixelBuffer *rtcPixelBuffer = (RTCCVPixelBuffer *)frame.buffer;
     buffer = new rtc::RefCountedObject<ObjCFrameBuffer>([[RTCCVPixelBuffer alloc]
         initWithPixelBuffer:rtcPixelBuffer.pixelBuffer
@@ -99,6 +100,7 @@ void ObjCVideoTrackSource::OnCapturedFrame(RTCVideoFrame *frame) {
                  cropHeight:crop_height
                       cropX:crop_x + rtcPixelBuffer.cropX
                       cropY:crop_y + rtcPixelBuffer.cropY]);
+    }
   } else {
     // Adapted I420 frame.
     // TODO(magjed): Optimize this I420 path.

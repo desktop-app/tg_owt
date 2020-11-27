@@ -16,12 +16,13 @@
 namespace webrtc {
 
 RTCVideoFrame *ToObjCVideoFrame(const VideoFrame &frame) {
-  RTCVideoFrame *videoFrame =
-      [[RTCVideoFrame alloc] initWithBuffer:ToObjCVideoFrameBuffer(frame.video_frame_buffer())
+  RTCVideoFrame *videoFrame = nil;
+  @autoreleasepool {
+  videoFrame = [[RTCVideoFrame alloc] initWithBuffer:ToObjCVideoFrameBuffer(frame.video_frame_buffer())
                                    rotation:RTCVideoRotation(frame.rotation())
                                 timeStampNs:frame.timestamp_us() * rtc::kNumNanosecsPerMicrosec];
   videoFrame.timeStamp = frame.timestamp();
-
+  }
   return videoFrame;
 }
 

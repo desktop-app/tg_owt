@@ -85,14 +85,18 @@ class ObjCVideoEncoder : public VideoEncoder {
 
   int32_t Encode(const VideoFrame &frame,
                  const std::vector<VideoFrameType> *frame_types) override {
+    int32_t result = 0;
+    @autoreleasepool {
     NSMutableArray<NSNumber *> *rtcFrameTypes = [NSMutableArray array];
     for (size_t i = 0; i < frame_types->size(); ++i) {
       [rtcFrameTypes addObject:@(RTCFrameType(frame_types->at(i)))];
     }
 
-    return [encoder_ encode:ToObjCVideoFrame(frame)
+    result = [encoder_ encode:ToObjCVideoFrame(frame)
           codecSpecificInfo:nil
                  frameTypes:rtcFrameTypes];
+    }
+    return result;
   }
 
   void SetRates(const RateControlParameters &parameters) override {
