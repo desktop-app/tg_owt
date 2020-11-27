@@ -26,9 +26,9 @@
 namespace webrtc {
 namespace internal {
 
-AudioState::AudioState(const AudioState::Config& config)
+AudioState::AudioState(const AudioState::Config& config, std::function<void(AudioFrame const *)> onProcessAudioFrame)
     : config_(config),
-      audio_transport_(config_.audio_mixer, config_.audio_processing.get()) {
+      audio_transport_(config_.audio_mixer, config_.audio_processing.get(), std::move(onProcessAudioFrame)) {
   process_thread_checker_.Detach();
   RTC_DCHECK(config_.audio_mixer);
   RTC_DCHECK(config_.audio_device_module);
@@ -185,7 +185,7 @@ void AudioState::UpdateNullAudioPollerState() {
 }  // namespace internal
 
 rtc::scoped_refptr<AudioState> AudioState::Create(
-    const AudioState::Config& config) {
-  return new rtc::RefCountedObject<internal::AudioState>(config);
+    const AudioState::Config& config, std::function<void(AudioFrame const *)> onProcessAudioFrame) {
+  return new rtc::RefCountedObject<internal::AudioState>(config, onProcessAudioFrame);
 }
 }  // namespace webrtc

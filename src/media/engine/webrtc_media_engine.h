@@ -28,6 +28,7 @@
 #include "modules/audio_device/include/audio_device.h"
 #include "modules/audio_processing/include/audio_processing.h"
 #include "rtc_base/system/rtc_export.h"
+#include "api/audio/audio_frame.h"
 
 namespace cricket {
 
@@ -50,6 +51,7 @@ struct MediaEngineDependencies {
   std::unique_ptr<webrtc::VideoDecoderFactory> video_decoder_factory;
 
   std::function<void(uint32_t)> onUnknownAudioSsrc = nullptr;
+  std::function<void(webrtc::AudioFrame const *)> onProcessAudioFrame = nullptr;
 };
 
 // CreateMediaEngine may be called on any thread, though the engine is

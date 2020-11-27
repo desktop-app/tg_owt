@@ -29,7 +29,7 @@ class AudioSender;
 
 class AudioTransportImpl : public AudioTransport {
  public:
-  AudioTransportImpl(AudioMixer* mixer, AudioProcessing* audio_processing);
+  AudioTransportImpl(AudioMixer* mixer, AudioProcessing* audio_processing, std::function<void(AudioFrame const *)> onProcessAudioFrame);
   ~AudioTransportImpl() override;
 
   int32_t RecordedDataIsAvailable(const void* audioSamples,
@@ -85,6 +85,8 @@ class AudioTransportImpl : public AudioTransport {
   AudioFrame mixed_frame_;
   // Converts mixed audio to the audio device output rate.
   PushResampler<int16_t> render_resampler_;
+
+  std::function<void(AudioFrame const *)> onProcessAudioFrame_ = nullptr;
 
   RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(AudioTransportImpl);
 };

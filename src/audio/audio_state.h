@@ -32,7 +32,7 @@ namespace internal {
 
 class AudioState : public webrtc::AudioState {
  public:
-  explicit AudioState(const AudioState::Config& config);
+  explicit AudioState(const AudioState::Config& config, std::function<void(AudioFrame const *)> onProcessAudioFrame);
   ~AudioState() override;
 
   AudioProcessing* audio_processing() override;

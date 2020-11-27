@@ -194,14 +194,16 @@ WebRtcVoiceEngine::WebRtcVoiceEngine(
     const rtc::scoped_refptr<webrtc::AudioDecoderFactory>& decoder_factory,
     rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
     rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing,
-    std::function<void(uint32_t)> onUnknownAudioSsrc)
+    std::function<void(uint32_t)> onUnknownAudioSsrc,
+    std::function<void(webrtc::AudioFrame const *)> onProcessAudioFrame)
     : task_queue_factory_(task_queue_factory),
       adm_(adm),
       encoder_factory_(encoder_factory),
       decoder_factory_(decoder_factory),
       audio_mixer_(audio_mixer),
       apm_(audio_processing),
-      onUnknownAudioSsrc_(onUnknownAudioSsrc) {
+      onUnknownAudioSsrc_(onUnknownAudioSsrc),
+      onProcessAudioFrame_(onProcessAudioFrame) {
   // This may be called from any thread, so detach thread checkers.
   worker_thread_checker_.Detach();
   signal_thread_checker_.Detach();
@@ -268,7 +270,7 @@ void WebRtcVoiceEngine::Init() {
     }
     config.audio_processing = apm_;
     config.audio_device_module = adm_;
-    audio_state_ = webrtc::AudioState::Create(config);
+    audio_state_ = webrtc::AudioState::Create(config, std::move(onProcessAudioFrame_));
   }
 
   // Connect the ADM to our audio path.

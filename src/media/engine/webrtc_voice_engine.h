@@ -30,6 +30,10 @@
 #include "rtc_base/task_queue.h"
 #include "rtc_base/thread_checker.h"
 
+namespace webrtc {
+class AudioFrame;
+} // namespace webrtc
+
 namespace cricket {
 
 class AudioDeviceModule;
@@ -50,7 +54,8 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
       const rtc::scoped_refptr<webrtc::AudioDecoderFactory>& decoder_factory,
       rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
       rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing,
-      std::function<void(uint32_t)> onUnknownAudioSsrc);
+      std::function<void(uint32_t)> onUnknownAudioSsrc,
+      std::function<void(webrtc::AudioFrame const *)> onProcessAudioFrame);
   ~WebRtcVoiceEngine() override;
 
   // Does initialization that needs to occur on the worker thread.
@@ -130,6 +135,7 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
   bool audio_jitter_buffer_enable_rtx_handling_ = false;
 
   std::function<void(uint32_t)> onUnknownAudioSsrc_ = nullptr;
+  std::function<void(webrtc::AudioFrame const *)> onProcessAudioFrame_ = nullptr;
 
   RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(WebRtcVoiceEngine);
 };

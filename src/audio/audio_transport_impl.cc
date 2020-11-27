@@ -82,8 +82,9 @@ int Resample(const AudioFrame& frame,
 }  // namespace
 
 AudioTransportImpl::AudioTransportImpl(AudioMixer* mixer,
-                                       AudioProcessing* audio_processing)
-    : audio_processing_(audio_processing), mixer_(mixer) {
+                                       AudioProcessing* audio_processing,
+                                       std::function<void(AudioFrame const *)> onProcessAudioFrame)
+    : audio_processing_(audio_processing), mixer_(mixer), onProcessAudioFrame_(onProcessAudioFrame) {
   RTC_DCHECK(mixer);
   RTC_DCHECK(audio_processing);
 }
@@ -149,6 +150,10 @@ int32_t AudioTransportImpl::RecordedDataIsAvailable(
   {
     rtc::CritScope lock(&capture_lock_);
     typing_noise_detected_ = typing_detected;
+
+    if (onProcessAudioFrame_) {
+        onProcessAudioFrame_(audio_frame.get());
+    }
 
     RTC_DCHECK_GT(audio_frame->samples_per_channel_, 0);
     if (!audio_senders_.empty()) {
