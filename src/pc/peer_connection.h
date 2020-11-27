@@ -1091,6 +1091,8 @@ class PeerConnection : public PeerConnectionInternal,
       RTC_RUN_ON(signaling_thread());
   void OnTransportControllerDtlsHandshakeError(rtc::SSLHandshakeError error);
 
+  void OnErrorDemuxingPacket(uint32_t ssrc);
+
   const char* SessionErrorToString(SessionError error) const;
   std::string GetSessionErrorMsg() RTC_RUN_ON(signaling_thread());
 

@@ -580,6 +580,9 @@ JsepTransportController::CreateDtlsSrtpTransport(
       config_.active_reset_srtp_params);
   dtls_srtp_transport->SignalDtlsStateChange.connect(
       this, &JsepTransportController::UpdateAggregateStates_n);
+  dtls_srtp_transport->SetOnErrorDemuxingPacket([this](uint32_t ssrc) {
+    this->JsepTransportController::ErrorDemuxingPacket_n(ssrc);
+  });
   return dtls_srtp_transport;
 }
 
@@ -1652,6 +1655,10 @@ void JsepTransportController::UpdateAggregateStates_n() {
                                  SignalIceGatheringState(new_gathering_state);
                                });
   }
+}
+
+void JsepTransportController::ErrorDemuxingPacket_n(uint32_t ssrc) {
+  SignalErrorDemuxingPacket.emit(ssrc);
 }
 
 void JsepTransportController::OnRtcpPacketReceived_n(

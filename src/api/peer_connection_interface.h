@@ -1264,6 +1264,8 @@ class PeerConnectionObserver {
   // The heuristics for defining what constitutes "interesting" are
   // implementation-defined.
   virtual void OnInterestingUsage(int usage_pattern) {}
+
+  virtual void OnErrorDemuxingPacket(uint32_t ssrc) {}
 };
 
 // PeerConnectionDependencies holds all of PeerConnections dependencies.

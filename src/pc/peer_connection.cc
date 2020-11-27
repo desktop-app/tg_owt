@@ -136,6 +136,7 @@ enum {
   MSG_CREATE_SESSIONDESCRIPTION_FAILED,
   MSG_GETSTATS,
   MSG_REPORT_USAGE_PATTERN,
+  MSG_ON_ERROR_DEMUXING_PACKET,
 };
 
 static const int REPORT_USAGE_PATTERN_DELAY_MS = 60000;
@@ -164,6 +165,13 @@ struct GetStatsMsg : public rtc::MessageData {
       : observer(observer), track(track) {}
   rtc::scoped_refptr<webrtc::StatsObserver> observer;
   rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track;
+};
+
+struct OnErrorDemuxingPacketMsg : public rtc::MessageData {
+  explicit OnErrorDemuxingPacketMsg(uint32_t ssrc)
+      : ssrc(ssrc) {}
+
+  uint32_t ssrc;
 };
 
 // Check if we can send |new_stream| on a PeerConnection.
@@ -1347,6 +1355,8 @@ bool PeerConnection::Initialize(
       this, &PeerConnection::OnTransportControllerDtlsHandshakeError);
   transport_controller_->SignalIceCandidatePairChanged.connect(
       this, &PeerConnection::OnTransportControllerCandidateChanged);
+  transport_controller_->SignalErrorDemuxingPacket.connect(
+      this, &PeerConnection::OnErrorDemuxingPacket);
 
   stats_.reset(new StatsCollector(this));
   stats_collector_ = RTCStatsCollector::Create(this);
@@ -4511,6 +4521,12 @@ void PeerConnection::OnMessage(rtc::Message* msg) {
       ReportUsagePattern();
       break;
     }
+    case MSG_ON_ERROR_DEMUXING_PACKET: {
+      OnErrorDemuxingPacketMsg* param = static_cast<OnErrorDemuxingPacketMsg*>(msg->pdata);
+      Observer()->OnErrorDemuxingPacket(param->ssrc);
+      delete param;
+      break;
+    }
     default:
       RTC_NOTREACHED() << "Not implemented";
       break;
@@ -6391,6 +6407,10 @@ void PeerConnection::OnTransportControllerCandidatesRemoved(
 void PeerConnection::OnTransportControllerCandidateChanged(
     const cricket::CandidatePairChangeEvent& event) {
   OnSelectedCandidatePairChanged(event);
+}
+
+void PeerConnection::OnErrorDemuxingPacket(uint32_t ssrc) {
+    signaling_thread()->Post(RTC_FROM_HERE, this, MSG_ON_ERROR_DEMUXING_PACKET, new OnErrorDemuxingPacketMsg(ssrc));
 }
 
 void PeerConnection::OnTransportControllerDtlsHandshakeError(
