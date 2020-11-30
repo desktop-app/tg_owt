@@ -20,6 +20,7 @@ endif()
 
 option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." ${TG_OWT_PACKAGED_BUILD})
 option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
+option(TG_OWT_USE_PULSEAUDIO "Use pulseaudio" ON)
 
 project(tg_owt
     LANGUAGES C CXX ASM
@@ -128,7 +129,9 @@ link_opus(tg_owt)
 
 if (UNIX AND NOT APPLE)
     link_libalsa(tg_owt)
-    link_libpulse(tg_owt)
+    if (TG_OWT_USE_PULSEAUDIO)
+        link_libpulse(tg_owt)
+    endif()
     link_dl(tg_owt)
 endif()
 
@@ -1749,6 +1752,17 @@ PRIVATE
     stats/rtc_stats.cc
     stats/rtcstats_objects.cc
 )
+
+if (NOT TG_OWT_USE_PULSEAUDIO)
+    remove_target_sources(tg_owt ${webrtc_loc}
+        modules/audio_device/linux/audio_device_pulse_linux.cc
+        modules/audio_device/linux/audio_device_pulse_linux.h
+        modules/audio_device/linux/audio_mixer_manager_pulse_linux.cc
+        modules/audio_device/linux/audio_mixer_manager_pulse_linux.h
+        modules/audio_device/linux/pulseaudiosymboltable_linux.cc
+        modules/audio_device/linux/pulseaudiosymboltable_linux.h
+    )
+endif()
 
 if (NOT TG_OWT_USE_PROTOBUF)
     remove_target_sources(tg_owt ${webrtc_loc}

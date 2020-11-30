@@ -18,10 +18,16 @@ INTERFACE
     WEBRTC_LIBRARY_IMPL
     WEBRTC_NON_STATIC_TRACE_EVENT_HANDLERS=1
     WEBRTC_ENABLE_LINUX_ALSA
-    WEBRTC_ENABLE_LINUX_PULSE
     HAVE_WEBRTC_VIDEO
     RTC_ENABLE_VP9
 )
+
+if (TG_OWT_USE_PULSEAUDIO)
+    target_compile_definitions(libwebrtcbuild
+    INTERFACE
+        WEBRTC_ENABLE_LINUX_PULSE
+    )
+endif()
 
 if (WIN32)
     target_compile_definitions(libwebrtcbuild
