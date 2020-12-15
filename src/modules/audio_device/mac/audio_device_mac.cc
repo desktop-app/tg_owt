@@ -2407,24 +2407,24 @@ bool AudioDeviceMac::RenderWorkerThread() {
   uint32_t nOutSamples = nSamples * _outDesiredFormat.mChannelsPerFrame;
 
   SInt16* pPlayBuffer = (SInt16*)&playBuffer;
-  if (_macBookProPanRight && (_playChannels == 2)) {
-    // Mix entirely into the right channel and zero the left channel.
-    SInt32 sampleInt32 = 0;
-    for (uint32_t sampleIdx = 0; sampleIdx < nOutSamples; sampleIdx += 2) {
-      sampleInt32 = pPlayBuffer[sampleIdx];
-      sampleInt32 += pPlayBuffer[sampleIdx + 1];
-      sampleInt32 /= 2;
+  // if (_macBookProPanRight && (_playChannels == 2)) {
+  //   // Mix entirely into the right channel and zero the left channel.
+  //   SInt32 sampleInt32 = 0;
+  //   for (uint32_t sampleIdx = 0; sampleIdx < nOutSamples; sampleIdx += 2) {
+  //     sampleInt32 = pPlayBuffer[sampleIdx];
+  //     sampleInt32 += pPlayBuffer[sampleIdx + 1];
+  //     sampleInt32 /= 2;
 
-      if (sampleInt32 > 32767) {
-        sampleInt32 = 32767;
-      } else if (sampleInt32 < -32768) {
-        sampleInt32 = -32768;
-      }
+  //     if (sampleInt32 > 32767) {
+  //       sampleInt32 = 32767;
+  //     } else if (sampleInt32 < -32768) {
+  //       sampleInt32 = -32768;
+  //     }
 
-      pPlayBuffer[sampleIdx] = 0;
-      pPlayBuffer[sampleIdx + 1] = static_cast<SInt16>(sampleInt32);
-    }
-  }
+  //     pPlayBuffer[sampleIdx] = 0;
+  //     pPlayBuffer[sampleIdx + 1] = static_cast<SInt16>(sampleInt32);
+  //   }
+  // }
 
   PaUtil_WriteRingBuffer(_paRenderBuffer, pPlayBuffer, nOutSamples);
 
