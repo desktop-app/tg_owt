@@ -768,12 +768,16 @@ int32_t AudioDeviceMac::PlayoutDeviceName(uint16_t index,
 
   memset(name, 0, kAdmMaxDeviceNameSize);
 
+  char noguid[kAdmMaxGuidSize];
   if (guid != NULL) {
     memset(guid, 0, kAdmMaxGuidSize);
+  } else {
+    memset(noguid, 0, kAdmMaxGuidSize);
   }
 
   return GetDeviceName(kAudioDevicePropertyScopeOutput, index,
-                       std::span<char>(name, kAdmMaxDeviceNameSize));
+                       std::span<char>(name, kAdmMaxDeviceNameSize),
+                       std::span<char>(guid ? guid : noguid, kAdmMaxGuidSize));
 }
 
 int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
@@ -787,12 +791,16 @@ int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
 
   memset(name, 0, kAdmMaxDeviceNameSize);
 
+  char noguid[kAdmMaxGuidSize];
   if (guid != NULL) {
     memset(guid, 0, kAdmMaxGuidSize);
+  } else {
+    memset(noguid, 0, kAdmMaxGuidSize);
   }
 
   return GetDeviceName(kAudioDevicePropertyScopeInput, index,
-                       std::span<char>(name, kAdmMaxDeviceNameSize));
+                       std::span<char>(name, kAdmMaxDeviceNameSize),
+                       std::span<char>(guid ? guid : noguid, kAdmMaxGuidSize));
 }
 
 int16_t AudioDeviceMac::RecordingDevices() {
@@ -1585,7 +1593,8 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
 
 int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
                                       const uint16_t index,
-                                      std::span<char> name) {
+                                      std::span<char> name,
+                                      std::span<char> guid) {
   OSStatus err = noErr;
   AudioDeviceID deviceIds[MaxNumberDevices];
 
@@ -1649,6 +1658,23 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
 
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(
         usedID, &propertyAddress, 0, NULL, &len, name.data()));
+  }
+
+  // Get UID
+  {
+    AudioObjectPropertyAddress propertyAddress = {kAudioDevicePropertyDeviceUID,
+                                                kAudioObjectPropertyScopeGlobal, 0};
+    CFStringRef uid = NULL;
+    UInt32 size = sizeof(uid);
+    WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(usedID, &propertyAddress,
+                                                       0, NULL, &size, &uid));
+
+    const CFIndex kCStringSize = kAdmMaxGuidSize;
+    CFStringGetCString(uid, guid.data(), kCStringSize, kCFStringEncodingUTF8);
+
+    if (uid) {
+      CFRelease(uid);
+    }
   }
 
   return 0;
