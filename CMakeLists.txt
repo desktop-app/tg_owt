@@ -308,6 +308,8 @@ PRIVATE
     rtc_base/win32.h
     rtc_base/win32_window.cc
     rtc_base/win32_window.h
+    rtc_base/win/windows_version.cc
+    rtc_base/win/windows_version.h
     rtc_base/strings/string_builder.cc
     rtc_base/strings/string_builder.h
     rtc_base/experiments/experimental_screenshare_settings.cc
@@ -879,6 +881,8 @@ PRIVATE
     modules/audio_coding/neteq/sync_buffer.cc
     modules/audio_coding/neteq/time_stretch.cc
     modules/audio_coding/neteq/timestamp_scaler.cc
+    modules/audio_device/include/audio_device_factory.cc
+    modules/audio_device/include/audio_device_factory.h
     # modules/audio_device/android/audio_manager.cc
     # modules/audio_device/android/audio_record_jni.cc
     # modules/audio_device/android/audio_track_jni.cc
@@ -904,6 +908,16 @@ PRIVATE
     modules/audio_device/mac/audio_device_mac.h
     modules/audio_device/mac/audio_mixer_manager_mac.cc
     modules/audio_device/mac/audio_mixer_manager_mac.h
+    modules/audio_device/win/audio_device_module_win.cc
+    modules/audio_device/win/audio_device_module_win.h
+    modules/audio_device/win/core_audio_base_win.cc
+    modules/audio_device/win/core_audio_base_win.h
+    modules/audio_device/win/core_audio_input_win.cc
+    modules/audio_device/win/core_audio_input_win.h
+    modules/audio_device/win/core_audio_output_win.cc
+    modules/audio_device/win/core_audio_output_win.h
+    modules/audio_device/win/core_audio_utility_win.cc
+    modules/audio_device/win/core_audio_utility_win.h
     modules/audio_device/win/audio_device_core_win.cc
     modules/audio_device/win/audio_device_core_win.h
     modules/audio_device/audio_device_buffer.cc
@@ -1766,6 +1780,8 @@ if (NOT WIN32)
         rtc_base/task_queue_win.cc
         rtc_base/task_queue_win.h
         api/task_queue/default_task_queue_factory_win.cc
+        modules/audio_device/include/audio_device_factory.cc
+        modules/audio_device/include/audio_device_factory.h
     )
 endif()
 
