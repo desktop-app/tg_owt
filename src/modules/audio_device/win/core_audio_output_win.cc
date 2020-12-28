@@ -272,7 +272,7 @@ bool CoreAudioOutput::OnErrorCallback(ErrorType error) {
   }
 
   if (error == CoreAudioBase::ErrorType::kStreamDisconnected) {
-    HandleStreamDisconnected();
+    return HandleStreamDisconnected();
   } else {
     RTC_DLOG(WARNING) << "Unsupported error type";
   }

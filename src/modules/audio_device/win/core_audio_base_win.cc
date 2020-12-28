@@ -958,12 +958,13 @@ void CoreAudioBase::ThreadRun() {
     // Stop audio streaming since something has gone wrong in our main thread
     // loop. Note that, we are still in a "started" state, hence a Stop() call
     // is required to join the thread properly.
-    result = audio_client_->Stop();
-    if (FAILED(result.Error())) {
-      RTC_LOG(LS_ERROR) << "IAudioClient::Stop failed: "
-                        << core_audio_utility::ErrorToString(result);
+    if (audio_client_) {
+        result = audio_client_->Stop();
+        if (FAILED(result.Error())) {
+            RTC_LOG(LS_ERROR) << "IAudioClient::Stop failed: "
+                << core_audio_utility::ErrorToString(result);
+        }
     }
-
     // TODO(henrika): notify clients that something has gone wrong and that
     // this stream should be destroyed instead of reused in the future.
   }
