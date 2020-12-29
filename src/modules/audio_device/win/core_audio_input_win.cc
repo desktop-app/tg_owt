@@ -58,7 +58,7 @@ int CoreAudioInput::Terminate() {
 
 int CoreAudioInput::NumDevices() const {
   RTC_DCHECK_RUN_ON(&thread_checker_);
-  return core_audio_utility::NumberOfActiveDevices(eCapture);
+  return CoreAudioBase::NumberOfEnumeratedDevices();
 }
 
 int CoreAudioInput::SetDevice(int index) {
