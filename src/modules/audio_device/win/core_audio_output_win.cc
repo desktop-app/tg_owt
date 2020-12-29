@@ -56,7 +56,7 @@ int CoreAudioOutput::Terminate() {
 
 int CoreAudioOutput::NumDevices() const {
   RTC_DCHECK_RUN_ON(&thread_checker_);
-  return core_audio_utility::NumberOfActiveDevices(eRender);
+  return CoreAudioBase::NumberOfEnumeratedDevices();
 }
 
 int CoreAudioOutput::SetDevice(int index) {
