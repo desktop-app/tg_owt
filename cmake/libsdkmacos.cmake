@@ -74,8 +74,8 @@ PRIVATE
     base/RTCMacros.h
     base/RTCMutableI420Buffer.h
     base/RTCMutableYUVPlanarBuffer.h
-    base/RTCRtpFragmentationHeader.h
-    base/RTCRtpFragmentationHeader.m
+    # base/RTCRtpFragmentationHeader.h
+    # base/RTCRtpFragmentationHeader.m
     base/RTCVideoCapturer.h
     base/RTCVideoCapturer.m
     base/RTCVideoCodecInfo.h
@@ -137,8 +137,8 @@ PRIVATE
     api/video_codec/RTCVideoEncoderVP9.mm
     api/peerconnection/RTCEncodedImage+Private.h
     api/peerconnection/RTCEncodedImage+Private.mm
-    api/peerconnection/RTCRtpFragmentationHeader+Private.h
-    api/peerconnection/RTCRtpFragmentationHeader+Private.mm
+    # api/peerconnection/RTCRtpFragmentationHeader+Private.h
+    # api/peerconnection/RTCRtpFragmentationHeader+Private.mm
     api/peerconnection/RTCVideoCodecInfo+Private.h
     api/peerconnection/RTCVideoCodecInfo+Private.mm
     api/peerconnection/RTCVideoEncoderSettings+Private.h
