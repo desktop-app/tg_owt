@@ -56,7 +56,8 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
       rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
       rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing,
       webrtc::AudioFrameProcessor* audio_frame_processor,
-      const webrtc::WebRtcKeyValueConfig& trials);
+      const webrtc::WebRtcKeyValueConfig& trials,
+      std::function<void(uint32_t)> onUnknownAudioSsrc);
 
   WebRtcVoiceEngine() = delete;
   WebRtcVoiceEngine(const WebRtcVoiceEngine&) = delete;
@@ -145,6 +146,8 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
   // redundancy for opus audio.
   const bool audio_red_for_opus_trial_enabled_;
   const bool minimized_remsampling_on_mobile_trial_enabled_;
+
+  std::function<void(uint32_t)> onUnknownAudioSsrc_ = nullptr;
 };
 
 // WebRtcVoiceMediaChannel is an implementation of VoiceMediaChannel that uses
