@@ -19,7 +19,6 @@
 #endif
 #import "RTCCodecSpecificInfoH264.h"
 #import "RTCH264ProfileLevelId.h"
-#import "api/peerconnection/RTCRtpFragmentationHeader+Private.h"
 #import "api/peerconnection/RTCVideoCodecInfo+Private.h"
 #import "base/RTCCodecSpecificInfo.h"
 #import "base/RTCI420Buffer.h"
@@ -32,7 +31,6 @@
 #include "common_video/h264/h264_bitstream_parser.h"
 #include "common_video/h264/profile_level_id.h"
 #include "common_video/include/bitrate_adjuster.h"
-#include "modules/include/module_common_types.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/logging.h"
@@ -40,17 +38,14 @@
 #include "sdk/objc/components/video_codec/nalu_rewriter.h"
 #include "third_party/libyuv/include/libyuv/convert_from.h"
 
-@interface RTCVideoEncoderH264 ()
+@interface RTC_OBJC_TYPE (RTCVideoEncoderH264)
+()
 
-- (void)frameWasEncoded:(OSStatus)status
-                  flags:(VTEncodeInfoFlags)infoFlags
-           sampleBuffer:(CMSampleBufferRef)sampleBuffer
-      codecSpecificInfo:(id<RTCCodecSpecificInfo>)codecSpecificInfo
-                  width:(int32_t)width
-                 height:(int32_t)height
-           renderTimeMs:(int64_t)renderTimeMs
-              timestamp:(uint32_t)timestamp
-               rotation:(RTCVideoRotation)rotation;
+    - (void)frameWasEncoded : (OSStatus)status flags : (VTEncodeInfoFlags)infoFlags sampleBuffer
+    : (CMSampleBufferRef)sampleBuffer codecSpecificInfo
+    : (id<RTC_OBJC_TYPE(RTCCodecSpecificInfo)>)codecSpecificInfo width : (int32_t)width height
+    : (int32_t)height renderTimeMs : (int64_t)renderTimeMs timestamp : (uint32_t)timestamp rotation
+    : (RTCVideoRotation)rotation;
 
 @end
 
@@ -70,8 +65,8 @@ const OSType kNV12PixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
 // Struct that we pass to the encoder per frame to encode. We receive it again
 // in the encoder callback.
 struct RTCFrameEncodeParams {
-  RTCFrameEncodeParams(RTCVideoEncoderH264 *e,
-                       RTCCodecSpecificInfoH264 *csi,
+  RTCFrameEncodeParams(RTC_OBJC_TYPE(RTCVideoEncoderH264) * e,
+                       RTC_OBJC_TYPE(RTCCodecSpecificInfoH264) * csi,
                        int32_t w,
                        int32_t h,
                        int64_t rtms,
@@ -81,12 +76,12 @@ struct RTCFrameEncodeParams {
     if (csi) {
       codecSpecificInfo = csi;
     } else {
-      codecSpecificInfo = [[RTCCodecSpecificInfoH264 alloc] init];
+      codecSpecificInfo = [[RTC_OBJC_TYPE(RTCCodecSpecificInfoH264) alloc] init];
     }
   }
 
-  RTCVideoEncoderH264 *encoder;
-  RTCCodecSpecificInfoH264 *codecSpecificInfo;
+  RTC_OBJC_TYPE(RTCVideoEncoderH264) * encoder;
+  RTC_OBJC_TYPE(RTCCodecSpecificInfoH264) * codecSpecificInfo;
   int32_t width;
   int32_t height;
   int64_t render_time_ms;
@@ -97,7 +92,8 @@ struct RTCFrameEncodeParams {
 // We receive I420Frames as input, but we need to feed CVPixelBuffers into the
 // encoder. This performs the copy and format conversion.
 // TODO(tkchin): See if encoder will accept i420 frames and compare performance.
-bool CopyVideoFrameToNV12PixelBuffer(id<RTCI420Buffer> frameBuffer, CVPixelBufferRef pixelBuffer) {
+bool CopyVideoFrameToNV12PixelBuffer(id<RTC_OBJC_TYPE(RTCI420Buffer)> frameBuffer,
+                                     CVPixelBufferRef pixelBuffer) {
   RTC_DCHECK(pixelBuffer);
   RTC_DCHECK_EQ(CVPixelBufferGetPixelFormatType(pixelBuffer), kNV12PixelFormat);
   RTC_DCHECK_EQ(CVPixelBufferGetHeightOfPlane(pixelBuffer, 0), frameBuffer.height);
@@ -313,8 +309,8 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
 }
 }  // namespace
 
-@implementation RTCVideoEncoderH264 {
-  RTCVideoCodecInfo *_codecInfo;
+@implementation RTC_OBJC_TYPE (RTCVideoEncoderH264) {
+  RTC_OBJC_TYPE(RTCVideoCodecInfo) * _codecInfo;
   std::unique_ptr<webrtc::BitrateAdjuster> _bitrateAdjuster;
   uint32_t _targetBitrateBps;
   uint32_t _encoderBitrateBps;
@@ -340,7 +336,7 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
 // drastically reduced bitrate, so we want to avoid that. In steady state
 // conditions, 0.95 seems to give us better overall bitrate over long periods
 // of time.
-- (instancetype)initWithCodecInfo:(RTCVideoCodecInfo *)codecInfo {
+- (instancetype)initWithCodecInfo:(RTC_OBJC_TYPE(RTCVideoCodecInfo) *)codecInfo {
   if (self = [super init]) {
     _codecInfo = codecInfo;
     _bitrateAdjuster.reset(new webrtc::BitrateAdjuster(.5, .95));
@@ -358,7 +354,7 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
   [self destroyCompressionSession];
 }
 
-- (NSInteger)startEncodeWithSettings:(RTCVideoEncoderSettings *)settings
+- (NSInteger)startEncodeWithSettings:(RTC_OBJC_TYPE(RTCVideoEncoderSettings) *)settings
                        numberOfCores:(int)numberOfCores {
   RTC_DCHECK(settings);
   RTC_DCHECK([settings.name isEqualToString:kRTCVideoCodecH264Name]);
@@ -388,8 +384,8 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
   return [self resetCompressionSessionWithPixelFormat:kNV12PixelFormat];
 }
 
-- (NSInteger)encode:(RTCVideoFrame *)frame
-    codecSpecificInfo:(nullable id<RTCCodecSpecificInfo>)codecSpecificInfo
+- (NSInteger)encode:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame
+    codecSpecificInfo:(nullable id<RTC_OBJC_TYPE(RTCCodecSpecificInfo)>)codecSpecificInfo
            frameTypes:(NSArray<NSNumber *> *)frameTypes {
   RTC_DCHECK_EQ(frame.width, _width);
   RTC_DCHECK_EQ(frame.height, _height);
@@ -404,9 +400,10 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
   }
 
   CVPixelBufferRef pixelBuffer = nullptr;
-  if ([frame.buffer isKindOfClass:[RTCCVPixelBuffer class]]) {
+  if ([frame.buffer isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
     // Native frame buffer
-    RTCCVPixelBuffer *rtcPixelBuffer = (RTCCVPixelBuffer *)frame.buffer;
+    RTC_OBJC_TYPE(RTCCVPixelBuffer) *rtcPixelBuffer =
+        (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)frame.buffer;
     if (![rtcPixelBuffer requiresCropping]) {
       // This pixel buffer might have a higher resolution than what the
       // compression session is configured to. The compression session can
@@ -543,17 +540,18 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
-- (OSType)pixelFormatOfFrame:(RTCVideoFrame *)frame {
+- (OSType)pixelFormatOfFrame:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
   // Use NV12 for non-native frames.
-  if ([frame.buffer isKindOfClass:[RTCCVPixelBuffer class]]) {
-    RTCCVPixelBuffer *rtcPixelBuffer = (RTCCVPixelBuffer *)frame.buffer;
+  if ([frame.buffer isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
+    RTC_OBJC_TYPE(RTCCVPixelBuffer) *rtcPixelBuffer =
+        (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)frame.buffer;
     return CVPixelBufferGetPixelFormatType(rtcPixelBuffer.pixelBuffer);
   }
 
   return kNV12PixelFormat;
 }
 
-- (BOOL)resetCompressionSessionIfNeededWithFrame:(RTCVideoFrame *)frame {
+- (BOOL)resetCompressionSessionIfNeededWithFrame:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
   BOOL resetCompressionSession = NO;
 
   // If we're capturing native frames in another pixel format than the compression session is
@@ -755,7 +753,7 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
 - (void)frameWasEncoded:(OSStatus)status
                   flags:(VTEncodeInfoFlags)infoFlags
            sampleBuffer:(CMSampleBufferRef)sampleBuffer
-      codecSpecificInfo:(id<RTCCodecSpecificInfo>)codecSpecificInfo
+      codecSpecificInfo:(id<RTC_OBJC_TYPE(RTCCodecSpecificInfo)>)codecSpecificInfo
                   width:(int32_t)width
                  height:(int32_t)height
            renderTimeMs:(int64_t)renderTimeMs
@@ -783,18 +781,11 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
   }
 
   __block std::unique_ptr<rtc::Buffer> buffer = std::make_unique<rtc::Buffer>();
-  RTCRtpFragmentationHeader *header;
-  {
-    std::unique_ptr<webrtc::RTPFragmentationHeader> header_cpp;
-    bool result =
-        H264CMSampleBufferToAnnexBBuffer(sampleBuffer, isKeyframe, buffer.get(), &header_cpp);
-    header = [[RTCRtpFragmentationHeader alloc] initWithNativeFragmentationHeader:header_cpp.get()];
-    if (!result) {
-      return;
-    }
+  if (!webrtc::H264CMSampleBufferToAnnexBBuffer(sampleBuffer, isKeyframe, buffer.get())) {
+    return;
   }
 
-  RTCEncodedImage *frame = [[RTCEncodedImage alloc] init];
+  RTC_OBJC_TYPE(RTCEncodedImage) *frame = [[RTC_OBJC_TYPE(RTCEncodedImage) alloc] init];
   // This assumes ownership of `buffer` and is responsible for freeing it when done.
   frame.buffer = [[NSData alloc] initWithBytesNoCopy:buffer->data()
                                               length:buffer->size()
@@ -803,7 +794,6 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
                                          }];
   frame.encodedWidth = width;
   frame.encodedHeight = height;
-  frame.completeFrame = YES;
   frame.frameType = isKeyframe ? RTCFrameTypeVideoFrameKey : RTCFrameTypeVideoFrameDelta;
   frame.captureTimeMs = renderTimeMs;
   frame.timeStamp = timestamp;
@@ -817,7 +807,7 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
   _h264BitstreamParser.GetLastSliceQp(&qp);
   frame.qp = @(qp);
 
-  BOOL res = _callback(frame, codecSpecificInfo, header);
+  BOOL res = _callback(frame, codecSpecificInfo);
   if (!res) {
     RTC_LOG(LS_ERROR) << "Encode callback failed";
     return;
@@ -825,9 +815,10 @@ NSUInteger GetMaxSampleRate(const webrtc::H264::ProfileLevelId &profile_level_id
   _bitrateAdjuster->Update(frame.buffer.length);
 }
 
-- (nullable RTCVideoEncoderQpThresholds *)scalingSettings {
-  return [[RTCVideoEncoderQpThresholds alloc] initWithThresholdsLow:kLowH264QpThreshold
-                                                               high:kHighH264QpThreshold];
+- (nullable RTC_OBJC_TYPE(RTCVideoEncoderQpThresholds) *)scalingSettings {
+  return [[RTC_OBJC_TYPE(RTCVideoEncoderQpThresholds) alloc]
+      initWithThresholdsLow:kLowH264QpThreshold
+                       high:kHighH264QpThreshold];
 }
 
 @end

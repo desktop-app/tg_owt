@@ -80,7 +80,6 @@ const uint32_t kFmtIeeeFloatSubchunkSize =
 // read audio samples.
 #pragma pack(2)
 struct WavHeaderPcm {
-  WavHeaderPcm() = default;
   WavHeaderPcm(const WavHeaderPcm&) = default;
   WavHeaderPcm& operator=(const WavHeaderPcm&) = default;
   RiffHeader riff;
@@ -96,7 +95,6 @@ static_assert(sizeof(WavHeaderPcm) == kPcmWavHeaderSize,
 // WAV implementation.
 #pragma pack(2)
 struct WavHeaderIeeeFloat {
-  WavHeaderIeeeFloat() = default;
   WavHeaderIeeeFloat(const WavHeaderIeeeFloat&) = default;
   WavHeaderIeeeFloat& operator=(const WavHeaderIeeeFloat&) = default;
   RiffHeader riff;
@@ -134,7 +132,7 @@ uint16_t MapWavFormatToHeaderField(WavFormat format) {
     case WavFormat::kWavFormatMuLaw:
       return 7;
   }
-  RTC_CHECK(false);
+  RTC_CHECK_NOTREACHED();
 }
 
 WavFormat MapHeaderFieldToWavFormat(uint16_t format_header_value) {
@@ -280,10 +278,8 @@ size_t GetFormatBytesPerSample(WavFormat format) {
       return 1;
     case WavFormat::kWavFormatIeeeFloat:
       return 4;
-    default:
-      RTC_CHECK(false);
-      return 2;
   }
+  RTC_CHECK_NOTREACHED();
 }
 
 bool CheckWavParameters(size_t num_channels,

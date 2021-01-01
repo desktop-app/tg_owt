@@ -41,11 +41,11 @@
 #include "p2p/base/port_allocator.h"
 #include "p2p/base/port_interface.h"
 #include "p2p/base/regathering_controller.h"
-#include "rtc_base/async_invoker.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/constructor_magic.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/system/rtc_export.h"
+#include "rtc_base/task_utils/pending_task_safety_flag.h"
 #include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -209,8 +209,6 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
   }
 
  private:
-  rtc::Thread* thread() const { return network_thread_; }
-
   bool IsGettingPorts() {
     RTC_DCHECK_RUN_ON(network_thread_);
     return allocator_session()->IsGettingPorts();
@@ -245,7 +243,7 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
   bool CreateConnection(PortInterface* port,
                         const Candidate& remote_candidate,
                         PortInterface* origin_port);
-  bool FindConnection(Connection* connection) const;
+  bool FindConnection(const Connection* connection) const;
 
   uint32_t GetRemoteCandidateGeneration(const Candidate& candidate);
   bool IsDuplicateRemoteCandidate(const Candidate& candidate);
@@ -348,12 +346,26 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
   // 2. Peer-reflexive remote candidates.
   Candidate SanitizeRemoteCandidate(const Candidate& c) const;
 
+  // Cast a Connection returned from IceController and verify that it exists.
+  // (P2P owns all Connections, and only gives const pointers to IceController,
+  // see IceControllerInterface).
+  Connection* FromIceController(const Connection* conn) {
+    // Verify that IceController does not return a connection
+    // that we have destroyed.
+    RTC_DCHECK(FindConnection(conn));
+    return const_cast<Connection*>(conn);
+  }
+
+  int64_t ComputeEstimatedDisconnectedTimeMs(int64_t now,
+                                             Connection* old_connection);
+
+  webrtc::ScopedTaskSafety task_safety_;
   std::string transport_name_ RTC_GUARDED_BY(network_thread_);
   int component_ RTC_GUARDED_BY(network_thread_);
   PortAllocator* allocator_ RTC_GUARDED_BY(network_thread_);
   webrtc::AsyncResolverFactory* async_resolver_factory_
       RTC_GUARDED_BY(network_thread_);
-  rtc::Thread* network_thread_;
+  rtc::Thread* const network_thread_;
   bool incoming_only_ RTC_GUARDED_BY(network_thread_);
   int error_ RTC_GUARDED_BY(network_thread_);
   std::vector<std::unique_ptr<PortAllocatorSession>> allocator_sessions_
@@ -406,7 +418,6 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
   bool has_been_writable_ RTC_GUARDED_BY(network_thread_) =
       false;  // if writable_ has ever been true
 
-  rtc::AsyncInvoker invoker_ RTC_GUARDED_BY(network_thread_);
   absl::optional<rtc::NetworkRoute> network_route_
       RTC_GUARDED_BY(network_thread_);
   webrtc::IceEventLog ice_event_log_ RTC_GUARDED_BY(network_thread_);
@@ -429,6 +440,10 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
 
   // Number of times the selected_connection_ has been modified.
   uint32_t selected_candidate_pair_changes_ = 0;
+
+  // When was last data received on a existing connection,
+  // from connection->last_data_received() that uses rtc::TimeMillis().
+  int64_t last_data_received_ms_ = 0;
 
   IceFieldTrials field_trials_;
 

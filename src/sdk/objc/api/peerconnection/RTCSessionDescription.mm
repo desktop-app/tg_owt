@@ -15,7 +15,7 @@
 
 #include "rtc_base/checks.h"
 
-@implementation RTCSessionDescription
+@implementation RTC_OBJC_TYPE (RTCSessionDescription)
 
 @synthesize type = _type;
 @synthesize sdp = _sdp;
@@ -31,7 +31,6 @@
 }
 
 - (instancetype)initWithType:(RTCSdpType)type sdp:(NSString *)sdp {
-  NSParameterAssert(sdp.length);
   if (self = [super init]) {
     _type = type;
     _sdp = [sdp copy];
@@ -40,7 +39,7 @@
 }
 
 - (NSString *)description {
-  return [NSString stringWithFormat:@"RTCSessionDescription:\n%@\n%@",
+  return [NSString stringWithFormat:@"RTC_OBJC_TYPE(RTCSessionDescription):\n%@\n%@",
                                     [[self class] stringForType:_type],
                                     _sdp];
 }
@@ -83,6 +82,8 @@
       return webrtc::SessionDescriptionInterface::kPrAnswer;
     case RTCSdpTypeAnswer:
       return webrtc::SessionDescriptionInterface::kAnswer;
+    case RTCSdpTypeRollback:
+      return webrtc::SessionDescriptionInterface::kRollback;
   }
 }
 
@@ -93,6 +94,8 @@
     return RTCSdpTypePrAnswer;
   } else if (string == webrtc::SessionDescriptionInterface::kAnswer) {
     return RTCSdpTypeAnswer;
+  } else if (string == webrtc::SessionDescriptionInterface::kRollback) {
+    return RTCSdpTypeRollback;
   } else {
     RTC_NOTREACHED();
     return RTCSdpTypeOffer;

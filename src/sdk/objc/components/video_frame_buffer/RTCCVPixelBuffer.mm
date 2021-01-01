@@ -22,7 +22,7 @@
 #import <VideoToolbox/VideoToolbox.h>
 #endif
 
-@implementation RTCCVPixelBuffer {
+@implementation RTC_OBJC_TYPE (RTCCVPixelBuffer) {
   int _width;
   int _height;
   int _bufferWidth;
@@ -152,13 +152,16 @@
   return YES;
 }
 
-- (id<RTCI420Buffer>)toI420 {
+- (id<RTC_OBJC_TYPE(RTCI420Buffer)>)toI420 {
+  RTC_OBJC_TYPE(RTCMutableI420Buffer)* i420Buffer = nil;
+  
+  @autoreleasepool {
   const OSType pixelFormat = CVPixelBufferGetPixelFormatType(_pixelBuffer);
 
   CVPixelBufferLockBaseAddress(_pixelBuffer, kCVPixelBufferLock_ReadOnly);
 
-  RTCMutableI420Buffer* i420Buffer =
-      [[RTCMutableI420Buffer alloc] initWithWidth:[self width] height:[self height]];
+  i420Buffer =
+      [[RTC_OBJC_TYPE(RTCMutableI420Buffer) alloc] initWithWidth:[self width] height:[self height]];
 
   switch (pixelFormat) {
     case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
@@ -246,7 +249,8 @@
   }
 
   CVPixelBufferUnlockBaseAddress(_pixelBuffer, kCVPixelBufferLock_ReadOnly);
-
+  }
+  
   return i420Buffer;
 }
 

@@ -21,7 +21,7 @@ namespace cricket {
 
 extern const int kVideoCodecClockrate;
 extern const int kDataCodecClockrate;
-extern const int kDataMaxBandwidth;  // bps
+extern const int kRtpDataMaxBandwidth;  // bps
 
 // Default CPU thresholds.
 extern const float kHighSystemCpuThreshold;
@@ -61,8 +61,6 @@ extern const char kCodecParamUseInbandFec[];
 extern const char kCodecParamUseDtx[];
 extern const char kCodecParamMaxAverageBitrate[];
 extern const char kCodecParamMaxPlaybackRate[];
-extern const char kCodecParamSctpProtocol[];
-extern const char kCodecParamSctpStreams[];
 
 extern const char kParamValueTrue[];
 // Parameters are stored as parameter/value pairs. For parameters who do not
@@ -115,20 +113,12 @@ extern const char kCodecParamMaxBitrate[];
 extern const char kCodecParamMinBitrate[];
 extern const char kCodecParamStartBitrate[];
 extern const char kCodecParamMaxQuantization[];
-extern const char kCodecParamPort[];
-extern const char kCodecParamMaxMessageSize[];
 
 // We put the data codec names here so callers of DataEngine::CreateChannel
 // don't have to import rtpdataengine.h to get the codec names they want to
 // pass in.
 extern const int kGoogleRtpDataCodecPlType;
 extern const char kGoogleRtpDataCodecName[];
-
-// TODO(pthatcher): Find an id that won't conflict with anything.  On
-// the other hand, it really shouldn't matter since the id won't be
-// used on the wire.
-extern const int kGoogleSctpDataCodecPlType;
-extern const char kGoogleSctpDataCodecName[];
 
 extern const char kComfortNoiseCodecName[];
 
@@ -145,7 +135,9 @@ RTC_EXPORT extern const char kH264FmtpProfileLevelId[];
 RTC_EXPORT extern const char kH264FmtpLevelAsymmetryAllowed[];
 RTC_EXPORT extern const char kH264FmtpPacketizationMode[];
 extern const char kH264FmtpSpropParameterSets[];
+extern const char kH264FmtpSpsPpsIdrInKeyframe[];
 extern const char kH264ProfileLevelConstrainedBaseline[];
+extern const char kH264ProfileLevelConstrainedHigh[];
 
 #ifndef DISABLE_H265
 // RFC 7798 RTP Payload Format for H.265 video
@@ -159,6 +151,9 @@ extern const int kDefaultVideoMaxFramerate;
 extern const size_t kConferenceMaxNumSpatialLayers;
 extern const size_t kConferenceMaxNumTemporalLayers;
 extern const size_t kConferenceDefaultNumTemporalLayers;
+
+extern const char kApplicationSpecificBandwidth[];
+extern const char kTransportSpecificBandwidth[];
 }  // namespace cricket
 
 #endif  // MEDIA_BASE_MEDIA_CONSTANTS_H_

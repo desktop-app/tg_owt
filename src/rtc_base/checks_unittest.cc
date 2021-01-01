@@ -19,9 +19,9 @@ TEST(ChecksTest, ExpressionNotEvaluatedWhenCheckPassing) {
 }
 
 #if GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
-TEST(ChecksTest, Checks) {
+TEST(ChecksDeathTest, Checks) {
 #if RTC_CHECK_MSG_ENABLED
-  EXPECT_DEATH(FATAL() << "message",
+  EXPECT_DEATH(RTC_FATAL() << "message",
                "\n\n#\n"
                "# Fatal error in: \\S+, line \\w+\n"
                "# last system error: \\w+\n"
@@ -45,7 +45,7 @@ TEST(ChecksTest, Checks) {
                "# Check failed: false\n"
                "# Hi there!");
 #else
-  EXPECT_DEATH(FATAL() << "message",
+  EXPECT_DEATH(RTC_FATAL() << "message",
                "\n\n#\n"
                "# Fatal error in: \\S+, line \\w+\n"
                "# last system error: \\w+\n"

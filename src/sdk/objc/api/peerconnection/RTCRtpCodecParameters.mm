@@ -34,7 +34,7 @@ const NSString * const kRTCVp8CodecName = @(cricket::kVp8CodecName);
 const NSString * const kRTCVp9CodecName = @(cricket::kVp9CodecName);
 const NSString * const kRTCH264CodecName = @(cricket::kH264CodecName);
 
-@implementation RTCRtpCodecParameters
+@implementation RTC_OBJC_TYPE (RTCRtpCodecParameters)
 
 @synthesize payloadType = _payloadType;
 @synthesize name = _name;
@@ -60,6 +60,9 @@ const NSString * const kRTCH264CodecName = @(cricket::kH264CodecName);
         _kind = kRTCMediaStreamTrackKindVideo;
         break;
       case cricket::MEDIA_TYPE_DATA:
+        RTC_NOTREACHED();
+        break;
+      case cricket::MEDIA_TYPE_UNSUPPORTED:
         RTC_NOTREACHED();
         break;
     }

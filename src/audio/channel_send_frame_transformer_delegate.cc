@@ -20,6 +20,7 @@ class TransformableAudioFrame : public TransformableFrameInterface {
   TransformableAudioFrame(AudioFrameType frame_type,
                           uint8_t payload_type,
                           uint32_t rtp_timestamp,
+                          uint32_t rtp_start_timestamp,
                           const uint8_t* payload_data,
                           size_t payload_size,
                           int64_t absolute_capture_timestamp_ms,
@@ -27,6 +28,7 @@ class TransformableAudioFrame : public TransformableFrameInterface {
       : frame_type_(frame_type),
         payload_type_(payload_type),
         rtp_timestamp_(rtp_timestamp),
+        rtp_start_timestamp_(rtp_start_timestamp),
         payload_(payload_data, payload_size),
         absolute_capture_timestamp_ms_(absolute_capture_timestamp_ms),
         ssrc_(ssrc) {}
@@ -35,7 +37,10 @@ class TransformableAudioFrame : public TransformableFrameInterface {
   void SetData(rtc::ArrayView<const uint8_t> data) override {
     payload_.SetData(data.data(), data.size());
   }
-  uint32_t GetTimestamp() const override { return rtp_timestamp_; }
+  uint32_t GetTimestamp() const override {
+    return rtp_timestamp_ + rtp_start_timestamp_;
+  }
+  uint32_t GetStartTimestamp() const { return rtp_start_timestamp_; }
   uint32_t GetSsrc() const override { return ssrc_; }
 
   AudioFrameType GetFrameType() const { return frame_type_; }
@@ -48,6 +53,7 @@ class TransformableAudioFrame : public TransformableFrameInterface {
   AudioFrameType frame_type_;
   uint8_t payload_type_;
   uint32_t rtp_timestamp_;
+  uint32_t rtp_start_timestamp_;
   rtc::Buffer payload_;
   int64_t absolute_capture_timestamp_ms_;
   uint32_t ssrc_;
@@ -71,7 +77,7 @@ void ChannelSendFrameTransformerDelegate::Reset() {
   frame_transformer_->UnregisterTransformedFrameCallback();
   frame_transformer_ = nullptr;
 
-  rtc::CritScope lock(&send_lock_);
+  MutexLock lock(&send_lock_);
   send_frame_callback_ = SendFrameCallback();
 }
 
@@ -79,18 +85,19 @@ void ChannelSendFrameTransformerDelegate::Transform(
     AudioFrameType frame_type,
     uint8_t payload_type,
     uint32_t rtp_timestamp,
+    uint32_t rtp_start_timestamp,
     const uint8_t* payload_data,
     size_t payload_size,
     int64_t absolute_capture_timestamp_ms,
     uint32_t ssrc) {
   frame_transformer_->Transform(std::make_unique<TransformableAudioFrame>(
-      frame_type, payload_type, rtp_timestamp, payload_data, payload_size,
-      absolute_capture_timestamp_ms, ssrc));
+      frame_type, payload_type, rtp_timestamp, rtp_start_timestamp,
+      payload_data, payload_size, absolute_capture_timestamp_ms, ssrc));
 }
 
 void ChannelSendFrameTransformerDelegate::OnTransformedFrame(
     std::unique_ptr<TransformableFrameInterface> frame) {
-  rtc::CritScope lock(&send_lock_);
+  MutexLock lock(&send_lock_);
   if (!send_frame_callback_)
     return;
   rtc::scoped_refptr<ChannelSendFrameTransformerDelegate> delegate = this;
@@ -102,15 +109,17 @@ void ChannelSendFrameTransformerDelegate::OnTransformedFrame(
 
 void ChannelSendFrameTransformerDelegate::SendFrame(
     std::unique_ptr<TransformableFrameInterface> frame) const {
-  rtc::CritScope lock(&send_lock_);
+  MutexLock lock(&send_lock_);
   RTC_DCHECK_RUN_ON(encoder_queue_);
   if (!send_frame_callback_)
     return;
   auto* transformed_frame = static_cast<TransformableAudioFrame*>(frame.get());
-  send_frame_callback_(
-      transformed_frame->GetFrameType(), transformed_frame->GetPayloadType(),
-      transformed_frame->GetTimestamp(), transformed_frame->GetData(),
-      transformed_frame->GetAbsoluteCaptureTimestampMs());
+  send_frame_callback_(transformed_frame->GetFrameType(),
+                       transformed_frame->GetPayloadType(),
+                       transformed_frame->GetTimestamp() -
+                           transformed_frame->GetStartTimestamp(),
+                       transformed_frame->GetData(),
+                       transformed_frame->GetAbsoluteCaptureTimestampMs());
 }
 
 }  // namespace webrtc

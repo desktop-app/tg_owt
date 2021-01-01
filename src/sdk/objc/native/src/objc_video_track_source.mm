@@ -25,8 +25,11 @@
 
 @synthesize objCVideoTrackSource = _objCVideoTrackSource;
 
-- (void)capturer:(RTCVideoCapturer *)capturer didCaptureVideoFrame:(RTCVideoFrame *)frame {
+- (void)capturer:(RTC_OBJC_TYPE(RTCVideoCapturer) *)capturer
+    didCaptureVideoFrame:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
+  @autoreleasepool {
   _objCVideoTrackSource->OnCapturedFrame(frame);
+  }
 }
 
 @end
@@ -61,7 +64,7 @@ void ObjCVideoTrackSource::OnOutputFormatRequest(int width, int height, int fps)
   video_adapter()->OnOutputFormatRequest(format);
 }
 
-void ObjCVideoTrackSource::OnCapturedFrame(RTCVideoFrame *frame) {
+void ObjCVideoTrackSource::OnCapturedFrame(RTC_OBJC_TYPE(RTCVideoFrame) * frame) {
   const int64_t timestamp_us = frame.timeStampNs / rtc::kNumNanosecsPerMicrosec;
   const int64_t translated_timestamp_us =
       timestamp_aligner_.TranslateTimestamp(timestamp_us, rtc::TimeMicros());
@@ -87,12 +90,15 @@ void ObjCVideoTrackSource::OnCapturedFrame(RTCVideoFrame *frame) {
   rtc::scoped_refptr<VideoFrameBuffer> buffer;
   if (adapted_width == frame.width && adapted_height == frame.height) {
     // No adaption - optimized path.
+    @autoreleasepool {
     buffer = new rtc::RefCountedObject<ObjCFrameBuffer>(frame.buffer);
-  } else if ([frame.buffer isKindOfClass:[RTCCVPixelBuffer class]]) {
+    }
+  } else if ([frame.buffer isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
     // Adapted CVPixelBuffer frame.
     @autoreleasepool {
-    RTCCVPixelBuffer *rtcPixelBuffer = (RTCCVPixelBuffer *)frame.buffer;
-    buffer = new rtc::RefCountedObject<ObjCFrameBuffer>([[RTCCVPixelBuffer alloc]
+    RTC_OBJC_TYPE(RTCCVPixelBuffer) *rtcPixelBuffer =
+        (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)frame.buffer;
+    buffer = new rtc::RefCountedObject<ObjCFrameBuffer>([[RTC_OBJC_TYPE(RTCCVPixelBuffer) alloc]
         initWithPixelBuffer:rtcPixelBuffer.pixelBuffer
                adaptedWidth:adapted_width
               adaptedHeight:adapted_height
@@ -102,12 +108,14 @@ void ObjCVideoTrackSource::OnCapturedFrame(RTCVideoFrame *frame) {
                       cropY:crop_y + rtcPixelBuffer.cropY]);
     }
   } else {
+    @autoreleasepool {
     // Adapted I420 frame.
     // TODO(magjed): Optimize this I420 path.
     rtc::scoped_refptr<I420Buffer> i420_buffer = I420Buffer::Create(adapted_width, adapted_height);
     buffer = new rtc::RefCountedObject<ObjCFrameBuffer>(frame.buffer);
     i420_buffer->CropAndScaleFrom(*buffer->ToI420(), crop_x, crop_y, crop_width, crop_height);
     buffer = i420_buffer;
+    }
   }
 
   // Applying rotation is only supported for legacy reasons and performance is

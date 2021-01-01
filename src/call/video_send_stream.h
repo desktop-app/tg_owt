@@ -18,10 +18,12 @@
 #include <vector>
 
 #include "absl/types/optional.h"
+#include "api/adaptation/resource.h"
 #include "api/call/transport.h"
 #include "api/crypto/crypto_options.h"
 #include "api/frame_transformer_interface.h"
 #include "api/rtp_parameters.h"
+#include "api/scoped_refptr.h"
 #include "api/video/video_content_type.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
@@ -29,6 +31,7 @@
 #include "api/video/video_stream_encoder_settings.h"
 #include "api/video_codecs/video_encoder_config.h"
 #include "call/rtp_config.h"
+#include "common_video/frame_counts.h"
 #include "common_video/include/quality_limitation_reason.h"
 #include "modules/rtp_rtcp/include/report_block_data.h"
 #include "modules/rtp_rtcp/include/rtcp_statistics.h"
@@ -83,13 +86,12 @@ class VideoSendStream {
     // A snapshot of the most recent Report Block with additional data of
     // interest to statistics. Used to implement RTCRemoteInboundRtpStreamStats.
     absl::optional<ReportBlockData> report_block_data;
-
-    // These booleans are redundant; this information is already exposed in
-    // |type|.
-    // TODO(hbos): Update downstream projects to use |type| instead and delete
-    // these members.
-    bool is_flexfec = false;
-    bool is_rtx = false;
+    double encode_frame_rate = 0.0;
+    int frames_encoded = 0;
+    absl::optional<uint64_t> qp_sum;
+    uint64_t total_encode_time_ms = 0;
+    uint64_t total_encoded_bytes_target = 0;
+    uint32_t huge_frames_sent = 0;
   };
 
   struct Stats {
@@ -111,7 +113,6 @@ class VideoSendStream {
     uint32_t frames_dropped_by_rate_limiter = 0;
     uint32_t frames_dropped_by_congestion_window = 0;
     uint32_t frames_dropped_by_encoder = 0;
-    absl::optional<uint64_t> qp_sum;
     // Bitrate the encoder is currently configured to use due to bandwidth
     // limitations.
     int target_media_bitrate_bps = 0;
@@ -137,6 +138,7 @@ class VideoSendStream {
     std::map<uint32_t, StreamStats> substreams;
     webrtc::VideoContentType content_type =
         webrtc::VideoContentType::UNSPECIFIED;
+    uint32_t frames_sent = 0;
     uint32_t huge_frames_sent = 0;
   };
 
@@ -215,6 +217,15 @@ class VideoSendStream {
   // Stops stream activity.
   // When a stream is stopped, it can't receive, process or deliver packets.
   virtual void Stop() = 0;
+
+  // If the resource is overusing, the VideoSendStream will try to reduce
+  // resolution or frame rate until no resource is overusing.
+  // TODO(https://crbug.com/webrtc/11565): When the ResourceAdaptationProcessor
+  // is moved to Call this method could be deleted altogether in favor of
+  // Call-level APIs only.
+  virtual void AddAdaptationResource(rtc::scoped_refptr<Resource> resource) = 0;
+  virtual std::vector<rtc::scoped_refptr<Resource>>
+  GetAdaptationResources() = 0;
 
   virtual void SetSource(
       rtc::VideoSourceInterface<webrtc::VideoFrame>* source,

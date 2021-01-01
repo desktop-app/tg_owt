@@ -196,7 +196,8 @@ void RunFilterUpdateTest(int num_blocks_to_process,
     std::array<float, kFftLengthBy2Plus1> erl;
     ComputeErl(optimization, H2[0], erl);
     refined_gain.Compute(render_power, render_signal_analyzer, output[0], erl,
-                         refined_filter.SizePartitions(), saturation, &G);
+                         refined_filter.SizePartitions(), saturation, false,
+                         &G);
     refined_filter.Adapt(*render_delay_buffer->GetRenderBuffer(), G, &h[0]);
 
     // Update the delay.
@@ -234,7 +235,7 @@ std::string ProduceDebugText(size_t delay, int filter_length_blocks) {
 #if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
 
 // Verifies that the check for non-null output gain parameter works.
-TEST(RefinedFilterUpdateGain, NullDataOutputGain) {
+TEST(RefinedFilterUpdateGainDeathTest, NullDataOutputGain) {
   ApmDataDumper data_dumper(42);
   EchoCanceller3Config config;
   RenderSignalAnalyzer analyzer(config);
@@ -247,7 +248,7 @@ TEST(RefinedFilterUpdateGain, NullDataOutputGain) {
   erl.fill(0.f);
   EXPECT_DEATH(
       gain.Compute(render_power, analyzer, output, erl,
-                   config.filter.refined.length_blocks, false, nullptr),
+                   config.filter.refined.length_blocks, false, false, nullptr),
       "");
 }
 

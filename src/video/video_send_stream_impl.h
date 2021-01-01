@@ -35,13 +35,12 @@
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/utility/include/process_thread.h"
 #include "modules/video_coding/include/video_codec_interface.h"
-#include "rtc_base/critical_section.h"
 #include "rtc_base/experiments/field_trial_parser.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/task_queue.h"
 #include "rtc_base/task_utils/repeating_task.h"
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/weak_ptr.h"
-#include "video/call_stats.h"
 #include "video/encoder_rtcp_feedback.h"
 #include "video/send_delay_stats.h"
 #include "video/send_statistics_proxy.h"
@@ -68,14 +67,13 @@ struct PacingConfig {
 // An encoder may deliver frames through the EncodedImageCallback on an
 // arbitrary thread.
 class VideoSendStreamImpl : public webrtc::BitrateAllocatorObserver,
-                            public VideoStreamEncoderInterface::EncoderSink,
-                            public VideoBitrateAllocationObserver {
+                            public VideoStreamEncoderInterface::EncoderSink {
  public:
   VideoSendStreamImpl(
       Clock* clock,
       SendStatisticsProxy* stats_proxy,
       rtc::TaskQueue* worker_queue,
-      CallStats* call_stats,
+      RtcpRttStats* call_stats,
       RtpTransportControllerSendInterface* transport,
       BitrateAllocatorInterface* bitrate_allocator,
       SendDelayStats* send_delay_stats,
@@ -114,26 +112,27 @@ class VideoSendStreamImpl : public webrtc::BitrateAllocatorObserver,
   // Implements BitrateAllocatorObserver.
   uint32_t OnBitrateUpdated(BitrateAllocationUpdate update) override;
 
+  // Implements VideoStreamEncoderInterface::EncoderSink
   void OnEncoderConfigurationChanged(
       std::vector<VideoStream> streams,
       bool is_svc,
       VideoEncoderConfig::ContentType content_type,
       int min_transmit_bitrate_bps) override;
 
+  void OnBitrateAllocationUpdated(
+      const VideoBitrateAllocation& allocation) override;
+  void OnVideoLayersAllocationUpdated(
+      VideoLayersAllocation allocation) override;
+
   // Implements EncodedImageCallback. The implementation routes encoded frames
   // to the |payload_router_| and |config.pre_encode_callback| if set.
   // Called on an arbitrary encoder callback thread.
   EncodedImageCallback::Result OnEncodedImage(
       const EncodedImage& encoded_image,
-      const CodecSpecificInfo* codec_specific_info,
-      const RTPFragmentationHeader* fragmentation) override;
+      const CodecSpecificInfo* codec_specific_info) override;
 
   // Implements EncodedImageCallback.
   void OnDroppedFrame(EncodedImageCallback::DropReason reason) override;
-
-  // Implements VideoBitrateAllocationObserver.
-  void OnBitrateAllocationUpdated(
-      const VideoBitrateAllocation& allocation) override;
 
   // Starts monitoring and sends a keyframe.
   void StartupVideoSendStream();
@@ -162,11 +161,10 @@ class VideoSendStreamImpl : public webrtc::BitrateAllocatorObserver,
   std::atomic_bool activity_;
   bool timed_out_ RTC_GUARDED_BY(worker_queue_);
 
-  CallStats* const call_stats_;
   RtpTransportControllerSendInterface* const transport_;
   BitrateAllocatorInterface* const bitrate_allocator_;
 
-  rtc::CriticalSection ivf_writers_crit_;
+  Mutex ivf_writers_mutex_;
 
   bool disable_padding_;
   int max_padding_bitrate_;

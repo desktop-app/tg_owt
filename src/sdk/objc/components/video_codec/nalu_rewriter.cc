@@ -29,14 +29,10 @@ using H264::ParseNaluType;
 const char kAnnexBHeaderBytes[4] = {0, 0, 0, 1};
 const size_t kAvccHeaderByteSize = sizeof(uint32_t);
 
-bool H264CMSampleBufferToAnnexBBuffer(
-    CMSampleBufferRef avcc_sample_buffer,
-    bool is_keyframe,
-    rtc::Buffer* annexb_buffer,
-    std::unique_ptr<RTPFragmentationHeader>* out_header) {
+bool H264CMSampleBufferToAnnexBBuffer(CMSampleBufferRef avcc_sample_buffer,
+                                      bool is_keyframe,
+                                      rtc::Buffer* annexb_buffer) {
   RTC_DCHECK(avcc_sample_buffer);
-  RTC_DCHECK(out_header);
-  out_header->reset(nullptr);
 
   // Get format description from the sample buffer.
   CMVideoFormatDescriptionRef description =
@@ -61,10 +57,6 @@ bool H264CMSampleBufferToAnnexBBuffer(
   // Truncate any previous data in the buffer without changing its capacity.
   annexb_buffer->SetSize(0);
 
-  size_t nalu_offset = 0;
-  std::vector<size_t> frag_offsets;
-  std::vector<size_t> frag_lengths;
-
   // Place all parameter sets at the front of buffer.
   if (is_keyframe) {
     size_t param_set_size = 0;
@@ -80,10 +72,6 @@ bool H264CMSampleBufferToAnnexBBuffer(
       annexb_buffer->AppendData(kAnnexBHeaderBytes, sizeof(kAnnexBHeaderBytes));
       annexb_buffer->AppendData(reinterpret_cast<const char*>(param_set),
                                 param_set_size);
-      // Update fragmentation.
-      frag_offsets.push_back(nalu_offset + sizeof(kAnnexBHeaderBytes));
-      frag_lengths.push_back(param_set_size);
-      nalu_offset += sizeof(kAnnexBHeaderBytes) + param_set_size;
     }
   }
 
@@ -132,10 +120,6 @@ bool H264CMSampleBufferToAnnexBBuffer(
     // Update buffer.
     annexb_buffer->AppendData(kAnnexBHeaderBytes, sizeof(kAnnexBHeaderBytes));
     annexb_buffer->AppendData(data_ptr + nalu_header_size, packet_size);
-    // Update fragmentation.
-    frag_offsets.push_back(nalu_offset + sizeof(kAnnexBHeaderBytes));
-    frag_lengths.push_back(packet_size);
-    nalu_offset += sizeof(kAnnexBHeaderBytes) + packet_size;
 
     size_t bytes_written = packet_size + sizeof(kAnnexBHeaderBytes);
     bytes_remaining -= bytes_written;
@@ -143,14 +127,6 @@ bool H264CMSampleBufferToAnnexBBuffer(
   }
   RTC_DCHECK_EQ(bytes_remaining, (size_t)0);
 
-  std::unique_ptr<RTPFragmentationHeader> header(new RTPFragmentationHeader());
-  header->VerifyAndAllocateFragmentationHeader(frag_offsets.size());
-  RTC_DCHECK_EQ(frag_lengths.size(), frag_offsets.size());
-  for (size_t i = 0; i < frag_offsets.size(); ++i) {
-    header->fragmentationOffset[i] = frag_offsets[i];
-    header->fragmentationLength[i] = frag_lengths[i];
-  }
-  *out_header = std::move(header);
   CFRelease(contiguous_buffer);
   return true;
 }
@@ -252,11 +228,10 @@ bool H264AnnexBBufferToCMSampleBuffer(const uint8_t* annexb_buffer,
 bool H265CMSampleBufferToAnnexBBuffer(
     CMSampleBufferRef hvcc_sample_buffer,
     bool is_keyframe,
-    rtc::Buffer* annexb_buffer,
-    std::unique_ptr<RTPFragmentationHeader> *out_header) {
+    rtc::Buffer* annexb_buffer) {
   RTC_DCHECK(hvcc_sample_buffer);
-  RTC_DCHECK(out_header);
-  out_header->reset(nullptr);
+  //RTC_DCHECK(out_header);
+  //out_header->reset(nullptr);
 
   // Get format description from the sample buffer.
   CMVideoFormatDescriptionRef description =
@@ -269,14 +244,8 @@ bool H265CMSampleBufferToAnnexBBuffer(
   // Get parameter set information.
   int nalu_header_size = 0;
   size_t param_set_count = 0;
-  OSStatus status = noErr;
-  if (__builtin_available(macOS 10.13, *)) {
-    status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-        description, 0, nullptr, nullptr, &param_set_count, &nalu_header_size);
-  } else {
-    RTC_LOG(LS_ERROR) << "Not supported.";
-    return false;
-  }
+  OSStatus status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+      description, 0, nullptr, nullptr, &param_set_count, &nalu_header_size);
   if (status != noErr) {
     RTC_LOG(LS_ERROR) << "Failed to get parameter set.";
     return false;
@@ -296,13 +265,8 @@ bool H265CMSampleBufferToAnnexBBuffer(
     size_t param_set_size = 0;
     const uint8_t* param_set = nullptr;
     for (size_t i = 0; i < param_set_count; ++i) {
-      if (__builtin_available(macOS 10.13, *)) {
-        status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-            description, i, &param_set, &param_set_size, nullptr, nullptr);
-      } else {
-        RTC_LOG(LS_ERROR) << "Not supported.";
-        return false;
-      }
+      status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+          description, i, &param_set, &param_set_size, nullptr, nullptr);
       if (status != noErr) {
         RTC_LOG(LS_ERROR) << "Failed to get parameter set.";
         return false;
@@ -374,14 +338,14 @@ bool H265CMSampleBufferToAnnexBBuffer(
   }
   RTC_DCHECK_EQ(bytes_remaining, (size_t)0);
 
-  std::unique_ptr<RTPFragmentationHeader> header(new RTPFragmentationHeader());
+  /*std::unique_ptr<RTPFragmentationHeader> header(new RTPFragmentationHeader());
   header->VerifyAndAllocateFragmentationHeader(frag_offsets.size());
   RTC_DCHECK_EQ(frag_lengths.size(), frag_offsets.size());
   for (size_t i = 0; i < frag_offsets.size(); ++i) {
     header->fragmentationOffset[i] = frag_offsets[i];
     header->fragmentationLength[i] = frag_lengths[i];
   }
-  *out_header = std::move(header);
+  *out_header = std::move(header);*/
   CFRelease(contiguous_buffer);
   return true;
 }
@@ -538,15 +502,9 @@ CMVideoFormatDescriptionRef CreateH265VideoFormatDescription(
 
   // Parse the SPS and PPS into a CMVideoFormatDescription.
   CMVideoFormatDescriptionRef description = nullptr;
-  OSStatus status = noErr;
-  if (__builtin_available(macOS 10.13, *)) {
-    status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
-        kCFAllocatorDefault, 3, param_set_ptrs, param_set_sizes, 4, nullptr,
-        &description);
-  } else {
-    RTC_LOG(LS_ERROR) << "Not supported.";
-    return nullptr;
-  }
+  OSStatus status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+      kCFAllocatorDefault, 3, param_set_ptrs, param_set_sizes, 4, nullptr,
+      &description);
   if (status != noErr) {
     RTC_LOG(LS_ERROR) << "Failed to create video format description.";
     return nullptr;

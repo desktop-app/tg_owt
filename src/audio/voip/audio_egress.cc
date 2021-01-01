@@ -1,12 +1,12 @@
-//
-//  Copyright (c) 2020 The WebRTC project authors. All Rights Reserved.
-//
-//  Use of this source code is governed by a BSD-style license
-//  that can be found in the LICENSE file in the root of the source
-//  tree. An additional intellectual property rights grant can be found
-//  in the file PATENTS.  All contributing project authors may
-//  be found in the AUTHORS file in the root of the source tree.
-//
+/*
+ *  Copyright (c) 2020 The WebRTC project authors. All Rights Reserved.
+ *
+ *  Use of this source code is governed by a BSD-style license
+ *  that can be found in the LICENSE file in the root of the source
+ *  tree. An additional intellectual property rights grant can be found
+ *  in the file PATENTS.  All contributing project authors may
+ *  be found in the AUTHORS file in the root of the source tree.
+ */
 
 #include "audio/voip/audio_egress.h"
 
@@ -17,7 +17,7 @@
 
 namespace webrtc {
 
-AudioEgress::AudioEgress(RtpRtcp* rtp_rtcp,
+AudioEgress::AudioEgress(RtpRtcpInterface* rtp_rtcp,
                          Clock* clock,
                          TaskQueueFactory* task_queue_factory)
     : rtp_rtcp_(rtp_rtcp),
@@ -34,18 +34,16 @@ AudioEgress::~AudioEgress() {
 }
 
 bool AudioEgress::IsSending() const {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
   return rtp_rtcp_->SendingMedia();
 }
 
 void AudioEgress::SetEncoder(int payload_type,
                              const SdpAudioFormat& encoder_format,
                              std::unique_ptr<AudioEncoder> encoder) {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
   RTC_DCHECK_GE(payload_type, 0);
   RTC_DCHECK_LE(payload_type, 127);
 
-  encoder_format_ = encoder_format;
+  SetEncoderFormat(encoder_format);
 
   // The RTP/RTCP module needs to know the RTP timestamp rate (i.e. clockrate)
   // as well as some other things, so we collect this info and send it along.
@@ -58,20 +56,16 @@ void AudioEgress::SetEncoder(int payload_type,
   audio_coding_->SetEncoder(std::move(encoder));
 }
 
-absl::optional<SdpAudioFormat> AudioEgress::GetEncoderFormat() const {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-  return encoder_format_;
-}
-
-void AudioEgress::StartSend() {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-
+bool AudioEgress::StartSend() {
+  if (!GetEncoderFormat()) {
+    RTC_DLOG(LS_WARNING) << "Send codec has not been set yet";
+    return false;
+  }
   rtp_rtcp_->SetSendingMediaStatus(true);
+  return true;
 }
 
 void AudioEgress::StopSend() {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-
   rtp_rtcp_->SetSendingMediaStatus(false);
 }
 
@@ -85,6 +79,12 @@ void AudioEgress::SendAudioData(std::unique_ptr<AudioFrame> audio_frame) {
         if (!rtp_rtcp_->SendingMedia()) {
           return;
         }
+
+        double duration_seconds =
+            static_cast<double>(audio_frame->samples_per_channel_) /
+            audio_frame->sample_rate_hz_;
+
+        input_audio_level_.ComputeLevel(*audio_frame, duration_seconds);
 
         AudioFrameOperations::Mute(audio_frame.get(),
                                    encoder_context_.previously_muted_,
@@ -144,7 +144,6 @@ int32_t AudioEgress::SendData(AudioFrameType frame_type,
 
 void AudioEgress::RegisterTelephoneEventType(int rtp_payload_type,
                                              int sample_rate_hz) {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
   RTC_DCHECK_GE(rtp_payload_type, 0);
   RTC_DCHECK_LE(rtp_payload_type, 127);
 
@@ -154,7 +153,6 @@ void AudioEgress::RegisterTelephoneEventType(int rtp_payload_type,
 }
 
 bool AudioEgress::SendTelephoneEvent(int dtmf_event, int duration_ms) {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
   RTC_DCHECK_GE(dtmf_event, 0);
   RTC_DCHECK_LE(dtmf_event, 255);
   RTC_DCHECK_GE(duration_ms, 0);
@@ -175,8 +173,6 @@ bool AudioEgress::SendTelephoneEvent(int dtmf_event, int duration_ms) {
 }
 
 void AudioEgress::SetMute(bool mute) {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-
   encoder_queue_.PostTask([this, mute] {
     RTC_DCHECK_RUN_ON(&encoder_queue_);
     encoder_context_.mute_ = mute;

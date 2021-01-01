@@ -14,6 +14,8 @@
 
 #include <memory>
 
+#include "absl/types/optional.h"
+#include "api/rtp_parameters.h"
 #include "media/base/fake_media_engine.h"
 #include "pc/test/mock_channel_interface.h"
 #include "pc/test/mock_rtp_receiver_internal.h"
@@ -22,9 +24,8 @@
 #include "test/gtest.h"
 
 using ::testing::ElementsAre;
-using ::testing::Eq;
-using ::testing::Field;
-using ::testing::Not;
+using ::testing::Optional;
+using ::testing::Property;
 using ::testing::Return;
 using ::testing::ReturnRef;
 
@@ -44,7 +45,7 @@ TEST(RtpTransceiverTest, CannotSetChannelOnStoppedTransceiver) {
   EXPECT_EQ(&channel1, transceiver.channel());
 
   // Stop the transceiver.
-  transceiver.Stop();
+  transceiver.StopInternal();
   EXPECT_EQ(&channel1, transceiver.channel());
 
   cricket::MockChannelInterface channel2;
@@ -70,7 +71,7 @@ TEST(RtpTransceiverTest, CanUnsetChannelOnStoppedTransceiver) {
   EXPECT_EQ(&channel, transceiver.channel());
 
   // Stop the transceiver.
-  transceiver.Stop();
+  transceiver.StopInternal();
   EXPECT_EQ(&channel, transceiver.channel());
 
   // Set the channel to |nullptr|.
@@ -78,27 +79,189 @@ TEST(RtpTransceiverTest, CanUnsetChannelOnStoppedTransceiver) {
   EXPECT_EQ(nullptr, transceiver.channel());
 }
 
-TEST(RtpTransceiverTest,
-     InitsWithChannelManagerRtpHeaderExtensionCapabilities) {
-  cricket::ChannelManager channel_manager(
-      std::make_unique<cricket::FakeMediaEngine>(),
-      std::make_unique<cricket::FakeDataEngine>(), rtc::Thread::Current(),
-      rtc::Thread::Current());
-  std::vector<RtpHeaderExtensionCapability> extensions({
-      RtpHeaderExtensionCapability("uri1", 1,
-                                   RtpTransceiverDirection::kSendRecv),
-      RtpHeaderExtensionCapability("uri2", 2,
-                                   RtpTransceiverDirection::kRecvOnly),
-  });
-  RtpTransceiver transceiver(
-      RtpSenderProxyWithInternal<RtpSenderInternal>::Create(
-          rtc::Thread::Current(),
-          new rtc::RefCountedObject<MockRtpSenderInternal>()),
-      RtpReceiverProxyWithInternal<RtpReceiverInternal>::Create(
-          rtc::Thread::Current(),
-          new rtc::RefCountedObject<MockRtpReceiverInternal>()),
-      &channel_manager, extensions);
-  EXPECT_EQ(transceiver.HeaderExtensionsToOffer(), extensions);
+class RtpTransceiverUnifiedPlanTest : public ::testing::Test {
+ public:
+  RtpTransceiverUnifiedPlanTest()
+      : channel_manager_(std::make_unique<cricket::FakeMediaEngine>(),
+                         std::make_unique<cricket::FakeDataEngine>(),
+                         rtc::Thread::Current(),
+                         rtc::Thread::Current()),
+        transceiver_(RtpSenderProxyWithInternal<RtpSenderInternal>::Create(
+                         rtc::Thread::Current(),
+                         new rtc::RefCountedObject<MockRtpSenderInternal>()),
+                     RtpReceiverProxyWithInternal<RtpReceiverInternal>::Create(
+                         rtc::Thread::Current(),
+                         new rtc::RefCountedObject<MockRtpReceiverInternal>()),
+                     &channel_manager_,
+                     channel_manager_.GetSupportedAudioRtpHeaderExtensions(),
+                     /* on_negotiation_needed= */ [] {}) {}
+
+  cricket::ChannelManager channel_manager_;
+  RtpTransceiver transceiver_;
+};
+
+// Basic tests for Stop()
+TEST_F(RtpTransceiverUnifiedPlanTest, StopSetsDirection) {
+  EXPECT_EQ(RtpTransceiverDirection::kInactive, transceiver_.direction());
+  EXPECT_FALSE(transceiver_.current_direction());
+  transceiver_.StopStandard();
+  EXPECT_EQ(RtpTransceiverDirection::kStopped, transceiver_.direction());
+  EXPECT_FALSE(transceiver_.current_direction());
+  transceiver_.StopTransceiverProcedure();
+  EXPECT_TRUE(transceiver_.current_direction());
+  EXPECT_EQ(RtpTransceiverDirection::kStopped, transceiver_.direction());
+  EXPECT_EQ(RtpTransceiverDirection::kStopped,
+            *transceiver_.current_direction());
+}
+
+class RtpTransceiverTestForHeaderExtensions : public ::testing::Test {
+ public:
+  RtpTransceiverTestForHeaderExtensions()
+      : channel_manager_(std::make_unique<cricket::FakeMediaEngine>(),
+                         std::make_unique<cricket::FakeDataEngine>(),
+                         rtc::Thread::Current(),
+                         rtc::Thread::Current()),
+        extensions_(
+            {RtpHeaderExtensionCapability("uri1",
+                                          1,
+                                          RtpTransceiverDirection::kSendOnly),
+             RtpHeaderExtensionCapability("uri2",
+                                          2,
+                                          RtpTransceiverDirection::kRecvOnly),
+             RtpHeaderExtensionCapability(RtpExtension::kMidUri,
+                                          3,
+                                          RtpTransceiverDirection::kSendRecv),
+             RtpHeaderExtensionCapability(RtpExtension::kVideoRotationUri,
+                                          4,
+                                          RtpTransceiverDirection::kSendRecv)}),
+        transceiver_(RtpSenderProxyWithInternal<RtpSenderInternal>::Create(
+                         rtc::Thread::Current(),
+                         new rtc::RefCountedObject<MockRtpSenderInternal>()),
+                     RtpReceiverProxyWithInternal<RtpReceiverInternal>::Create(
+                         rtc::Thread::Current(),
+                         new rtc::RefCountedObject<MockRtpReceiverInternal>()),
+                     &channel_manager_,
+                     extensions_,
+                     /* on_negotiation_needed= */ [] {}) {}
+
+  cricket::ChannelManager channel_manager_;
+  std::vector<RtpHeaderExtensionCapability> extensions_;
+  RtpTransceiver transceiver_;
+};
+
+TEST_F(RtpTransceiverTestForHeaderExtensions, OffersChannelManagerList) {
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), extensions_);
+}
+
+TEST_F(RtpTransceiverTestForHeaderExtensions, ModifiesDirection) {
+  auto modified_extensions = extensions_;
+  modified_extensions[0].direction = RtpTransceiverDirection::kSendOnly;
+  EXPECT_TRUE(
+      transceiver_.SetOfferedRtpHeaderExtensions(modified_extensions).ok());
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), modified_extensions);
+  modified_extensions[0].direction = RtpTransceiverDirection::kRecvOnly;
+  EXPECT_TRUE(
+      transceiver_.SetOfferedRtpHeaderExtensions(modified_extensions).ok());
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), modified_extensions);
+  modified_extensions[0].direction = RtpTransceiverDirection::kSendRecv;
+  EXPECT_TRUE(
+      transceiver_.SetOfferedRtpHeaderExtensions(modified_extensions).ok());
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), modified_extensions);
+  modified_extensions[0].direction = RtpTransceiverDirection::kInactive;
+  EXPECT_TRUE(
+      transceiver_.SetOfferedRtpHeaderExtensions(modified_extensions).ok());
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), modified_extensions);
+}
+
+TEST_F(RtpTransceiverTestForHeaderExtensions, AcceptsStoppedExtension) {
+  auto modified_extensions = extensions_;
+  modified_extensions[0].direction = RtpTransceiverDirection::kStopped;
+  EXPECT_TRUE(
+      transceiver_.SetOfferedRtpHeaderExtensions(modified_extensions).ok());
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), modified_extensions);
+}
+
+TEST_F(RtpTransceiverTestForHeaderExtensions, RejectsUnsupportedExtension) {
+  std::vector<RtpHeaderExtensionCapability> modified_extensions(
+      {RtpHeaderExtensionCapability("uri3", 1,
+                                    RtpTransceiverDirection::kSendRecv)});
+  EXPECT_THAT(transceiver_.SetOfferedRtpHeaderExtensions(modified_extensions),
+              Property(&RTCError::type, RTCErrorType::INVALID_PARAMETER));
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), extensions_);
+}
+
+TEST_F(RtpTransceiverTestForHeaderExtensions,
+       RejectsStoppedMandatoryExtensions) {
+  std::vector<RtpHeaderExtensionCapability> modified_extensions = extensions_;
+  // Attempting to stop the mandatory MID extension.
+  modified_extensions[2].direction = RtpTransceiverDirection::kStopped;
+  EXPECT_THAT(transceiver_.SetOfferedRtpHeaderExtensions(modified_extensions),
+              Property(&RTCError::type, RTCErrorType::INVALID_MODIFICATION));
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), extensions_);
+  modified_extensions = extensions_;
+  // Attempting to stop the mandatory video orientation extension.
+  modified_extensions[3].direction = RtpTransceiverDirection::kStopped;
+  EXPECT_THAT(transceiver_.SetOfferedRtpHeaderExtensions(modified_extensions),
+              Property(&RTCError::type, RTCErrorType::INVALID_MODIFICATION));
+  EXPECT_EQ(transceiver_.HeaderExtensionsToOffer(), extensions_);
+}
+
+TEST_F(RtpTransceiverTestForHeaderExtensions,
+       NoNegotiatedHdrExtsWithoutChannel) {
+  EXPECT_THAT(transceiver_.HeaderExtensionsNegotiated(), ElementsAre());
+}
+
+TEST_F(RtpTransceiverTestForHeaderExtensions,
+       NoNegotiatedHdrExtsWithChannelWithoutNegotiation) {
+  cricket::MockChannelInterface mock_channel;
+  sigslot::signal1<cricket::ChannelInterface*> signal;
+  ON_CALL(mock_channel, SignalFirstPacketReceived)
+      .WillByDefault(ReturnRef(signal));
+  transceiver_.SetChannel(&mock_channel);
+  EXPECT_THAT(transceiver_.HeaderExtensionsNegotiated(), ElementsAre());
+}
+
+TEST_F(RtpTransceiverTestForHeaderExtensions, ReturnsNegotiatedHdrExts) {
+  cricket::MockChannelInterface mock_channel;
+  sigslot::signal1<cricket::ChannelInterface*> signal;
+  ON_CALL(mock_channel, SignalFirstPacketReceived)
+      .WillByDefault(ReturnRef(signal));
+  cricket::RtpHeaderExtensions extensions = {webrtc::RtpExtension("uri1", 1),
+                                             webrtc::RtpExtension("uri2", 2)};
+  EXPECT_CALL(mock_channel, GetNegotiatedRtpHeaderExtensions)
+      .WillOnce(Return(extensions));
+  transceiver_.SetChannel(&mock_channel);
+  EXPECT_THAT(transceiver_.HeaderExtensionsNegotiated(),
+              ElementsAre(RtpHeaderExtensionCapability(
+                              "uri1", 1, RtpTransceiverDirection::kSendRecv),
+                          RtpHeaderExtensionCapability(
+                              "uri2", 2, RtpTransceiverDirection::kSendRecv)));
+}
+
+TEST_F(RtpTransceiverTestForHeaderExtensions,
+       ReturnsNegotiatedHdrExtsSecondTime) {
+  cricket::MockChannelInterface mock_channel;
+  sigslot::signal1<cricket::ChannelInterface*> signal;
+  ON_CALL(mock_channel, SignalFirstPacketReceived)
+      .WillByDefault(ReturnRef(signal));
+  cricket::RtpHeaderExtensions extensions = {webrtc::RtpExtension("uri1", 1),
+                                             webrtc::RtpExtension("uri2", 2)};
+
+  EXPECT_CALL(mock_channel, GetNegotiatedRtpHeaderExtensions)
+      .WillOnce(Return(extensions));
+  transceiver_.SetChannel(&mock_channel);
+  transceiver_.HeaderExtensionsNegotiated();
+  testing::Mock::VerifyAndClearExpectations(&mock_channel);
+
+  extensions = {webrtc::RtpExtension("uri3", 4),
+                webrtc::RtpExtension("uri5", 6)};
+  EXPECT_CALL(mock_channel, GetNegotiatedRtpHeaderExtensions)
+      .WillOnce(Return(extensions));
+  EXPECT_THAT(transceiver_.HeaderExtensionsNegotiated(),
+              ElementsAre(RtpHeaderExtensionCapability(
+                              "uri3", 4, RtpTransceiverDirection::kSendRecv),
+                          RtpHeaderExtensionCapability(
+                              "uri5", 6, RtpTransceiverDirection::kSendRecv)));
 }
 
 }  // namespace webrtc

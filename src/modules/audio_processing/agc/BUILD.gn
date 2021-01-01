@@ -29,15 +29,14 @@ rtc_library("agc") {
     "../../../rtc_base:checks",
     "../../../rtc_base:gtest_prod",
     "../../../rtc_base:logging",
-    "../../../rtc_base:macromagic",
     "../../../rtc_base:rtc_base_approved",
     "../../../rtc_base:safe_minmax",
     "../../../system_wrappers:field_trial",
     "../../../system_wrappers:metrics",
     "../agc2:level_estimation_agc",
     "../vad",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_library("level_estimation") {
@@ -51,7 +50,6 @@ rtc_library("level_estimation") {
   ]
   deps = [
     "../../../rtc_base:checks",
-    "../../../rtc_base:macromagic",
     "../vad",
   ]
 }
@@ -75,10 +73,10 @@ rtc_library("legacy_agc") {
   deps = [
     "../../../common_audio",
     "../../../common_audio:common_audio_c",
-    "../../../common_audio/third_party/fft4g",
+    "../../../common_audio/third_party/ooura:fft_size_256",
     "../../../rtc_base:checks",
     "../../../rtc_base:rtc_base_approved",
-    "../../../system_wrappers:cpu_features_api",
+    "../../../system_wrappers",
   ]
 
   if (rtc_build_with_neon) {

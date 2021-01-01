@@ -30,13 +30,10 @@ namespace webrtc {
 
 // Converts a sample buffer emitted from the VideoToolbox encoder into a buffer
 // suitable for RTP. The sample buffer is in avcc format whereas the rtp buffer
-// needs to be in Annex B format. Data is written directly to |annexb_buffer|
-// and a new RTPFragmentationHeader is returned in |out_header|.
-bool H264CMSampleBufferToAnnexBBuffer(
-    CMSampleBufferRef avcc_sample_buffer,
-    bool is_keyframe,
-    rtc::Buffer* annexb_buffer,
-    std::unique_ptr<RTPFragmentationHeader>* out_header);
+// needs to be in Annex B format. Data is written directly to |annexb_buffer|.
+bool H264CMSampleBufferToAnnexBBuffer(CMSampleBufferRef avcc_sample_buffer,
+                                      bool is_keyframe,
+                                      rtc::Buffer* annexb_buffer);
 
 // Converts a buffer received from RTP into a sample buffer suitable for the
 // VideoToolbox decoder. The RTP buffer is in annex b format whereas the sample
@@ -58,8 +55,7 @@ bool H264AnnexBBufferToCMSampleBuffer(const uint8_t* annexb_buffer,
 bool H265CMSampleBufferToAnnexBBuffer(
     CMSampleBufferRef hvcc_sample_buffer,
     bool is_keyframe,
-    rtc::Buffer* annexb_buffer,
-    std::unique_ptr<RTPFragmentationHeader> *out_header)
+    rtc::Buffer* annexb_buffer)
     __OSX_AVAILABLE_STARTING(__MAC_10_12, __IPHONE_11_0);
 
  // Converts a buffer received from RTP into a sample buffer suitable for the

@@ -20,7 +20,7 @@
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/ssl_identity.h"
 
-@implementation RTCConfiguration
+@implementation RTC_OBJC_TYPE (RTCConfiguration)
 
 @synthesize enableDscp = _enableDscp;
 @synthesize iceServers = _iceServers;
@@ -52,9 +52,8 @@
 @synthesize turnCustomizer = _turnCustomizer;
 @synthesize activeResetSrtpParams = _activeResetSrtpParams;
 @synthesize allowCodecSwitching = _allowCodecSwitching;
-@synthesize useMediaTransport = _useMediaTransport;
-@synthesize useMediaTransportForDataChannels = _useMediaTransportForDataChannels;
 @synthesize cryptoOptions = _cryptoOptions;
+@synthesize turnLoggingId = _turnLoggingId;
 @synthesize rtcpAudioReportIntervalMs = _rtcpAudioReportIntervalMs;
 @synthesize rtcpVideoReportIntervalMs = _rtcpVideoReportIntervalMs;
 
@@ -70,7 +69,8 @@
     _enableDscp = config.dscp();
     NSMutableArray *iceServers = [NSMutableArray array];
     for (const webrtc::PeerConnectionInterface::IceServer& server : config.servers) {
-      RTCIceServer *iceServer = [[RTCIceServer alloc] initWithNativeServer:server];
+      RTC_OBJC_TYPE(RTCIceServer) *iceServer =
+          [[RTC_OBJC_TYPE(RTCIceServer) alloc] initWithNativeServer:server];
       [iceServers addObject:iceServer];
     }
     _iceServers = iceServers;
@@ -78,9 +78,9 @@
       rtc::scoped_refptr<rtc::RTCCertificate> native_cert;
       native_cert = config.certificates[0];
       rtc::RTCCertificatePEM native_pem = native_cert->ToPEM();
-      _certificate =
-          [[RTCCertificate alloc] initWithPrivateKey:@(native_pem.private_key().c_str())
-                                         certificate:@(native_pem.certificate().c_str())];
+      _certificate = [[RTC_OBJC_TYPE(RTCCertificate) alloc]
+          initWithPrivateKey:@(native_pem.private_key().c_str())
+                 certificate:@(native_pem.certificate().c_str())];
     }
     _iceTransportPolicy =
         [[self class] transportPolicyForTransportsType:config.type];
@@ -105,8 +105,6 @@
     _iceConnectionReceivingTimeout = config.ice_connection_receiving_timeout;
     _iceBackupCandidatePairPingInterval =
         config.ice_backup_candidate_pair_ping_interval;
-    _useMediaTransport = config.use_media_transport;
-    _useMediaTransportForDataChannels = config.use_media_transport_for_data_channels;
     _keyType = RTCEncryptionKeyTypeECDSA;
     _iceCandidatePoolSize = config.ice_candidate_pool_size;
     _shouldPruneTurnPorts = config.prune_turn_ports;
@@ -122,7 +120,7 @@
     _turnCustomizer = config.turn_customizer;
     _activeResetSrtpParams = config.active_reset_srtp_params;
     if (config.crypto_options) {
-      _cryptoOptions = [[RTCCryptoOptions alloc]
+      _cryptoOptions = [[RTC_OBJC_TYPE(RTCCryptoOptions) alloc]
                initWithSrtpEnableGcmCryptoSuites:config.crypto_options->srtp
                                                      .enable_gcm_crypto_suites
              srtpEnableAes128Sha1_32CryptoCipher:config.crypto_options->srtp
@@ -132,6 +130,7 @@
                     sframeRequireFrameEncryption:config.crypto_options->sframe
                                                      .require_frame_encryption];
     }
+    _turnLoggingId = [NSString stringWithUTF8String:config.turn_logging_id.c_str()];
     _rtcpAudioReportIntervalMs = config.audio_rtcp_report_interval_ms();
     _rtcpVideoReportIntervalMs = config.video_rtcp_report_interval_ms();
     _allowCodecSwitching = config.allow_codec_switching.value_or(false);
@@ -140,9 +139,9 @@
 }
 
 - (NSString *)description {
-  static NSString *formatString = @"RTCConfiguration: "
+  static NSString *formatString = @"RTC_OBJC_TYPE(RTCConfiguration): "
                                   @"{\n%@\n%@\n%@\n%@\n%@\n%@\n%@\n%@\n%d\n%d\n%d\n%d\n%d\n%d\n"
-                                  @"%d\n%@\n%d\n%d\n%d\n%d\n%d\n%@\n%d\n}\n";
+                                  @"%d\n%@\n%d\n%d\n%d\n%d\n%d\n%@\n}\n";
 
   return [NSString
       stringWithFormat:formatString,
@@ -168,7 +167,6 @@
                        _disableIPV6OnWiFi,
                        _maxIPv6Networks,
                        _activeResetSrtpParams,
-                       _useMediaTransport,
                        _enableDscp];
 }
 
@@ -181,7 +179,7 @@
           webrtc::PeerConnectionInterface::RTCConfigurationType::kAggressive));
 
   nativeConfig->set_dscp(_enableDscp);
-  for (RTCIceServer *iceServer in _iceServers) {
+  for (RTC_OBJC_TYPE(RTCIceServer) * iceServer in _iceServers) {
     nativeConfig->servers.push_back(iceServer.nativeServer);
   }
   nativeConfig->type =
@@ -207,8 +205,6 @@
       _iceConnectionReceivingTimeout;
   nativeConfig->ice_backup_candidate_pair_ping_interval =
       _iceBackupCandidatePairPingInterval;
-  nativeConfig->use_media_transport = _useMediaTransport;
-  nativeConfig->use_media_transport_for_data_channels = _useMediaTransportForDataChannels;
   rtc::KeyType keyType =
       [[self class] nativeEncryptionKeyTypeForKeyType:_keyType];
   if (_certificate != nullptr) {
@@ -264,6 +260,7 @@
         _cryptoOptions.sframeRequireFrameEncryption ? true : false;
     nativeConfig->crypto_options = absl::optional<webrtc::CryptoOptions>(nativeCryptoOptions);
   }
+  nativeConfig->turn_logging_id = [_turnLoggingId UTF8String];
   nativeConfig->set_audio_rtcp_report_interval_ms(_rtcpAudioReportIntervalMs);
   nativeConfig->set_video_rtcp_report_interval_ms(_rtcpVideoReportIntervalMs);
   nativeConfig->allow_codec_switching = _allowCodecSwitching;

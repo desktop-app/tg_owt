@@ -25,10 +25,7 @@ rtc_library("config") {
     "include/config.cc",
     "include/config.h",
   ]
-  deps = [
-    "../../rtc_base:macromagic",
-    "../../rtc_base/system:rtc_export",
-  ]
+  deps = [ "../../rtc_base/system:rtc_export" ]
 }
 
 rtc_library("api") {
@@ -39,21 +36,21 @@ rtc_library("api") {
   ]
   deps = [
     ":audio_frame_view",
-    ":audio_generator_interface",
     ":audio_processing_statistics",
     ":config",
+    "../../api:array_view",
     "../../api:scoped_refptr",
     "../../api/audio:aec3_config",
     "../../api/audio:audio_frame_api",
     "../../api/audio:echo_control",
     "../../rtc_base:deprecation",
-    "../../rtc_base:macromagic",
     "../../rtc_base:rtc_base_approved",
     "../../rtc_base/system:arch",
+    "../../rtc_base/system:file_wrapper",
     "../../rtc_base/system:rtc_export",
     "agc:gain_control_interface",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_library("audio_frame_proxies") {
@@ -112,10 +109,25 @@ rtc_library("high_pass_filter") {
   ]
 }
 
+rtc_source_set("aec_dump_interface") {
+  visibility = [ "*" ]
+  sources = [
+    "include/aec_dump.cc",
+    "include/aec_dump.h",
+  ]
+
+  deps = [
+    ":api",
+    ":audio_frame_view",
+    "../../rtc_base:deprecation",
+  ]
+}
+
 rtc_library("audio_processing") {
   visibility = [ "*" ]
   configs += [ ":apm_debug_dump" ]
   sources = [
+    "audio_processing_builder_impl.cc",
     "audio_processing_impl.cc",
     "audio_processing_impl.h",
     "common.h",
@@ -133,8 +145,6 @@ rtc_library("audio_processing") {
     "gain_control_impl.h",
     "gain_controller2.cc",
     "gain_controller2.h",
-    "include/aec_dump.cc",
-    "include/aec_dump.h",
     "level_estimator.cc",
     "level_estimator.h",
     "render_queue_item_verifier.h",
@@ -146,15 +156,16 @@ rtc_library("audio_processing") {
 
   defines = []
   deps = [
+    ":aec_dump_interface",
     ":api",
     ":apm_logging",
     ":audio_buffer",
     ":audio_frame_proxies",
     ":audio_frame_view",
-    ":audio_generator_interface",
     ":audio_processing_statistics",
     ":config",
     ":high_pass_filter",
+    ":optionally_built_submodule_creators",
     ":rms_level",
     ":voice_detection",
     "../../api:array_view",
@@ -164,18 +175,21 @@ rtc_library("audio_processing") {
     "../../api/audio:echo_control",
     "../../audio/utility:audio_frame_operations",
     "../../common_audio:common_audio_c",
-    "../../common_audio/third_party/fft4g",
+    "../../common_audio/third_party/ooura:fft_size_256",
     "../../rtc_base:checks",
     "../../rtc_base:deprecation",
     "../../rtc_base:gtest_prod",
     "../../rtc_base:ignore_wundef",
+    "../../rtc_base:refcount",
     "../../rtc_base:safe_minmax",
     "../../rtc_base:sanitizer",
+    "../../rtc_base/synchronization:mutex",
     "../../rtc_base/system:rtc_export",
-    "../../system_wrappers:cpu_features_api",
+    "../../system_wrappers",
     "../../system_wrappers:field_trial",
     "../../system_wrappers:metrics",
     "aec3",
+    "aec_dump:aec_dump",
     "aecm:aecm_core",
     "agc",
     "agc:gain_control_interface",
@@ -185,10 +199,9 @@ rtc_library("audio_processing") {
     "agc2:gain_applier",
     "ns",
     "transient:transient_suppressor_api",
-    "transient:transient_suppressor_creator",
     "vad",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 
   deps += [
     "../../common_audio",
@@ -197,6 +210,12 @@ rtc_library("audio_processing") {
     "../../rtc_base:rtc_base_approved",
     "../../system_wrappers",
   ]
+
+  if (rtc_enable_protobuf) {
+    deps += [ "aec_dump:aec_dump_impl" ]
+  } else {
+    deps += [ "aec_dump:null_aec_dump_factory" ]
+  }
 }
 
 rtc_library("voice_detection") {
@@ -213,6 +232,17 @@ rtc_library("voice_detection") {
   ]
 }
 
+rtc_library("optionally_built_submodule_creators") {
+  sources = [
+    "optionally_built_submodule_creators.cc",
+    "optionally_built_submodule_creators.h",
+  ]
+  deps = [
+    "transient:transient_suppressor_api",
+    "transient:transient_suppressor_impl",
+  ]
+}
+
 rtc_source_set("rms_level") {
   visibility = [ "*" ]
   sources = [
@@ -222,8 +252,8 @@ rtc_source_set("rms_level") {
   deps = [
     "../../api:array_view",
     "../../rtc_base:checks",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_library("audio_processing_statistics") {
@@ -232,54 +262,13 @@ rtc_library("audio_processing_statistics") {
     "include/audio_processing_statistics.cc",
     "include/audio_processing_statistics.h",
   ]
-  deps = [
-    "../../rtc_base/system:rtc_export",
-    "//third_party/abseil-cpp/absl/types:optional",
-  ]
+  deps = [ "../../rtc_base/system:rtc_export" ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_source_set("audio_frame_view") {
   sources = [ "include/audio_frame_view.h" ]
   deps = [ "../../api:array_view" ]
-}
-
-rtc_source_set("audio_generator_interface") {
-  visibility = [ "*" ]
-  sources = [ "include/audio_generator.h" ]
-  deps = [
-    ":audio_frame_view",
-    "../../rtc_base:rtc_base_approved",
-    "../../system_wrappers",
-  ]
-}
-
-rtc_library("audio_generator_factory") {
-  visibility = [ "*" ]
-  testonly = true
-  sources = [
-    "include/audio_generator_factory.cc",
-    "include/audio_generator_factory.h",
-  ]
-  deps = [
-    ":audio_generator_interface",
-    ":file_audio_generator",
-    "../../common_audio",
-    "../../rtc_base:rtc_base_approved",
-    "../../system_wrappers",
-  ]
-}
-
-rtc_library("file_audio_generator") {
-  sources = [
-    "audio_generator/file_audio_generator.cc",
-    "audio_generator/file_audio_generator.h",
-  ]
-  deps = [
-    ":audio_generator_interface",
-    "../../common_audio",
-    "../../rtc_base:rtc_base_approved",
-    "../../system_wrappers",
-  ]
 }
 
 if (rtc_enable_protobuf) {
@@ -310,6 +299,7 @@ if (rtc_include_tests) {
     testonly = true
     sources = [ "include/mock_audio_processing.h" ]
     deps = [
+      ":aec_dump_interface",
       ":api",
       ":audio_buffer",
       ":audio_processing",
@@ -359,7 +349,6 @@ if (rtc_include_tests) {
       ":audio_processing",
       ":audioproc_test_utils",
       ":config",
-      ":file_audio_generator_unittests",
       ":high_pass_filter",
       ":mocks",
       ":voice_detection",
@@ -378,10 +367,10 @@ if (rtc_include_tests) {
       "../../rtc_base:rtc_base_tests_utils",
       "../../rtc_base:safe_minmax",
       "../../rtc_base:task_queue_for_test",
+      "../../rtc_base/synchronization:mutex",
       "../../rtc_base/system:arch",
       "../../rtc_base/system:file_wrapper",
       "../../system_wrappers",
-      "../../system_wrappers:cpu_features_api",
       "../../test:fileutils",
       "../../test:rtc_expect_death",
       "../../test:test_support",
@@ -401,8 +390,8 @@ if (rtc_include_tests) {
       "utility:pffft_wrapper_unittest",
       "vad:vad_unittests",
       "//testing/gtest",
-      "//third_party/abseil-cpp/absl/types:optional",
     ]
+    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 
     defines = []
 
@@ -419,6 +408,7 @@ if (rtc_include_tests) {
         ":audioproc_protobuf_utils",
         ":audioproc_test_utils",
         ":audioproc_unittest_proto",
+        ":optionally_built_submodule_creators",
         ":rms_level",
         ":runtime_settings_protobuf_utils",
         "../../api/audio:audio_frame_api",
@@ -427,8 +417,8 @@ if (rtc_include_tests) {
         "../../rtc_base:rtc_task_queue",
         "aec_dump",
         "aec_dump:aec_dump_unittests",
-        "//third_party/abseil-cpp/absl/flags:flag",
       ]
+      absl_deps += [ "//third_party/abseil-cpp/absl/flags:flag" ]
       sources += [
         "audio_processing_impl_locking_unittest.cc",
         "audio_processing_impl_unittest.cc",
@@ -473,22 +463,6 @@ if (rtc_include_tests) {
     ]
   }
 
-  rtc_library("file_audio_generator_unittests") {
-    testonly = true
-
-    sources = [ "audio_generator/file_audio_generator_unittest.cc" ]
-
-    deps = [
-      ":api",
-      ":audio_generator_factory",
-      ":audio_processing",
-      ":file_audio_generator",
-      "../../rtc_base:rtc_base_approved",
-      "../../test:fileutils",
-      "../../test:test_support",
-    ]
-  }
-
   rtc_library("analog_mic_simulation") {
     sources = [
       "test/fake_recording_device.cc",
@@ -502,8 +476,8 @@ if (rtc_include_tests) {
       "../../rtc_base:rtc_base_approved",
       "../../rtc_base:safe_minmax",
       "agc:gain_map",
-      "//third_party/abseil-cpp/absl/types:optional",
     ]
+    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
   }
 
   if (rtc_enable_protobuf) {
@@ -548,47 +522,14 @@ if (rtc_include_tests) {
         "aec_dump",
         "aec_dump:aec_dump_impl",
         "//testing/gtest",
+      ]
+      absl_deps = [
         "//third_party/abseil-cpp/absl/flags:flag",
         "//third_party/abseil-cpp/absl/flags:parse",
         "//third_party/abseil-cpp/absl/strings",
         "//third_party/abseil-cpp/absl/types:optional",
       ]
     }  # audioproc_f_impl
-  }
-
-  rtc_library("audioproc_test_utils") {
-    visibility = [ "*" ]
-    testonly = true
-    sources = [
-      "test/audio_buffer_tools.cc",
-      "test/audio_buffer_tools.h",
-      "test/bitexactness_tools.cc",
-      "test/bitexactness_tools.h",
-      "test/performance_timer.cc",
-      "test/performance_timer.h",
-      "test/simulator_buffers.cc",
-      "test/simulator_buffers.h",
-      "test/test_utils.cc",
-      "test/test_utils.h",
-    ]
-
-    deps = [
-      ":api",
-      ":audio_buffer",
-      ":audio_processing",
-      "../../api:array_view",
-      "../../api/audio:audio_frame_api",
-      "../../common_audio",
-      "../../rtc_base:checks",
-      "../../rtc_base:rtc_base_approved",
-      "../../rtc_base/system:arch",
-      "../../system_wrappers",
-      "../../test:fileutils",
-      "../../test:test_support",
-      "../audio_coding:neteq_input_audio_tools",
-      "//testing/gtest",
-      "//third_party/abseil-cpp/absl/types:optional",
-    ]
   }
 
   if (rtc_enable_protobuf) {
@@ -628,4 +569,43 @@ if (rtc_include_tests) {
       ]
     }
   }
+}
+
+rtc_library("audioproc_test_utils") {
+  visibility = [ "*" ]
+  testonly = true
+  sources = [
+    "test/audio_buffer_tools.cc",
+    "test/audio_buffer_tools.h",
+    "test/audio_processing_builder_for_testing.cc",
+    "test/audio_processing_builder_for_testing.h",
+    "test/bitexactness_tools.cc",
+    "test/bitexactness_tools.h",
+    "test/performance_timer.cc",
+    "test/performance_timer.h",
+    "test/simulator_buffers.cc",
+    "test/simulator_buffers.h",
+    "test/test_utils.cc",
+    "test/test_utils.h",
+  ]
+
+  configs += [ ":apm_debug_dump" ]
+
+  deps = [
+    ":api",
+    ":audio_buffer",
+    ":audio_processing",
+    "../../api:array_view",
+    "../../api/audio:audio_frame_api",
+    "../../common_audio",
+    "../../rtc_base:checks",
+    "../../rtc_base:rtc_base_approved",
+    "../../rtc_base/system:arch",
+    "../../system_wrappers",
+    "../../test:fileutils",
+    "../../test:test_support",
+    "../audio_coding:neteq_input_audio_tools",
+    "//testing/gtest",
+  ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }

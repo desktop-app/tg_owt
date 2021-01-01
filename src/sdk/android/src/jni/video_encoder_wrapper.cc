@@ -41,7 +41,8 @@ VideoEncoderWrapper::VideoEncoderWrapper(JNIEnv* jni,
 
   // Get bitrate limits in the constructor. This is a static property of the
   // encoder and is expected to be available before it is initialized.
-  encoder_info_.resolution_bitrate_limits = GetResolutionBitrateLimits(jni);
+  encoder_info_.resolution_bitrate_limits = JavaToNativeResolutionBitrateLimits(
+      jni, Java_VideoEncoder_getResolutionBitrateLimits(jni, encoder_));
 }
 VideoEncoderWrapper::~VideoEncoderWrapper() = default;
 
@@ -115,7 +116,10 @@ int32_t VideoEncoderWrapper::Release() {
   int32_t status = JavaToNativeVideoCodecStatus(
       jni, Java_VideoEncoder_release(jni, encoder_));
   RTC_LOG(LS_INFO) << "release: " << status;
-  frame_extra_infos_.clear();
+  {
+    MutexLock lock(&frame_extra_infos_lock_);
+    frame_extra_infos_.clear();
+  }
   initialized_ = false;
 
   return status;
@@ -140,7 +144,10 @@ int32_t VideoEncoderWrapper::Encode(
   FrameExtraInfo info;
   info.capture_time_ns = frame.timestamp_us() * rtc::kNumNanosecsPerMicrosec;
   info.timestamp_rtp = frame.timestamp();
-  frame_extra_infos_.push_back(info);
+  {
+    MutexLock lock(&frame_extra_infos_lock_);
+    frame_extra_infos_.push_back(info);
+  }
 
   ScopedJavaLocalRef<jobject> j_frame = NativeToJavaVideoFrame(jni, frame);
   ScopedJavaLocalRef<jobject> ret =
@@ -213,37 +220,6 @@ VideoEncoderWrapper::GetScalingSettingsInternal(JNIEnv* jni) const {
   }
 }
 
-std::vector<VideoEncoder::ResolutionBitrateLimits>
-VideoEncoderWrapper::GetResolutionBitrateLimits(JNIEnv* jni) const {
-  std::vector<VideoEncoder::ResolutionBitrateLimits> resolution_bitrate_limits;
-
-  ScopedJavaLocalRef<jobjectArray> j_bitrate_limits_array =
-      Java_VideoEncoder_getResolutionBitrateLimits(jni, encoder_);
-
-  const jsize num_thresholds =
-      jni->GetArrayLength(j_bitrate_limits_array.obj());
-  for (int i = 0; i < num_thresholds; ++i) {
-    ScopedJavaLocalRef<jobject> j_bitrate_limits = ScopedJavaLocalRef<jobject>(
-        jni, jni->GetObjectArrayElement(j_bitrate_limits_array.obj(), i));
-
-    jint frame_size_pixels =
-        Java_ResolutionBitrateLimits_getFrameSizePixels(jni, j_bitrate_limits);
-    jint min_start_bitrate_bps =
-        Java_ResolutionBitrateLimits_getMinStartBitrateBps(jni,
-                                                           j_bitrate_limits);
-    jint min_bitrate_bps =
-        Java_ResolutionBitrateLimits_getMinBitrateBps(jni, j_bitrate_limits);
-    jint max_bitrate_bps =
-        Java_ResolutionBitrateLimits_getMaxBitrateBps(jni, j_bitrate_limits);
-
-    resolution_bitrate_limits.push_back(VideoEncoder::ResolutionBitrateLimits(
-        frame_size_pixels, min_start_bitrate_bps, min_bitrate_bps,
-        max_bitrate_bps));
-  }
-
-  return resolution_bitrate_limits;
-}
-
 void VideoEncoderWrapper::OnEncodedFrame(
     JNIEnv* jni,
     const JavaRef<jobject>& j_encoded_image) {
@@ -262,19 +238,23 @@ void VideoEncoderWrapper::OnEncodedFrame(
   // entries that don't belong to us, and we need to be careful not to
   // remove them. Removing only those entries older than the current frame
   // provides this guarantee.
-  while (!frame_extra_infos_.empty() &&
-         frame_extra_infos_.front().capture_time_ns < capture_time_ns) {
+  FrameExtraInfo frame_extra_info;
+  {
+    MutexLock lock(&frame_extra_infos_lock_);
+    while (!frame_extra_infos_.empty() &&
+           frame_extra_infos_.front().capture_time_ns < capture_time_ns) {
+      frame_extra_infos_.pop_front();
+    }
+    if (frame_extra_infos_.empty() ||
+        frame_extra_infos_.front().capture_time_ns != capture_time_ns) {
+      RTC_LOG(LS_WARNING)
+          << "Java encoder produced an unexpected frame with timestamp: "
+          << capture_time_ns;
+      return;
+    }
+    frame_extra_info = frame_extra_infos_.front();
     frame_extra_infos_.pop_front();
   }
-  if (frame_extra_infos_.empty() ||
-      frame_extra_infos_.front().capture_time_ns != capture_time_ns) {
-    RTC_LOG(LS_WARNING)
-        << "Java encoder produced an unexpected frame with timestamp: "
-        << capture_time_ns;
-    return;
-  }
-  FrameExtraInfo frame_extra_info = std::move(frame_extra_infos_.front());
-  frame_extra_infos_.pop_front();
 
   // This is a bit subtle. The |frame| variable from the lambda capture is
   // const. Which implies that (i) we need to make a copy to be able to
@@ -287,13 +267,12 @@ void VideoEncoderWrapper::OnEncodedFrame(
   frame_copy.SetTimestamp(frame_extra_info.timestamp_rtp);
   frame_copy.capture_time_ms_ = capture_time_ns / rtc::kNumNanosecsPerMillisec;
 
-  RTPFragmentationHeader header = ParseFragmentationHeader(frame);
   if (frame_copy.qp_ < 0)
     frame_copy.qp_ = ParseQp(frame);
 
   CodecSpecificInfo info(ParseCodecSpecificInfo(frame));
 
-  callback_->OnEncodedImage(frame_copy, &info, &header);
+  callback_->OnEncodedImage(frame_copy, &info);
 }
 
 int32_t VideoEncoderWrapper::HandleReturnCode(JNIEnv* jni,
@@ -381,6 +360,7 @@ int VideoEncoderWrapper::ParseQp(rtc::ArrayView<const uint8_t> buffer) {
       success = vp9::GetQp(buffer.data(), buffer.size(), &qp);
       break;
     case kVideoCodecH264:
+      h264_bitstream_parser_.ParseBitstream(buffer.data(), buffer.size());
       success = h264_bitstream_parser_.GetLastSliceQp(&qp);
       break;
 #ifndef DISABLE_H265
@@ -423,7 +403,6 @@ CodecSpecificInfo VideoEncoderWrapper::ParseCodecSpecificInfo(
           static_cast<uint8_t>(gof_idx_++ % gof_.num_frames_in_gof);
       info.codecSpecific.VP9.num_spatial_layers = 1;
       info.codecSpecific.VP9.first_frame_in_picture = true;
-      info.codecSpecific.VP9.end_of_picture = true;
       info.codecSpecific.VP9.spatial_layer_resolution_present = false;
       if (info.codecSpecific.VP9.ss_data_available) {
         info.codecSpecific.VP9.spatial_layer_resolution_present = true;
@@ -480,6 +459,35 @@ std::unique_ptr<VideoEncoder> JavaToNativeVideoEncoder(
 
 bool IsHardwareVideoEncoder(JNIEnv* jni, const JavaRef<jobject>& j_encoder) {
   return Java_VideoEncoder_isHardwareEncoder(jni, j_encoder);
+}
+
+std::vector<VideoEncoder::ResolutionBitrateLimits>
+JavaToNativeResolutionBitrateLimits(
+    JNIEnv* jni,
+    const JavaRef<jobjectArray>& j_bitrate_limits_array) {
+  std::vector<VideoEncoder::ResolutionBitrateLimits> resolution_bitrate_limits;
+
+  const jsize array_length = jni->GetArrayLength(j_bitrate_limits_array.obj());
+  for (int i = 0; i < array_length; ++i) {
+    ScopedJavaLocalRef<jobject> j_bitrate_limits = ScopedJavaLocalRef<jobject>(
+        jni, jni->GetObjectArrayElement(j_bitrate_limits_array.obj(), i));
+
+    jint frame_size_pixels =
+        Java_ResolutionBitrateLimits_getFrameSizePixels(jni, j_bitrate_limits);
+    jint min_start_bitrate_bps =
+        Java_ResolutionBitrateLimits_getMinStartBitrateBps(jni,
+                                                           j_bitrate_limits);
+    jint min_bitrate_bps =
+        Java_ResolutionBitrateLimits_getMinBitrateBps(jni, j_bitrate_limits);
+    jint max_bitrate_bps =
+        Java_ResolutionBitrateLimits_getMaxBitrateBps(jni, j_bitrate_limits);
+
+    resolution_bitrate_limits.push_back(VideoEncoder::ResolutionBitrateLimits(
+        frame_size_pixels, min_start_bitrate_bps, min_bitrate_bps,
+        max_bitrate_bps));
+  }
+
+  return resolution_bitrate_limits;
 }
 
 }  // namespace jni

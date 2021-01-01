@@ -215,29 +215,23 @@ void Aec3ConfigFromJsonString(absl::string_view json_string,
   }
 
   if (rtc::GetValueFromJsonObject(aec3_root, "filter", &section)) {
-    ReadParam(section, "main", &cfg.filter.main);
     ReadParam(section, "refined", &cfg.filter.refined);
-    ReadParam(section, "shadow", &cfg.filter.shadow);
     ReadParam(section, "coarse", &cfg.filter.coarse);
-    ReadParam(section, "main_initial", &cfg.filter.main_initial);
     ReadParam(section, "refined_initial", &cfg.filter.refined_initial);
-    ReadParam(section, "shadow_initial", &cfg.filter.shadow_initial);
     ReadParam(section, "coarse_initial", &cfg.filter.coarse_initial);
     ReadParam(section, "config_change_duration_blocks",
               &cfg.filter.config_change_duration_blocks);
     ReadParam(section, "initial_state_seconds",
               &cfg.filter.initial_state_seconds);
+    ReadParam(section, "coarse_reset_hangover_blocks",
+              &cfg.filter.coarse_reset_hangover_blocks);
     ReadParam(section, "conservative_initial_phase",
               &cfg.filter.conservative_initial_phase);
-    ReadParam(section, "enable_shadow_filter_output_usage",
-              &cfg.filter.enable_shadow_filter_output_usage);
     ReadParam(section, "enable_coarse_filter_output_usage",
               &cfg.filter.enable_coarse_filter_output_usage);
     ReadParam(section, "use_linear_filter", &cfg.filter.use_linear_filter);
     ReadParam(section, "export_linear_aec_output",
               &cfg.filter.export_linear_aec_output);
-    ReadParam(section, "use_legacy_filter_naming",
-              &cfg.filter.use_legacy_filter_naming);
   }
 
   if (rtc::GetValueFromJsonObject(aec3_root, "erle", &section)) {
@@ -310,6 +304,8 @@ void Aec3ConfigFromJsonString(absl::string_view json_string,
               &cfg.echo_model.render_pre_window_size);
     ReadParam(section, "render_post_window_size",
               &cfg.echo_model.render_post_window_size);
+    ReadParam(section, "model_reverb_in_nonlinear_mode",
+              &cfg.echo_model.model_reverb_in_nonlinear_mode);
   }
 
   if (rtc::GetValueFromJsonObject(aec3_root, "comfort_noise", &section)) {
@@ -389,6 +385,8 @@ void Aec3ConfigFromJsonString(absl::string_view json_string,
 
     ReadParam(section, "floor_first_increase",
               &cfg.suppressor.floor_first_increase);
+    ReadParam(section, "conservative_hf_suppression",
+              &cfg.suppressor.conservative_hf_suppression);
   }
 }
 
@@ -471,14 +469,6 @@ std::string Aec3ConfigToJsonString(const EchoCanceller3Config& config) {
   ost << "},";
 
   ost << "\"filter\": {";
-  ost << "\"main\": [";
-  ost << config.filter.main.length_blocks << ",";
-  ost << config.filter.main.leakage_converged << ",";
-  ost << config.filter.main.leakage_diverged << ",";
-  ost << config.filter.main.error_floor << ",";
-  ost << config.filter.main.error_ceil << ",";
-  ost << config.filter.main.noise_gate;
-  ost << "],";
 
   ost << "\"refined\": [";
   ost << config.filter.refined.length_blocks << ",";
@@ -489,25 +479,10 @@ std::string Aec3ConfigToJsonString(const EchoCanceller3Config& config) {
   ost << config.filter.refined.noise_gate;
   ost << "],";
 
-  ost << "\"shadow\": [";
-  ost << config.filter.shadow.length_blocks << ",";
-  ost << config.filter.shadow.rate << ",";
-  ost << config.filter.shadow.noise_gate;
-  ost << "],";
-
   ost << "\"coarse\": [";
   ost << config.filter.coarse.length_blocks << ",";
   ost << config.filter.coarse.rate << ",";
   ost << config.filter.coarse.noise_gate;
-  ost << "],";
-
-  ost << "\"main_initial\": [";
-  ost << config.filter.main_initial.length_blocks << ",";
-  ost << config.filter.main_initial.leakage_converged << ",";
-  ost << config.filter.main_initial.leakage_diverged << ",";
-  ost << config.filter.main_initial.error_floor << ",";
-  ost << config.filter.main_initial.error_ceil << ",";
-  ost << config.filter.main_initial.noise_gate;
   ost << "],";
 
   ost << "\"refined_initial\": [";
@@ -517,12 +492,6 @@ std::string Aec3ConfigToJsonString(const EchoCanceller3Config& config) {
   ost << config.filter.refined_initial.error_floor << ",";
   ost << config.filter.refined_initial.error_ceil << ",";
   ost << config.filter.refined_initial.noise_gate;
-  ost << "],";
-
-  ost << "\"shadow_initial\": [";
-  ost << config.filter.shadow_initial.length_blocks << ",";
-  ost << config.filter.shadow_initial.rate << ",";
-  ost << config.filter.shadow_initial.noise_gate;
   ost << "],";
 
   ost << "\"coarse_initial\": [";
@@ -535,20 +504,17 @@ std::string Aec3ConfigToJsonString(const EchoCanceller3Config& config) {
       << config.filter.config_change_duration_blocks << ",";
   ost << "\"initial_state_seconds\": " << config.filter.initial_state_seconds
       << ",";
+  ost << "\"coarse_reset_hangover_blocks\": "
+      << config.filter.coarse_reset_hangover_blocks << ",";
   ost << "\"conservative_initial_phase\": "
       << (config.filter.conservative_initial_phase ? "true" : "false") << ",";
-  ost << "\"enable_shadow_filter_output_usage\": "
-      << (config.filter.enable_shadow_filter_output_usage ? "true" : "false")
-      << ",";
   ost << "\"enable_coarse_filter_output_usage\": "
       << (config.filter.enable_coarse_filter_output_usage ? "true" : "false")
       << ",";
   ost << "\"use_linear_filter\": "
       << (config.filter.use_linear_filter ? "true" : "false") << ",";
   ost << "\"export_linear_aec_output\": "
-      << (config.filter.export_linear_aec_output ? "true" : "false") << ",";
-  ost << "\"use_legacy_filter_naming\": "
-      << (config.filter.use_legacy_filter_naming ? "true" : "false");
+      << (config.filter.export_linear_aec_output ? "true" : "false");
 
   ost << "},";
 
@@ -627,7 +593,9 @@ std::string Aec3ConfigToJsonString(const EchoCanceller3Config& config) {
   ost << "\"render_pre_window_size\": "
       << config.echo_model.render_pre_window_size << ",";
   ost << "\"render_post_window_size\": "
-      << config.echo_model.render_post_window_size;
+      << config.echo_model.render_post_window_size << ",";
+  ost << "\"model_reverb_in_nonlinear_mode\": "
+      << (config.echo_model.model_reverb_in_nonlinear_mode ? "true" : "false");
   ost << "},";
 
   ost << "\"comfort_noise\": {";
@@ -714,7 +682,10 @@ std::string Aec3ConfigToJsonString(const EchoCanceller3Config& config) {
   ost << "\"anti_howling_gain\": "
       << config.suppressor.high_bands_suppression.anti_howling_gain;
   ost << "},";
-  ost << "\"floor_first_increase\": " << config.suppressor.floor_first_increase;
+  ost << "\"floor_first_increase\": " << config.suppressor.floor_first_increase
+      << ",";
+  ost << "\"conservative_hf_suppression\": "
+      << config.suppressor.conservative_hf_suppression;
   ost << "}";
   ost << "}";
   ost << "}";

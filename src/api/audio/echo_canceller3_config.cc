@@ -118,25 +118,6 @@ bool EchoCanceller3Config::Validate(EchoCanceller3Config* config) {
   res = res & Limit(&c->delay.delay_selection_thresholds.initial, 1, 250);
   res = res & Limit(&c->delay.delay_selection_thresholds.converged, 1, 250);
 
-  res = res & FloorLimit(&c->filter.main.length_blocks, 1);
-  res = res & Limit(&c->filter.main.leakage_converged, 0.f, 1000.f);
-  res = res & Limit(&c->filter.main.leakage_diverged, 0.f, 1000.f);
-  res = res & Limit(&c->filter.main.error_floor, 0.f, 1000.f);
-  res = res & Limit(&c->filter.main.error_ceil, 0.f, 100000000.f);
-  res = res & Limit(&c->filter.main.noise_gate, 0.f, 100000000.f);
-
-  res = res & FloorLimit(&c->filter.main_initial.length_blocks, 1);
-  res = res & Limit(&c->filter.main_initial.leakage_converged, 0.f, 1000.f);
-  res = res & Limit(&c->filter.main_initial.leakage_diverged, 0.f, 1000.f);
-  res = res & Limit(&c->filter.main_initial.error_floor, 0.f, 1000.f);
-  res = res & Limit(&c->filter.main_initial.error_ceil, 0.f, 100000000.f);
-  res = res & Limit(&c->filter.main_initial.noise_gate, 0.f, 100000000.f);
-
-  if (c->filter.main.length_blocks < c->filter.main_initial.length_blocks) {
-    c->filter.main_initial.length_blocks = c->filter.main.length_blocks;
-    res = false;
-  }
-
   res = res & FloorLimit(&c->filter.refined.length_blocks, 1);
   res = res & Limit(&c->filter.refined.leakage_converged, 0.f, 1000.f);
   res = res & Limit(&c->filter.refined.leakage_diverged, 0.f, 1000.f);
@@ -157,19 +138,6 @@ bool EchoCanceller3Config::Validate(EchoCanceller3Config* config) {
     res = false;
   }
 
-  res = res & FloorLimit(&c->filter.shadow.length_blocks, 1);
-  res = res & Limit(&c->filter.shadow.rate, 0.f, 1.f);
-  res = res & Limit(&c->filter.shadow.noise_gate, 0.f, 100000000.f);
-
-  res = res & FloorLimit(&c->filter.shadow_initial.length_blocks, 1);
-  res = res & Limit(&c->filter.shadow_initial.rate, 0.f, 1.f);
-  res = res & Limit(&c->filter.shadow_initial.noise_gate, 0.f, 100000000.f);
-
-  if (c->filter.shadow.length_blocks < c->filter.shadow_initial.length_blocks) {
-    c->filter.shadow_initial.length_blocks = c->filter.shadow.length_blocks;
-    res = false;
-  }
-
   res = res & FloorLimit(&c->filter.coarse.length_blocks, 1);
   res = res & Limit(&c->filter.coarse.rate, 0.f, 1.f);
   res = res & Limit(&c->filter.coarse.noise_gate, 0.f, 100000000.f);
@@ -185,6 +153,7 @@ bool EchoCanceller3Config::Validate(EchoCanceller3Config* config) {
 
   res = res & Limit(&c->filter.config_change_duration_blocks, 0, 100000);
   res = res & Limit(&c->filter.initial_state_seconds, 0.f, 100.f);
+  res = res & Limit(&c->filter.coarse_reset_hangover_blocks, 0, 2500);
 
   res = res & Limit(&c->erle.min, 1.f, 100000.f);
   res = res & Limit(&c->erle.max_l, 1.f, 100000.f);
@@ -193,7 +162,6 @@ bool EchoCanceller3Config::Validate(EchoCanceller3Config* config) {
     c->erle.min = std::min(c->erle.max_l, c->erle.max_h);
     res = false;
   }
-  res = res & Limit(&c->erle.num_sections, 1, c->filter.main.length_blocks);
   res = res & Limit(&c->erle.num_sections, 1, c->filter.refined.length_blocks);
 
   res = res & Limit(&c->ep_strength.default_gain, 0.f, 1000000.f);
