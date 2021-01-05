@@ -34,7 +34,17 @@ set(third_party_loc ${webrtc_loc}/third_party)
 include(GNUInstallDirs)
 set(webrtc_includedir ${CMAKE_INSTALL_INCLUDEDIR}/tg_owt)
 
-include(cmake/arch.cmake)
+if (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+    set(is_aarch64 1)
+    set(arm_use_neon 1)
+else()
+    if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+        set(is_x64 1)
+    else()
+        include(cmake/arch.cmake)
+    endif()
+endif()
+
 include(cmake/nice_target_sources.cmake)
 include(cmake/init_target.cmake)
 include(cmake/target_yasm_sources.cmake)
@@ -1961,18 +1971,19 @@ PRIVATE
     stats/rtc_stats.cc
     stats/rtcstats_objects.cc
 )
-
-add_sublibrary(avx2
-    modules/audio_processing/aec3/adaptive_fir_filter_avx2.cc
-    modules/audio_processing/aec3/adaptive_fir_filter_erl_avx2.cc
-    modules/audio_processing/aec3/fft_data_avx2.cc
-    modules/audio_processing/aec3/matched_filter_avx2.cc
-    modules/audio_processing/agc2/rnn_vad/vector_math_avx2.cc
-    modules/audio_processing/aec3/vector_math_avx2.cc
-    common_audio/resampler/sinc_resampler_avx2.cc
-    common_audio/fir_filter_avx2.cc
-    common_audio/fir_filter_avx2.h
-)
+if (NOT arm_use_neon)
+    add_sublibrary(avx2
+        modules/audio_processing/aec3/adaptive_fir_filter_avx2.cc
+        modules/audio_processing/aec3/adaptive_fir_filter_erl_avx2.cc
+        modules/audio_processing/aec3/fft_data_avx2.cc
+        modules/audio_processing/aec3/matched_filter_avx2.cc
+        modules/audio_processing/agc2/rnn_vad/vector_math_avx2.cc
+        modules/audio_processing/aec3/vector_math_avx2.cc
+        common_audio/resampler/sinc_resampler_avx2.cc
+        common_audio/fir_filter_avx2.cc
+        common_audio/fir_filter_avx2.h
+    )
+endif()
 
 if (NOT TG_OWT_USE_PROTOBUF)
     remove_target_sources(tg_owt ${webrtc_loc}
@@ -2002,6 +2013,8 @@ if ((NOT is_x86) AND (NOT is_x64))
         common_audio/resampler/sinc_resampler_sse.cc
         modules/audio_processing/utility/ooura_fft_sse2.cc
         modules/video_processing/util/denoiser_filter_sse2.cc
+        common_audio/third_party/ooura/fft_size_128/ooura_fft_sse2.cc
+        common_audio/third_party/ooura/fft_size_128/ooura_fft_tables_neon_sse2.h
     )
 endif()
 

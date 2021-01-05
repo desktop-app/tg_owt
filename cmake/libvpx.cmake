@@ -35,6 +35,10 @@ elseif (APPLE)
         list(APPEND include_directories
             ${libvpx_loc}/source/config/mac/x64
         )
+    elseif (is_aarch64)
+        list(APPEND include_directories
+            ${libvpx_loc}/source/config/linux/arm64
+        )
     else()
         message(FATAL_ERROR "Unsupported CPU architecture on Apple devices.")
     endif()
