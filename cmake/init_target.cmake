@@ -111,7 +111,7 @@ function(init_feature_target target_name feature)
         elseif (${feature} STREQUAL "avx")
             set(option -mavx)
         elseif (${feature} STREQUAL "avx2")
-            set(option -mavx2)
+            set(option -mavx2 -mfma)
         endif()
         target_compile_options(${target_name}
         PRIVATE

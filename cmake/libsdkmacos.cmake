@@ -101,6 +101,8 @@ PRIVATE
     helpers/RTCDispatcher.h
     helpers/RTCDispatcher.m
     helpers/scoped_cftyperef.h
+    native/api/network_monitor_factory.h
+    native/api/network_monitor_factory.mm
     native/api/video_capturer.h
     native/api/video_capturer.mm
     native/api/video_decoder_factory.h

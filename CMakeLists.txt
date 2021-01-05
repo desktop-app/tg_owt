@@ -71,6 +71,7 @@ if (is_x86 OR is_x64)
     PUBLIC
         tg_owt::libwebrtcbuild
     PRIVATE
+        tg_owt::tg_owt_avx2
         tg_owt::libabsl
         tg_owt::libopenh264
         tg_owt::libpffft
@@ -131,6 +132,29 @@ if (UNIX AND NOT APPLE)
     link_libpulse(tg_owt)
     link_dl(tg_owt)
 endif()
+
+function(add_sublibrary postfix)
+    add_library(tg_owt_${postfix} OBJECT)
+    init_feature_target(tg_owt_${postfix} ${postfix})
+    add_library(tg_owt::tg_owt_${postfix} ALIAS tg_owt_${postfix})
+    target_link_libraries(tg_owt_${postfix}
+    PUBLIC
+        tg_owt::libwebrtcbuild
+    PRIVATE
+        tg_owt::libabsl
+    )
+    target_include_directories(tg_owt_${postfix}
+    PUBLIC
+        $<BUILD_INTERFACE:${webrtc_loc}>
+        $<INSTALL_INTERFACE:${webrtc_includedir}>
+    )
+    set(sources_list ${ARGV})
+    list(REMOVE_AT sources_list 0)
+    nice_target_sources(tg_owt_${postfix} ${webrtc_loc}
+    PRIVATE
+        ${sources_list}
+    )
+endfunction()
 
 nice_target_sources(tg_owt ${webrtc_loc}
 PRIVATE
@@ -1041,13 +1065,8 @@ PRIVATE
     modules/audio_processing/aec3/subtractor_output_analyzer.cc
     modules/audio_processing/aec3/suppression_filter.cc
     modules/audio_processing/aec3/suppression_gain.cc
-    modules/audio_processing/aec3/adaptive_fir_filter_avx2.cc
-    modules/audio_processing/aec3/adaptive_fir_filter_erl_avx2.cc
     modules/audio_processing/aec3/transparent_mode.cc
     modules/audio_processing/aec3/transparent_mode.h
-    modules/audio_processing/aec3/fft_data_avx2.cc
-    modules/audio_processing/aec3/matched_filter_avx2.cc
-    modules/audio_processing/aec3/vector_math_avx2.cc
     modules/audio_processing/aec_dump/null_aec_dump_factory.cc
     modules/audio_processing/aecm/aecm_core.cc
     modules/audio_processing/aecm/aecm_core_c.cc
@@ -1094,7 +1113,6 @@ PRIVATE
     modules/audio_processing/agc2/rnn_vad/rnn_fc.h
     modules/audio_processing/agc2/rnn_vad/rnn_gru.cc
     modules/audio_processing/agc2/rnn_vad/rnn_gru.h
-    modules/audio_processing/agc2/rnn_vad/vector_math_avx2.cc
     modules/audio_processing/audio_processing_impl.cc
     modules/audio_processing/audio_processing_impl.h
     modules/audio_processing/audio_processing_builder_impl.cc
@@ -1574,9 +1592,6 @@ PRIVATE
     common_audio/fir_filter_neon.h
     common_audio/fir_filter_sse.cc
     common_audio/fir_filter_sse.h
-    common_audio/fir_filter_avx2.cc
-    common_audio/fir_filter_avx2.h
-    common_audio/resampler/sinc_resampler_avx2.cc
     common_audio/real_fourier.cc
     common_audio/real_fourier_ooura.cc
     common_audio/resampler/push_resampler.cc
@@ -1947,6 +1962,18 @@ PRIVATE
     stats/rtcstats_objects.cc
 )
 
+add_sublibrary(avx2
+    modules/audio_processing/aec3/adaptive_fir_filter_avx2.cc
+    modules/audio_processing/aec3/adaptive_fir_filter_erl_avx2.cc
+    modules/audio_processing/aec3/fft_data_avx2.cc
+    modules/audio_processing/aec3/matched_filter_avx2.cc
+    modules/audio_processing/agc2/rnn_vad/vector_math_avx2.cc
+    modules/audio_processing/aec3/vector_math_avx2.cc
+    common_audio/resampler/sinc_resampler_avx2.cc
+    common_audio/fir_filter_avx2.cc
+    common_audio/fir_filter_avx2.h
+)
+
 if (NOT TG_OWT_USE_PROTOBUF)
     remove_target_sources(tg_owt ${webrtc_loc}
         logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.cc
@@ -2062,8 +2089,16 @@ if (is_x86 OR is_x64)
     )
 endif()
 
+set(tg_owt_export tg_owt)
+if (is_x86 OR is_x64)
+    set(tg_owt_export
+        tg_owt
+        tg_owt_avx2
+    )
+endif()
+
 set(export_targets
-    tg_owt
+    ${tg_owt_export}
     libabsl
     libopenh264
     libpffft
