@@ -71,6 +71,11 @@ PRIVATE
     components/renderer/opengl/RTCDefaultShader.mm
     components/renderer/opengl/RTCI420TextureCache.h
     components/renderer/opengl/RTCI420TextureCache.mm
+    components/renderer/metal/RTCMTLI420Renderer.h
+    components/renderer/metal/RTCMTLI420Renderer.mm
+    components/renderer/metal/RTCMTLRenderer+Private.h
+    components/renderer/metal/RTCMTLRenderer.h
+    components/renderer/metal/RTCMTLRenderer.mm
     base/RTCCodecSpecificInfo.h
     base/RTCEncodedImage.h
     base/RTCEncodedImage.m
