@@ -65,6 +65,12 @@ PRIVATE
     components/video_codec/helpers.h
     components/video_codec/nalu_rewriter.cc
     components/video_codec/nalu_rewriter.h
+    components/renderer/opengl/RTCShader.h
+    components/renderer/opengl/RTCShader.mm
+    components/renderer/opengl/RTCDefaultShader.h
+    components/renderer/opengl/RTCDefaultShader.mm
+    components/renderer/opengl/RTCI420TextureCache.h
+    components/renderer/opengl/RTCI420TextureCache.mm
     base/RTCCodecSpecificInfo.h
     base/RTCEncodedImage.h
     base/RTCEncodedImage.m

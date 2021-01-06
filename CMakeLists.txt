@@ -1201,12 +1201,12 @@ PRIVATE
     modules/audio_processing/utility/delay_estimator.cc
     modules/audio_processing/utility/delay_estimator_wrapper.cc
     modules/audio_processing/utility/pffft_wrapper.cc
-    # modules/audio_processing/utility/ooura_fft.cc
-    # modules/audio_processing/utility/ooura_fft.h
-    # modules/audio_processing/utility/ooura_fft_tables_common.h
-    # modules/audio_processing/utility/ooura_fft_neon.cc
-    # modules/audio_processing/utility/ooura_fft_sse2.cc
-    # modules/audio_processing/utility/ooura_fft_tables_neon_sse2.h
+    #modules/audio_processing/utility/ooura_fft.cc
+    #modules/audio_processing/utility/ooura_fft.h
+    #modules/audio_processing/utility/ooura_fft_tables_common.h
+    #modules/audio_processing/utility/ooura_fft_neon.cc
+    #modules/audio_processing/utility/ooura_fft_sse2.cc
+    #modules/audio_processing/utility/ooura_fft_tables_neon_sse2.h
     modules/audio_processing/vad/gmm.cc
     modules/audio_processing/vad/pitch_based_vad.cc
     modules/audio_processing/vad/pitch_internal.cc
@@ -1658,6 +1658,8 @@ PRIVATE
     common_audio/third_party/ooura/fft_size_128/ooura_fft.h
     common_audio/third_party/ooura/fft_size_128/ooura_fft_sse2.cc
     common_audio/third_party/ooura/fft_size_128/ooura_fft_tables_neon_sse2.h
+    common_audio/third_party/ooura/fft_size_128/ooura_fft_tables_common.h
+    common_audio/third_party/ooura/fft_size_128/ooura_fft_neon.cc
     common_audio/third_party/ooura/fft_size_256/fft4g.cc
     common_audio/third_party/ooura/fft_size_256/fft4g.h
     common_audio/vad/vad_core.c
@@ -1887,90 +1889,95 @@ PRIVATE
     modules/remote_bitrate_estimator/remote_estimator_proxy.cc
     sdk/media_constraints.cc
 
-    # sdk/android/native_api/audio_device_module/audio_device_android.cc
-    # sdk/android/native_api/base/init.cc
-    # sdk/android/native_api/codecs/wrapper.cc
-    # sdk/android/native_api/jni/class_loader.cc
-    # sdk/android/native_api/jni/java_types.cc
-    # sdk/android/native_api/jni/jvm.cc
-    # sdk/android/native_api/peerconnection/peer_connection_factory.cc
-    # sdk/android/native_api/stacktrace/stacktrace.cc
-    # sdk/android/native_api/video/video_source.cc
-    # sdk/android/native_api/video/wrapper.cc
-    # sdk/android/native_api/network_monitor/network_monitor.cc
-    # sdk/android/src/jni/android_histogram.cc
-    # sdk/android/src/jni/android_metrics.cc
-    # sdk/android/src/jni/android_network_monitor.cc
-    # sdk/android/src/jni/android_video_track_source.cc
-    # sdk/android/src/jni/audio_device/audio_device_module.cc
-    # sdk/android/src/jni/audio_device/audio_record_jni.cc
-    # sdk/android/src/jni/audio_device/audio_track_jni.cc
-    # sdk/android/src/jni/audio_device/java_audio_device_module.cc
-    # sdk/android/src/jni/audio_device/opensles_common.cc
-    # sdk/android/src/jni/audio_device/opensles_player.cc
-    # sdk/android/src/jni/audio_device/opensles_recorder.cc
-    # sdk/android/src/jni/builtin_audio_decoder_factory_factory.cc
-    # sdk/android/src/jni/builtin_audio_encoder_factory_factory.cc
-    # sdk/android/src/jni/encoded_image.cc
-    # sdk/android/src/jni/h264_utils.cc
-    # sdk/android/src/jni/java_i420_buffer.cc
-    # sdk/android/src/jni/jni_common.cc
-    # sdk/android/src/jni/jni_generator_helper.cc
-    # sdk/android/src/jni/jni_helpers.cc
-    # sdk/android/src/jni/jvm.cc
-    # sdk/android/src/jni/logging/log_sink.cc
-    # sdk/android/src/jni/native_capturer_observer.cc
-    # sdk/android/src/jni/nv12_buffer.cc
-    # sdk/android/src/jni/nv21_buffer.cc
-    # sdk/android/src/jni/pc/audio.cc
-    # sdk/android/src/jni/pc/audio_track.cc
-    # sdk/android/src/jni/pc/call_session_file_rotating_log_sink.cc
-    # sdk/android/src/jni/pc/crypto_options.cc
-    # sdk/android/src/jni/pc/data_channel.cc
-    # sdk/android/src/jni/pc/dtmf_sender.cc
-    # sdk/android/src/jni/pc/ice_candidate.cc
-    # sdk/android/src/jni/pc/logging.cc
-    # sdk/android/src/jni/pc/media_constraints.cc
-    # sdk/android/src/jni/pc/media_source.cc
-    # sdk/android/src/jni/pc/media_stream.cc
-    # sdk/android/src/jni/pc/media_stream_track.cc
-    # sdk/android/src/jni/pc/owned_factory_and_threads.cc
-    # sdk/android/src/jni/pc/peer_connection.cc
-    # sdk/android/src/jni/pc/peer_connection_factory.cc
-    # sdk/android/src/jni/pc/rtc_certificate.cc
-    # sdk/android/src/jni/pc/rtc_stats_collector_callback_wrapper.cc
-    # sdk/android/src/jni/pc/rtp_parameters.cc
-    # sdk/android/src/jni/pc/rtp_receiver.cc
-    # sdk/android/src/jni/pc/rtp_sender.cc
-    # sdk/android/src/jni/pc/rtp_transceiver.cc
-    # sdk/android/src/jni/pc/sdp_observer.cc
-    # sdk/android/src/jni/pc/session_description.cc
-    # sdk/android/src/jni/pc/ssl_certificate_verifier_wrapper.cc
-    # sdk/android/src/jni/pc/stats_observer.cc
-    # sdk/android/src/jni/pc/turn_customizer.cc
-    # sdk/android/src/jni/pc/video.cc
-    # sdk/android/src/jni/scoped_java_ref_counted.cc
-    # sdk/android/src/jni/timestamp_aligner.cc
-    # sdk/android/src/jni/video_codec_info.cc
-    # sdk/android/src/jni/video_codec_status.cc
-    # sdk/android/src/jni/video_decoder_factory_wrapper.cc
-    # sdk/android/src/jni/video_decoder_fallback.cc
-    # sdk/android/src/jni/video_decoder_wrapper.cc
-    # sdk/android/src/jni/video_encoder_factory_wrapper.cc
-    # sdk/android/src/jni/video_encoder_fallback.cc
-    # sdk/android/src/jni/video_encoder_wrapper.cc
-    # sdk/android/src/jni/video_frame.cc
-    # sdk/android/src/jni/video_sink.cc
-    # sdk/android/src/jni/video_track.cc
-    # sdk/android/src/jni/vp8_codec.cc
-    # sdk/android/src/jni/vp9_codec.cc
-    # sdk/android/src/jni/wrapped_native_i420_buffer.cc
-    # sdk/android/src/jni/yuv_helper.cc
+
+    modules/desktop_capture/mac/desktop_configuration.mm
+    modules/desktop_capture/mac/desktop_frame_cgimage.h
+    modules/desktop_capture/mac/desktop_frame_cgimage.mm
+    modules/desktop_capture/mac/desktop_frame_iosurface.h
+    modules/desktop_capture/mac/desktop_frame_iosurface.mm
+    modules/desktop_capture/mac/desktop_frame_provider.h
+    modules/desktop_capture/mac/desktop_frame_provider.mm
+    modules/desktop_capture/mac/screen_capturer_mac.h
+    modules/desktop_capture/mac/screen_capturer_mac.mm
+    modules/desktop_capture/mouse_cursor_monitor_mac.mm
+    modules/desktop_capture/screen_capturer_darwin.mm
+    modules/desktop_capture/window_capturer_mac.mm
+    modules/desktop_capture/window_finder_mac.h
+    modules/desktop_capture/window_finder_mac.mm
+
+    modules/desktop_capture/blank_detector_desktop_capturer_wrapper.cc
+    modules/desktop_capture/blank_detector_desktop_capturer_wrapper.h
+    modules/desktop_capture/cropped_desktop_frame.cc
+    modules/desktop_capture/cropped_desktop_frame.h
+    modules/desktop_capture/cropping_window_capturer.cc
+    modules/desktop_capture/cropping_window_capturer.h
+    modules/desktop_capture/desktop_and_cursor_composer.cc
+    modules/desktop_capture/desktop_and_cursor_composer.h
+    modules/desktop_capture/desktop_capture_options.cc
+    modules/desktop_capture/desktop_capture_options.h
+    modules/desktop_capture/desktop_capturer.cc
+    modules/desktop_capture/desktop_capturer.h
+    modules/desktop_capture/desktop_capturer_differ_wrapper.cc
+    modules/desktop_capture/desktop_capturer_differ_wrapper.h
+    modules/desktop_capture/desktop_capturer_wrapper.cc
+    modules/desktop_capture/desktop_capturer_wrapper.h
+    modules/desktop_capture/desktop_frame_generator.cc
+    modules/desktop_capture/desktop_frame_generator.h
+    modules/desktop_capture/desktop_frame_rotation.cc
+    modules/desktop_capture/desktop_frame_rotation.h
+    modules/desktop_capture/differ_block.cc
+    modules/desktop_capture/differ_block.h
+    modules/desktop_capture/fake_desktop_capturer.cc
+    modules/desktop_capture/fake_desktop_capturer.h
+    modules/desktop_capture/fallback_desktop_capturer_wrapper.cc
+    modules/desktop_capture/fallback_desktop_capturer_wrapper.h
+    modules/desktop_capture/full_screen_application_handler.cc
+    modules/desktop_capture/full_screen_application_handler.h
+    modules/desktop_capture/full_screen_window_detector.cc
+    modules/desktop_capture/full_screen_window_detector.h
+    modules/desktop_capture/mouse_cursor.cc
+    modules/desktop_capture/mouse_cursor.h
+    modules/desktop_capture/mouse_cursor_monitor.h
+    modules/desktop_capture/resolution_tracker.cc
+    modules/desktop_capture/resolution_tracker.h
+    modules/desktop_capture/rgba_color.cc
+    modules/desktop_capture/rgba_color.h
+    modules/desktop_capture/screen_capture_frame_queue.h
+    modules/desktop_capture/screen_capturer_helper.cc
+    modules/desktop_capture/screen_capturer_helper.h
+    modules/desktop_capture/window_finder.cc
+    modules/desktop_capture/window_finder.h
+    
+    #primitives
+    modules/desktop_capture/desktop_capture_types.h
+    modules/desktop_capture/desktop_frame.cc
+    modules/desktop_capture/desktop_frame.h
+    modules/desktop_capture/desktop_geometry.cc
+    modules/desktop_capture/desktop_geometry.h
+    modules/desktop_capture/desktop_region.cc
+    modules/desktop_capture/desktop_region.h
+    modules/desktop_capture/shared_desktop_frame.cc
+    modules/desktop_capture/shared_desktop_frame.h
+    modules/desktop_capture/shared_memory.cc
+    modules/desktop_capture/shared_memory.h
+    
+    #mac specific //41
+    modules/desktop_capture/mac/desktop_configuration.h
+    modules/desktop_capture/mac/desktop_configuration_monitor.cc
+    modules/desktop_capture/mac/desktop_configuration_monitor.h
+    modules/desktop_capture/mac/full_screen_mac_application_handler.cc
+    modules/desktop_capture/mac/full_screen_mac_application_handler.h
+    modules/desktop_capture/mac/window_list_utils.cc
+    modules/desktop_capture/mac/window_list_utils.h
 
     stats/rtc_stats_report.cc
     stats/rtc_stats.cc
     stats/rtcstats_objects.cc
+    
+    #neon
+    
 )
+
 if (NOT arm_use_neon)
     add_sublibrary(avx2
         modules/audio_processing/aec3/adaptive_fir_filter_avx2.cc
@@ -1980,8 +1987,6 @@ if (NOT arm_use_neon)
         modules/audio_processing/agc2/rnn_vad/vector_math_avx2.cc
         modules/audio_processing/aec3/vector_math_avx2.cc
         common_audio/resampler/sinc_resampler_avx2.cc
-        common_audio/fir_filter_avx2.cc
-        common_audio/fir_filter_avx2.h
     )
 endif()
 
@@ -2039,6 +2044,7 @@ else()
         modules/audio_processing/utility/ooura_fft_neon.cc
         modules/video_processing/util/denoiser_filter_neon.cc
         modules/audio_processing/aecm/aecm_core_neon.cc
+        common_audio/third_party/ooura/fft_size_128/ooura_fft_neon.cc
     )
 endif()
 
