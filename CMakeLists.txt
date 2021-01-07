@@ -1974,7 +1974,6 @@ PRIVATE
     stats/rtc_stats.cc
     stats/rtcstats_objects.cc
     
-    #neon
     
 )
 
