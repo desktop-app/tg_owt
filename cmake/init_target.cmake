@@ -27,6 +27,10 @@ function(init_target target_name) # init_target(my_target folder_name)
             XCODE_ATTRIBUTE_LLVM_LTO $<IF:$<CONFIG:Debug>,NO,YES>
         )
     endif()
+    target_compile_definitions(${target_name}
+    PRIVATE
+        HAVE_SCTP
+    )
     if (WIN32)
         target_compile_definitions(${target_name}
         PRIVATE
@@ -34,7 +38,6 @@ function(init_target target_name) # init_target(my_target folder_name)
             HAVE_WINSOCK2_H
             NOMINMAX
             HAVE_SSE2
-            HAVE_SCTP
             ABSL_ALLOCATOR_NOTHROW=1
         )
 
