@@ -82,6 +82,7 @@ if (is_x86 OR is_x64)
         tg_owt::libwebrtcbuild
     PRIVATE
         tg_owt::tg_owt_avx2
+        tg_owt::tg_owt_sse2
         tg_owt::libabsl
         tg_owt::libopenh264
         tg_owt::libpffft
@@ -1977,6 +1978,8 @@ PRIVATE
     modules/desktop_capture/mac/window_list_utils.cc
     modules/desktop_capture/mac/window_list_utils.h
 
+   
+
 
     stats/rtc_stats_report.cc
     stats/rtc_stats.cc
@@ -1996,6 +1999,10 @@ if (NOT arm_use_neon)
         common_audio/resampler/sinc_resampler_avx2.cc
         common_audio/fir_filter_avx2.cc
         common_audio/fir_filter_avx2.h
+    )
+    add_sublibrary(sse2
+        modules/desktop_capture/differ_vector_sse2.cc
+        modules/desktop_capture/differ_vector_sse2.h
     )
 endif()
 
@@ -2122,6 +2129,7 @@ if (is_x86 OR is_x64)
     set(tg_owt_export
         tg_owt
         tg_owt_avx2
+        tg_owt_sse2
     )
 endif()
 
