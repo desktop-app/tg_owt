@@ -1988,7 +1988,7 @@ PRIVATE
 
 )
 
-if (NOT arm_use_neon)
+if (is_x86 OR is_x64)
     add_sublibrary(avx2
         modules/audio_processing/aec3/adaptive_fir_filter_avx2.cc
         modules/audio_processing/aec3/adaptive_fir_filter_erl_avx2.cc
