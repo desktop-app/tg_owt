@@ -2039,6 +2039,25 @@ if ((NOT is_x86) AND (NOT is_x64))
     )
 endif()
 
+if (is_aarch64)
+    target_compile_definitions(tg_owt
+    PRIVATE
+        WEBRTC_ARCH_ARM64
+    )
+elseif (is_arm)
+    target_compile_definitions(tg_owt
+    PRIVATE
+        WEBRTC_ARCH_ARM
+    )
+
+    if (is_arm7 OR is_arm8)
+        target_compile_definitions(tg_owt
+        PRIVATE
+            WEBRTC_ARCH_ARM_V7
+        )
+    endif()
+endif()
+
 if (arm_use_neon)
     target_compile_definitions(tg_owt
     PRIVATE
