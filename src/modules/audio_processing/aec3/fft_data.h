@@ -45,7 +45,7 @@ struct FftData {
                 rtc::ArrayView<float> power_spectrum) const {
     RTC_DCHECK_EQ(kFftLengthBy2Plus1, power_spectrum.size());
     switch (optimization) {
-#if defined(WEBRTC_ARCH_X86_FAMILY)
+#if defined(WEBRTC_ARCH_X86_FAMILY) && defined(WEBRTC_HAS_SSE2)
       case Aec3Optimization::kSse2: {
         constexpr int kNumFourBinBands = kFftLengthBy2 / 4;
         constexpr int kLimit = kNumFourBinBands * 4;

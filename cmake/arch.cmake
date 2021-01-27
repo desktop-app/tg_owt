@@ -8,8 +8,10 @@ set(is_arm  0)
 set(is_arm8 0)
 set(is_arm7 0)
 set(arm_use_neon 0)
+set(x86_has_sse2 0)
 
 option(TG_OWT_ARCH_ARMV7_USE_NEON "Use NEON SIMD instructions when building for ARMv7" ON)
+option(TG_OWT_ARCH_X86_FORCE_SSE "Assume SSE instructions available when building for IA-32" ON)
 
 
 # Check for 64-bit x86 (aka x64):
@@ -117,3 +119,29 @@ endif() # arm32
 endif() # aarch64
 endif() # x86
 endif() # x64
+
+
+if (is_x86 OR is_x64)
+    check_symbol_exists(__SSE__  "stddef.h" HAVE_SSE1_DEF)
+    check_symbol_exists(__SSE2__ "stddef.h" HAVE_SSE2_DEF)
+
+    if (HAVE_SSE1_DEF AND HAVE_SSE2_DEF)
+        message(STATUS "Compiller natively supports SSE and SSE2, these SIMD instructions now enabled")
+        set(x86_has_sse2 1)
+    elseif (TG_OWT_ARCH_X86_FORCE_SSE)
+        message(STATUS "SSE SIMD instructions enabled (can be disabled with -DTG_OWT_ARCH_X86_FORCE_SSE=OFF).")
+        set(x86_has_sse2 1)
+
+        if (WIN32)
+            # TODO: Add the correct flags for Windows here.
+        elseif (APPLE)
+            # TODO: Add the correct flags for Apple devices here.
+        else()
+            set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -msse2")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse2")
+            set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -msse2")
+        endif()
+    else()
+        message(STATUS "Runtime checks of SSE SIMD activated (can be forced with -DTG_OWT_ARCH_X86_FORCE_SSE=ON).")
+    endif()
+endif()

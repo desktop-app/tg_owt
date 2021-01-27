@@ -88,7 +88,7 @@ void ComputeFrequencyResponse_Neon(
 
 #if defined(WEBRTC_ARCH_X86_FAMILY)
 // Computes and stores the frequency response of the filter.
-void ComputeFrequencyResponse_Sse2(
+RTC_TARGET_SSE2 void ComputeFrequencyResponse_Sse2(
     size_t num_partitions,
     const std::vector<std::vector<FftData>>& H,
     std::vector<std::array<float, kFftLengthBy2Plus1>>* H2) {
@@ -210,10 +210,11 @@ void AdaptPartitions_Neon(const RenderBuffer& render_buffer,
 
 #if defined(WEBRTC_ARCH_X86_FAMILY)
 // Adapts the filter partitions. (SSE2 variant)
-void AdaptPartitions_Sse2(const RenderBuffer& render_buffer,
-                          const FftData& G,
-                          size_t num_partitions,
-                          std::vector<std::vector<FftData>>* H) {
+RTC_TARGET_SSE2 void AdaptPartitions_Sse2(
+    const RenderBuffer& render_buffer,
+    const FftData& G,
+    size_t num_partitions,
+    std::vector<std::vector<FftData>>* H) {
   rtc::ArrayView<const std::vector<FftData>> render_buffer_data =
       render_buffer.GetFftBuffer();
   const size_t num_render_channels = render_buffer_data[0].size();
@@ -375,10 +376,11 @@ void ApplyFilter_Neon(const RenderBuffer& render_buffer,
 
 #if defined(WEBRTC_ARCH_X86_FAMILY)
 // Produces the filter output (SSE2 variant).
-void ApplyFilter_Sse2(const RenderBuffer& render_buffer,
-                      size_t num_partitions,
-                      const std::vector<std::vector<FftData>>& H,
-                      FftData* S) {
+RTC_TARGET_SSE2 void ApplyFilter_Sse2(
+    const RenderBuffer& render_buffer,
+    size_t num_partitions,
+    const std::vector<std::vector<FftData>>& H,
+    FftData* S) {
   // const RenderBuffer& render_buffer,
   //                     rtc::ArrayView<const FftData> H,
   //                     FftData* S) {

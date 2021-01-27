@@ -1769,7 +1769,12 @@ if (NOT WIN32)
     )
 endif()
 
-if ((NOT is_x86) AND (NOT is_x64))
+if (x86_has_sse2)
+    target_compile_definitions(tg_owt
+    PRIVATE
+        WEBRTC_HAS_SSE2
+    )
+else()
     remove_target_sources(tg_owt ${webrtc_loc}
         common_audio/fir_filter_sse.cc
         common_audio/fir_filter_sse.h

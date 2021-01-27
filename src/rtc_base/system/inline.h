@@ -28,4 +28,10 @@
 
 #endif
 
+#if defined(__GNUC__) && !defined(__SSE2__)
+#define RTC_TARGET_SSE2 __attribute__((__target__("sse2")))
+#else
+#define RTC_TARGET_SSE2
+#endif
+
 #endif  // RTC_BASE_SYSTEM_INLINE_H_

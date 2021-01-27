@@ -15,7 +15,7 @@ PRIVATE
     _USE_MATH_DEFINES
 )
 
-if (NOT is_x86 AND NOT is_x64 AND NOT arm_use_neon)
+if (NOT x86_has_sse2 AND NOT arm_use_neon)
     target_compile_definitions(libpffft
     PRIVATE
         PFFFT_SIMD_DISABLE

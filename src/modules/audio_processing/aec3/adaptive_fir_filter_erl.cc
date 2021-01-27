@@ -57,7 +57,7 @@ void ErlComputer_NEON(
 #if defined(WEBRTC_ARCH_X86_FAMILY)
 // Computes and stores the echo return loss estimate of the filter, which is the
 // sum of the partition frequency responses.
-void ErlComputer_SSE2(
+RTC_TARGET_SSE2 void ErlComputer_SSE2(
     const std::vector<std::array<float, kFftLengthBy2Plus1>>& H2,
     rtc::ArrayView<float> erl) {
   std::fill(erl.begin(), erl.end(), 0.f);

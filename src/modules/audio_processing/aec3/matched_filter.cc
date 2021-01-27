@@ -144,14 +144,14 @@ void MatchedFilterCore_NEON(size_t x_start_index,
 
 #if defined(WEBRTC_ARCH_X86_FAMILY)
 
-void MatchedFilterCore_SSE2(size_t x_start_index,
-                            float x2_sum_threshold,
-                            float smoothing,
-                            rtc::ArrayView<const float> x,
-                            rtc::ArrayView<const float> y,
-                            rtc::ArrayView<float> h,
-                            bool* filters_updated,
-                            float* error_sum) {
+RTC_TARGET_SSE2 void MatchedFilterCore_SSE2(size_t x_start_index,
+                                            float x2_sum_threshold,
+                                            float smoothing,
+                                            rtc::ArrayView<const float> x,
+                                            rtc::ArrayView<const float> y,
+                                            rtc::ArrayView<float> h,
+                                            bool* filters_updated,
+                                            float* error_sum) {
   const int h_size = static_cast<int>(h.size());
   const int x_size = static_cast<int>(x.size());
   RTC_DCHECK_EQ(0, h_size % 4);

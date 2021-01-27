@@ -75,13 +75,6 @@ function(init_target target_name) # init_target(my_target folder_name)
             endif()
         endif()
 
-        if (is_x86)
-            target_compile_options(${target_name}
-            PRIVATE
-                -msse2
-            )
-        endif()
-
         target_compile_definitions(${target_name}
         PRIVATE
             HAVE_NETINET_IN_H

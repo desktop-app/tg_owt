@@ -229,7 +229,7 @@ void ComputeFullyConnectedLayerOutput(
 
 #if defined(WEBRTC_ARCH_X86_FAMILY)
 // Fully connected layer SSE2 implementation.
-void ComputeFullyConnectedLayerOutputSse2(
+RTC_TARGET_SSE2 void ComputeFullyConnectedLayerOutputSse2(
     size_t input_size,
     size_t output_size,
     rtc::ArrayView<const float> input,

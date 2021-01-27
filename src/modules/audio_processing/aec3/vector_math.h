@@ -42,7 +42,7 @@ class VectorMath {
   // Elementwise square root.
   void Sqrt(rtc::ArrayView<float> x) {
     switch (optimization_) {
-#if defined(WEBRTC_ARCH_X86_FAMILY)
+#if defined(WEBRTC_ARCH_X86_FAMILY) && defined(WEBRTC_HAS_SSE2)
       case Aec3Optimization::kSse2: {
         const int x_size = static_cast<int>(x.size());
         const int vector_limit = x_size >> 2;
@@ -116,7 +116,7 @@ class VectorMath {
     RTC_DCHECK_EQ(z.size(), x.size());
     RTC_DCHECK_EQ(z.size(), y.size());
     switch (optimization_) {
-#if defined(WEBRTC_ARCH_X86_FAMILY)
+#if defined(WEBRTC_ARCH_X86_FAMILY) && defined(WEBRTC_HAS_SSE2)
       case Aec3Optimization::kSse2: {
         const int x_size = static_cast<int>(x.size());
         const int vector_limit = x_size >> 2;
@@ -162,7 +162,7 @@ class VectorMath {
   void Accumulate(rtc::ArrayView<const float> x, rtc::ArrayView<float> z) {
     RTC_DCHECK_EQ(z.size(), x.size());
     switch (optimization_) {
-#if defined(WEBRTC_ARCH_X86_FAMILY)
+#if defined(WEBRTC_ARCH_X86_FAMILY) && defined(WEBRTC_HAS_SSE2)
       case Aec3Optimization::kSse2: {
         const int x_size = static_cast<int>(x.size());
         const int vector_limit = x_size >> 2;
