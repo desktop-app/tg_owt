@@ -142,6 +142,7 @@ if (UNIX AND NOT APPLE)
     link_libalsa(tg_owt)
     link_libpulse(tg_owt)
     link_dl(tg_owt)
+    link_x11(tg_owt)
 endif()
 
 function(add_sublibrary postfix)
@@ -383,7 +384,8 @@ PRIVATE
     rtc_base/numerics/moving_average.cc
     rtc_base/numerics/sample_counter.cc
     rtc_base/numerics/sample_stats.cc
-    # rtc_base/numerics/samples_stats_counter.cc
+    api/numerics/samples_stats_counter.cc
+    api/numerics/samples_stats_counter.h
     rtc_base/strings/audio_format_to_string.cc
     rtc_base/strings/string_builder.cc
     rtc_base/synchronization/mutex.cc
@@ -1322,6 +1324,8 @@ PRIVATE
     modules/rtp_rtcp/source/rtp_sender_audio.h
     modules/rtp_rtcp/source/rtp_sender_egress.cc
     modules/rtp_rtcp/source/rtp_sender_egress.h
+    modules/rtp_rtcp/source/deprecated/deprecated_rtp_sender_egress.cc
+    modules/rtp_rtcp/source/deprecated/deprecated_rtp_sender_egress.h
     modules/rtp_rtcp/source/rtp_sender_video.cc
     modules/rtp_rtcp/source/rtp_sender_video.h
     modules/rtp_rtcp/source/rtp_sender_video_frame_transformer_delegate.cc
@@ -1459,6 +1463,8 @@ PRIVATE
     modules/video_coding/media_opt_util.h
     modules/video_coding/histogram.cc
     modules/video_coding/histogram.h
+    modules/video_coding/deprecated/nack_module.h
+    modules/video_coding/deprecated/nack_module.cc
     modules/video_coding/nack_module2.cc
     modules/video_coding/nack_module2.h
     modules/video_coding/encoded_frame.cc
@@ -1850,6 +1856,8 @@ PRIVATE
     video/video_send_stream_impl.h
     video/video_stream_decoder.cc
     video/video_stream_decoder.h
+    video/video_stream_decoder_impl.cc
+    video/video_stream_decoder_impl.h
     video/video_stream_decoder2.cc
     video/video_stream_decoder2.h
     video/alignment_adjuster.cc
@@ -1944,6 +1952,7 @@ PRIVATE
     modules/desktop_capture/mouse_cursor.cc
     modules/desktop_capture/mouse_cursor.h
     modules/desktop_capture/mouse_cursor_monitor.h
+    modules/desktop_capture/mouse_cursor_monitor_null.cc
     modules/desktop_capture/resolution_tracker.cc
     modules/desktop_capture/resolution_tracker.h
     modules/desktop_capture/rgba_color.cc
@@ -1951,8 +1960,17 @@ PRIVATE
     modules/desktop_capture/screen_capture_frame_queue.h
     modules/desktop_capture/screen_capturer_helper.cc
     modules/desktop_capture/screen_capturer_helper.h
+    modules/desktop_capture/screen_capturer_null.cc
     modules/desktop_capture/window_finder.cc
     modules/desktop_capture/window_finder.h
+    
+    #linux specific
+    modules/desktop_capture/window_capturer_linux.cc
+    modules/desktop_capture/screen_drawer_lock_posix.cc
+    modules/desktop_capture/screen_drawer_lock_posix.h
+    modules/desktop_capture/screen_drawer_linux.cc
+    modules/desktop_capture/linux/shared_x_display.cc
+    modules/desktop_capture/linux/shared_x_display.h
 
     #mac specific //
     modules/desktop_capture/mac/desktop_configuration.mm
@@ -2024,6 +2042,17 @@ if (NOT WIN32)
         api/task_queue/default_task_queue_factory_win.cc
         modules/audio_device/include/audio_device_factory.cc
         modules/audio_device/include/audio_device_factory.h
+    )
+endif()
+
+if ((NOT BUILD_SHARED_LIBS) OR (NOT UNIX))
+    remove_target_sources(tg_owt ${webrtc_loc}
+        modules/desktop_capture/window_capturer_linux.cc
+        modules/desktop_capture/screen_drawer_lock_posix.cc
+        modules/desktop_capture/screen_drawer_lock_posix.h
+        modules/desktop_capture/screen_drawer_linux.cc
+        modules/desktop_capture/linux/shared_x_display.cc
+        modules/desktop_capture/linux/shared_x_display.h
     )
 endif()
 
