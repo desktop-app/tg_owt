@@ -141,3 +141,34 @@ function(link_x11 target_name)
         target_link_libraries(${target_name} PRIVATE ${X11_Xtst_LIB})
     endif()
 endfunction()
+
+# libvpx
+function(link_vpx target_name)
+    if (TG_OWT_VPX_PACKAGED_BUILD)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(VPX vpx)
+        target_include_directories(${target_name} PRIVATE ${VPX_INCLUDE_DIRS})
+        target_link_libraries(${target_name} PRIVATE ${VPX_LINK_LIBRARIES})
+    else()
+        include("${CMAKE_CURRENT_LIST_DIR}/cmake/libvpx.cmake")
+        target_link_libraries(${target_name}
+        PRIVATE
+            tg_owt::libvpx
+        )
+        if (is_x86 OR is_x64)
+        target_link_libraries(${target_name}
+        PRIVATE
+            tg_owt::libvpx_mmx
+            tg_owt::libvpx_sse2
+            tg_owt::libvpx_ssse3
+            tg_owt::libvpx_sse4
+            tg_owt::libvpx_avx
+            tg_owt::libvpx_avx2
+        )
+        endif()
+        target_sources(tg_owt
+        PRIVATE
+            ${libvpx_yasm_objects}
+        )
+    endif()
+endfunction()
