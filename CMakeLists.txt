@@ -2166,6 +2166,9 @@ set(export_targets
     libyuv
     ${platform_export}
 )
+if (TG_OWT_USE_PROTOBUF)
+    list(APPEND export_targets proto)
+endif()
 
 export(
     TARGETS ${export_targets}
