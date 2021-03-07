@@ -1,4 +1,4 @@
-add_library(libvpx OBJECT)
+add_library(libvpx OBJECT EXCLUDE_FROM_ALL)
 init_target(libvpx)
 add_library(tg_owt::libvpx ALIAS libvpx)
 

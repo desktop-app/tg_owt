@@ -3,9 +3,11 @@ add_library(tg_owt::libwebrtcbuild ALIAS libwebrtcbuild)
 
 target_link_libraries(libwebrtcbuild
 INTERFACE
-    tg_owt::libabsl
     tg_owt::libyuv
 )
+if (NOT absl_FOUND)
+    target_link_libraries(libwebrtcbuild INTERFACE tg_owt::libabsl)
+endif()
 
 target_compile_definitions(libwebrtcbuild
 INTERFACE

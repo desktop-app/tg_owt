@@ -60,7 +60,6 @@ include(cmake/librnnoise.cmake)
 include(cmake/libsrtp.cmake)
 include(cmake/libusrsctp.cmake)
 include(cmake/libvpx.cmake)
-include(cmake/libwebrtcbuild.cmake)
 include(cmake/libyuv.cmake)
 if (NOT WIN32 AND NOT APPLE)
     include(cmake/libevent.cmake)
@@ -80,41 +79,19 @@ init_target(tg_owt)
 
 set_target_properties(tg_owt PROPERTIES SOVERSION 0 VERSION 0.0.0)
 
+target_link_libraries(tg_owt
+PRIVATE
+    tg_owt::libpffft
+    tg_owt::librnnoise
+    tg_owt::libsrtp
+    tg_owt::libyuv
+)
+
 if (is_x86 OR is_x64)
     target_link_libraries(tg_owt
-    PUBLIC
-        tg_owt::libwebrtcbuild
     PRIVATE
         tg_owt::tg_owt_avx2
         tg_owt::tg_owt_sse2
-        tg_owt::libabsl
-        tg_owt::libopenh264
-        tg_owt::libpffft
-        tg_owt::librnnoise
-        tg_owt::libsrtp
-        tg_owt::libusrsctp
-        tg_owt::libvpx
-        tg_owt::libvpx_mmx
-        tg_owt::libvpx_sse2
-        tg_owt::libvpx_ssse3
-        tg_owt::libvpx_sse4
-        tg_owt::libvpx_avx
-        tg_owt::libvpx_avx2
-        tg_owt::libyuv
-    )
-else()
-    target_link_libraries(tg_owt
-    PUBLIC
-        tg_owt::libwebrtcbuild
-    PRIVATE
-        tg_owt::libabsl
-        tg_owt::libopenh264
-        tg_owt::libpffft
-        tg_owt::librnnoise
-        tg_owt::libsrtp
-        tg_owt::libusrsctp
-        tg_owt::libvpx
-        tg_owt::libyuv
     )
 endif()
 
@@ -131,9 +108,6 @@ PRIVATE
     ${libopenh264_yasm_objects}
 )
 
-if (NOT WIN32 AND NOT APPLE)
-    target_link_libraries(tg_owt PRIVATE tg_owt::libevent)
-endif()
 if (APPLE)
     target_link_libraries(tg_owt PUBLIC tg_owt::libsdkmacos)
 endif()
@@ -141,6 +115,17 @@ endif()
 link_openssl(tg_owt)
 link_ffmpeg(tg_owt)
 link_opus(tg_owt)
+link_libabsl(tg_owt)
+link_libopenh264(tg_owt)
+link_libusrsctp(tg_owt)
+link_libvpx(tg_owt)
+
+if (NOT WIN32 AND NOT APPLE)
+    link_libevent(tg_owt)
+endif()
+
+include(cmake/libwebrtcbuild.cmake)
+target_link_libraries(tg_owt PUBLIC tg_owt::libwebrtcbuild)
 
 function(add_sublibrary postfix)
     add_library(tg_owt_${postfix} OBJECT)
@@ -149,9 +134,8 @@ function(add_sublibrary postfix)
     target_link_libraries(tg_owt_${postfix}
     PUBLIC
         tg_owt::libwebrtcbuild
-    PRIVATE
-        tg_owt::libabsl
     )
+    link_libabsl(tg_owt_${postfix})
     target_include_directories(tg_owt_${postfix}
     PUBLIC
         $<BUILD_INTERFACE:${webrtc_loc}>
@@ -2165,7 +2149,7 @@ else()
 endif()
 
 set(platform_export)
-if (NOT WIN32 AND NOT APPLE)
+if (NOT WIN32 AND NOT APPLE AND NOT LIBEVENT_FOUND)
     set(platform_export
         libevent
     )
@@ -2198,20 +2182,28 @@ endif()
 
 set(export_targets
     ${tg_owt_export}
-    libabsl
-    libopenh264
     libpffft
     librnnoise
     libsrtp
-    libusrsctp
-    libvpx
-    ${vpx_export}
     libwebrtcbuild
     libyuv
     ${platform_export}
 )
 if (TG_OWT_USE_PROTOBUF)
     list(APPEND export_targets proto)
+endif()
+
+if (NOT absl_FOUND)
+    list(APPEND export_targets libabsl)
+endif()
+if (NOT LIBOPENH264_FOUND)
+    list(APPEND export_targets libopenh264)
+endif()
+if (NOT LIBUSRSCTP_FOUND)
+    list(APPEND export_targets libusrsctp)
+endif()
+if (NOT LIBVPX_FOUND)
+    list(APPEND export_targets libvpx ${vpx_export})
 endif()
 
 export(
@@ -2223,7 +2215,7 @@ export(
 configure_file(
     "cmake/tg_owtConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/tg_owtConfig.cmake"
-    COPYONLY
+    @ONLY
 )
 
 target_include_directories(tg_owt
