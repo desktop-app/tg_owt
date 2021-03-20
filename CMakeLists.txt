@@ -138,10 +138,6 @@ link_openssl(tg_owt)
 link_ffmpeg(tg_owt)
 link_opus(tg_owt)
 
-if (UNIX AND NOT APPLE)
-    link_x11(tg_owt)
-endif()
-
 function(add_sublibrary postfix)
     add_library(tg_owt_${postfix} OBJECT)
     init_feature_target(tg_owt_${postfix} ${postfix})
@@ -1869,6 +1865,8 @@ PRIVATE
     modules/desktop_capture/screen_drawer.cc
     modules/desktop_capture/screen_drawer.h
     modules/desktop_capture/screen_drawer_mac.cc
+    modules/desktop_capture/screen_drawer_lock_posix.cc
+    modules/desktop_capture/screen_drawer_lock_posix.h
 
 
     #primitives
@@ -1931,13 +1929,8 @@ PRIVATE
     modules/desktop_capture/window_finder.cc
     modules/desktop_capture/window_finder.h
     
-    #linux specific
-    modules/desktop_capture/window_capturer_linux.cc
-    modules/desktop_capture/screen_drawer_lock_posix.cc
-    modules/desktop_capture/screen_drawer_lock_posix.h
-    modules/desktop_capture/screen_drawer_linux.cc
-    modules/desktop_capture/linux/shared_x_display.cc
-    modules/desktop_capture/linux/shared_x_display.h
+    #stubs for non-mac
+    modules/desktop_capture/window_capturer_null.cc
 
     #mac specific //
     modules/desktop_capture/mac/desktop_configuration.mm
@@ -2010,14 +2003,16 @@ if (NOT WIN32)
     )
 endif()
 
-if ((NOT BUILD_SHARED_LIBS) OR (NOT UNIX))
+if (APPLE)
     remove_target_sources(tg_owt ${webrtc_loc}
-        modules/desktop_capture/window_capturer_linux.cc
+        modules/desktop_capture/window_capturer_null.cc
+    )
+endif()
+
+if (NOT UNIX)
+    remove_target_sources(tg_owt ${webrtc_loc}
         modules/desktop_capture/screen_drawer_lock_posix.cc
         modules/desktop_capture/screen_drawer_lock_posix.h
-        modules/desktop_capture/screen_drawer_linux.cc
-        modules/desktop_capture/linux/shared_x_display.cc
-        modules/desktop_capture/linux/shared_x_display.h
     )
 endif()
 
