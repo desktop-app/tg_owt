@@ -1865,109 +1865,9 @@ PRIVATE
     modules/remote_bitrate_estimator/remote_estimator_proxy.cc
     sdk/media_constraints.cc
 
-    #screen drawer
-    modules/desktop_capture/screen_drawer.cc
-    modules/desktop_capture/screen_drawer.h
-    modules/desktop_capture/screen_drawer_mac.cc
-    modules/desktop_capture/screen_drawer_lock_posix.cc
-    modules/desktop_capture/screen_drawer_lock_posix.h
-
-
-    #primitives
-    modules/desktop_capture/desktop_capture_types.h
-    modules/desktop_capture/desktop_frame.cc
-    modules/desktop_capture/desktop_frame.h
-    modules/desktop_capture/desktop_geometry.cc
-    modules/desktop_capture/desktop_geometry.h
-    modules/desktop_capture/desktop_region.cc
-    modules/desktop_capture/desktop_region.h
-    modules/desktop_capture/shared_desktop_frame.cc
-    modules/desktop_capture/shared_desktop_frame.h
-    modules/desktop_capture/shared_memory.cc
-    modules/desktop_capture/shared_memory.h
-
-
-    #generic
-    modules/desktop_capture/blank_detector_desktop_capturer_wrapper.cc
-    modules/desktop_capture/blank_detector_desktop_capturer_wrapper.h
-    modules/desktop_capture/cropped_desktop_frame.cc
-    modules/desktop_capture/cropped_desktop_frame.h
-    modules/desktop_capture/cropping_window_capturer.cc
-    modules/desktop_capture/cropping_window_capturer.h
-    modules/desktop_capture/desktop_and_cursor_composer.cc
-    modules/desktop_capture/desktop_and_cursor_composer.h
-    modules/desktop_capture/desktop_capture_options.cc
-    modules/desktop_capture/desktop_capture_options.h
-    modules/desktop_capture/desktop_capturer.cc
-    modules/desktop_capture/desktop_capturer.h
-    modules/desktop_capture/desktop_capturer_differ_wrapper.cc
-    modules/desktop_capture/desktop_capturer_differ_wrapper.h
-    modules/desktop_capture/desktop_capturer_wrapper.cc
-    modules/desktop_capture/desktop_capturer_wrapper.h
-    modules/desktop_capture/desktop_frame_generator.cc
-    modules/desktop_capture/desktop_frame_generator.h
-    modules/desktop_capture/desktop_frame_rotation.cc
-    modules/desktop_capture/desktop_frame_rotation.h
-    modules/desktop_capture/differ_block.cc
-    modules/desktop_capture/differ_block.h
-    modules/desktop_capture/fake_desktop_capturer.cc
-    modules/desktop_capture/fake_desktop_capturer.h
-    modules/desktop_capture/fallback_desktop_capturer_wrapper.cc
-    modules/desktop_capture/fallback_desktop_capturer_wrapper.h
-    modules/desktop_capture/full_screen_application_handler.cc
-    modules/desktop_capture/full_screen_application_handler.h
-    modules/desktop_capture/full_screen_window_detector.cc
-    modules/desktop_capture/full_screen_window_detector.h
-    modules/desktop_capture/mouse_cursor.cc
-    modules/desktop_capture/mouse_cursor.h
-    modules/desktop_capture/mouse_cursor_monitor.h
-    modules/desktop_capture/mouse_cursor_monitor_null.cc
-    modules/desktop_capture/resolution_tracker.cc
-    modules/desktop_capture/resolution_tracker.h
-    modules/desktop_capture/rgba_color.cc
-    modules/desktop_capture/rgba_color.h
-    modules/desktop_capture/screen_capture_frame_queue.h
-    modules/desktop_capture/screen_capturer_helper.cc
-    modules/desktop_capture/screen_capturer_helper.h
-    modules/desktop_capture/screen_capturer_null.cc
-    modules/desktop_capture/window_finder.cc
-    modules/desktop_capture/window_finder.h
-    
-    #stubs for non-mac
-    modules/desktop_capture/window_capturer_null.cc
-
-    #mac specific //
-    modules/desktop_capture/mac/desktop_configuration.mm
-    modules/desktop_capture/mac/desktop_frame_cgimage.h
-    modules/desktop_capture/mac/desktop_frame_cgimage.mm
-    modules/desktop_capture/mac/desktop_frame_iosurface.h
-    modules/desktop_capture/mac/desktop_frame_iosurface.mm
-    modules/desktop_capture/mac/desktop_frame_provider.h
-    modules/desktop_capture/mac/desktop_frame_provider.mm
-    modules/desktop_capture/mac/screen_capturer_mac.h
-    modules/desktop_capture/mac/screen_capturer_mac.mm
-    modules/desktop_capture/mouse_cursor_monitor_mac.mm
-    modules/desktop_capture/screen_capturer_darwin.mm
-    modules/desktop_capture/window_capturer_mac.mm
-    modules/desktop_capture/window_finder_mac.h
-    modules/desktop_capture/window_finder_mac.mm
-
-    modules/desktop_capture/mac/desktop_configuration.h
-    modules/desktop_capture/mac/desktop_configuration_monitor.cc
-    modules/desktop_capture/mac/desktop_configuration_monitor.h
-    modules/desktop_capture/mac/full_screen_mac_application_handler.cc
-    modules/desktop_capture/mac/full_screen_mac_application_handler.h
-    modules/desktop_capture/mac/window_list_utils.cc
-    modules/desktop_capture/mac/window_list_utils.h
-
-   
-
-
     stats/rtc_stats_report.cc
     stats/rtc_stats.cc
     stats/rtcstats_objects.cc
-
-
 )
 
 if (is_x86 OR is_x64)
@@ -2008,15 +1908,99 @@ if (NOT WIN32)
 endif()
 
 if (APPLE)
-    remove_target_sources(tg_owt ${webrtc_loc}
-        modules/desktop_capture/window_capturer_null.cc
-    )
-endif()
-
-if (NOT UNIX)
-    remove_target_sources(tg_owt ${webrtc_loc}
+    nice_target_sources(tg_owt ${webrtc_loc}
+    PRIVATE
+        #screen drawer
+        modules/desktop_capture/screen_drawer.cc
+        modules/desktop_capture/screen_drawer.h
+        modules/desktop_capture/screen_drawer_mac.cc
         modules/desktop_capture/screen_drawer_lock_posix.cc
         modules/desktop_capture/screen_drawer_lock_posix.h
+
+
+        #primitives
+        modules/desktop_capture/desktop_capture_types.h
+        modules/desktop_capture/desktop_frame.cc
+        modules/desktop_capture/desktop_frame.h
+        modules/desktop_capture/desktop_geometry.cc
+        modules/desktop_capture/desktop_geometry.h
+        modules/desktop_capture/desktop_region.cc
+        modules/desktop_capture/desktop_region.h
+        modules/desktop_capture/shared_desktop_frame.cc
+        modules/desktop_capture/shared_desktop_frame.h
+        modules/desktop_capture/shared_memory.cc
+        modules/desktop_capture/shared_memory.h
+
+
+        #generic
+        modules/desktop_capture/blank_detector_desktop_capturer_wrapper.cc
+        modules/desktop_capture/blank_detector_desktop_capturer_wrapper.h
+        modules/desktop_capture/cropped_desktop_frame.cc
+        modules/desktop_capture/cropped_desktop_frame.h
+        modules/desktop_capture/cropping_window_capturer.cc
+        modules/desktop_capture/cropping_window_capturer.h
+        modules/desktop_capture/desktop_and_cursor_composer.cc
+        modules/desktop_capture/desktop_and_cursor_composer.h
+        modules/desktop_capture/desktop_capture_options.cc
+        modules/desktop_capture/desktop_capture_options.h
+        modules/desktop_capture/desktop_capturer.cc
+        modules/desktop_capture/desktop_capturer.h
+        modules/desktop_capture/desktop_capturer_differ_wrapper.cc
+        modules/desktop_capture/desktop_capturer_differ_wrapper.h
+        modules/desktop_capture/desktop_capturer_wrapper.cc
+        modules/desktop_capture/desktop_capturer_wrapper.h
+        modules/desktop_capture/desktop_frame_generator.cc
+        modules/desktop_capture/desktop_frame_generator.h
+        modules/desktop_capture/desktop_frame_rotation.cc
+        modules/desktop_capture/desktop_frame_rotation.h
+        modules/desktop_capture/differ_block.cc
+        modules/desktop_capture/differ_block.h
+        modules/desktop_capture/fake_desktop_capturer.cc
+        modules/desktop_capture/fake_desktop_capturer.h
+        modules/desktop_capture/fallback_desktop_capturer_wrapper.cc
+        modules/desktop_capture/fallback_desktop_capturer_wrapper.h
+        modules/desktop_capture/full_screen_application_handler.cc
+        modules/desktop_capture/full_screen_application_handler.h
+        modules/desktop_capture/full_screen_window_detector.cc
+        modules/desktop_capture/full_screen_window_detector.h
+        modules/desktop_capture/mouse_cursor.cc
+        modules/desktop_capture/mouse_cursor.h
+        modules/desktop_capture/mouse_cursor_monitor.h
+        modules/desktop_capture/mouse_cursor_monitor_null.cc
+        modules/desktop_capture/resolution_tracker.cc
+        modules/desktop_capture/resolution_tracker.h
+        modules/desktop_capture/rgba_color.cc
+        modules/desktop_capture/rgba_color.h
+        modules/desktop_capture/screen_capture_frame_queue.h
+        modules/desktop_capture/screen_capturer_helper.cc
+        modules/desktop_capture/screen_capturer_helper.h
+        modules/desktop_capture/screen_capturer_null.cc
+        modules/desktop_capture/window_finder.cc
+        modules/desktop_capture/window_finder.h
+
+        #mac specific //
+        modules/desktop_capture/mac/desktop_configuration.mm
+        modules/desktop_capture/mac/desktop_frame_cgimage.h
+        modules/desktop_capture/mac/desktop_frame_cgimage.mm
+        modules/desktop_capture/mac/desktop_frame_iosurface.h
+        modules/desktop_capture/mac/desktop_frame_iosurface.mm
+        modules/desktop_capture/mac/desktop_frame_provider.h
+        modules/desktop_capture/mac/desktop_frame_provider.mm
+        modules/desktop_capture/mac/screen_capturer_mac.h
+        modules/desktop_capture/mac/screen_capturer_mac.mm
+        modules/desktop_capture/mouse_cursor_monitor_mac.mm
+        modules/desktop_capture/screen_capturer_darwin.mm
+        modules/desktop_capture/window_capturer_mac.mm
+        modules/desktop_capture/window_finder_mac.h
+        modules/desktop_capture/window_finder_mac.mm
+
+        modules/desktop_capture/mac/desktop_configuration.h
+        modules/desktop_capture/mac/desktop_configuration_monitor.cc
+        modules/desktop_capture/mac/desktop_configuration_monitor.h
+        modules/desktop_capture/mac/full_screen_mac_application_handler.cc
+        modules/desktop_capture/mac/full_screen_mac_application_handler.h
+        modules/desktop_capture/mac/window_list_utils.cc
+        modules/desktop_capture/mac/window_list_utils.h
     )
 endif()
 
