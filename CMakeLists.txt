@@ -470,7 +470,6 @@ PRIVATE
     api/neteq/neteq.cc
     api/neteq/tick_timer.cc
     api/peer_connection_interface.cc
-    api/proxy.cc
     api/rtc_error.cc
     api/rtc_event_log/rtc_event.cc
     api/rtc_event_log/rtc_event_log.cc
