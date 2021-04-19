@@ -11,7 +11,6 @@ PRIVATE
     SCTP_PROCESS_LEVEL_LOCKS
     HAVE_SA_LEN
     HAVE_SCONN_LEN
-    HAVE_PTHREAD
     HAVE_NETINET_IN_H
 )
 
@@ -25,7 +24,6 @@ elseif (APPLE)
     PRIVATE
         __Userspace_os_Darwin
         _APPLE_USE_RFC_2292
-        
     )
     target_compile_options(libusrsctp
     PRIVATE
