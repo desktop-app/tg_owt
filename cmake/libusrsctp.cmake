@@ -9,8 +9,6 @@ PRIVATE
     __Userspace__
     SCTP_SIMPLE_ALLOCATOR
     SCTP_PROCESS_LEVEL_LOCKS
-    HAVE_SA_LEN
-    HAVE_SCONN_LEN
     HAVE_NETINET_IN_H
 )
 
@@ -24,6 +22,8 @@ elseif (APPLE)
     PRIVATE
         __Userspace_os_Darwin
         _APPLE_USE_RFC_2292
+        HAVE_SA_LEN
+        HAVE_SCONN_LEN
     )
     target_compile_options(libusrsctp
     PRIVATE
