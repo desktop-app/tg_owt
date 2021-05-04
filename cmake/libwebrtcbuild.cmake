@@ -18,16 +18,11 @@ INTERFACE
     WEBRTC_LIBRARY_IMPL
     WEBRTC_NON_STATIC_TRACE_EVENT_HANDLERS=1
     NO_MAIN_THREAD_WRAPPING
+    WEBRTC_ENABLE_LINUX_ALSA
+    WEBRTC_ENABLE_LINUX_PULSE
     HAVE_WEBRTC_VIDEO
     RTC_ENABLE_VP9
 )
-
-if (NOT APPLE)
-    target_compile_definitions(libwebrtcbuild
-    INTERFACE
-        WEBRTC_DUMMY_AUDIO_BUILD
-    )
-endif()
 
 if (WIN32)
     target_compile_definitions(libwebrtcbuild
