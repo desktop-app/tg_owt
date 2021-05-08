@@ -20,6 +20,11 @@ endif()
 
 option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." ${TG_OWT_PACKAGED_BUILD})
 option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
+option(TG_OWT_USE_PIPEWIRE "Use dlopen-ed pipewire 0.3 for desktop capture on non-Apple Unix." ON)
+
+if (NOT UNIX OR APPLE)
+    set(TG_OWT_USE_PIPEWIRE OFF)
+endif()
 
 if (BUILD_SHARED_LIBS)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -34,6 +39,7 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT t
 
 get_filename_component(webrtc_loc "src" REALPATH)
 set(third_party_loc ${webrtc_loc}/third_party)
+set(tools_loc ${webrtc_loc}/tools)
 
 include(GNUInstallDirs)
 set(webrtc_includedir ${CMAKE_INSTALL_INCLUDEDIR}/tg_owt)
@@ -51,6 +57,7 @@ endif()
 
 include(cmake/nice_target_sources.cmake)
 include(cmake/init_target.cmake)
+include(cmake/generate_target.cmake)
 include(cmake/target_yasm_sources.cmake)
 include(cmake/external.cmake)
 include(cmake/libabsl.cmake)
@@ -76,6 +83,17 @@ endif()
 
 add_library(tg_owt)
 init_target(tg_owt)
+
+if (TG_OWT_USE_PIPEWIRE)
+    include(cmake/generate_stubs.cmake)
+    set(stubs_loc ${webrtc_loc}/modules/desktop_capture/linux)
+    generate_stubs(tg_owt
+        ${stubs_loc}/pipewire_stub_header.fragment
+        pipewire_stubs
+        ${stubs_loc}/pipewire03.sigs
+    )
+    target_compile_definitions(tg_owt PRIVATE WEBRTC_DLOPEN_PIPEWIRE)
+endif()
 
 set_target_properties(tg_owt PROPERTIES SOVERSION 0 VERSION 0.0.0)
 
