@@ -93,6 +93,12 @@ if (TG_OWT_USE_PIPEWIRE)
         ${stubs_loc}/pipewire03.sigs
     )
     target_compile_definitions(tg_owt PRIVATE WEBRTC_DLOPEN_PIPEWIRE)
+    target_include_directories(tg_owt
+    PRIVATE
+        ${webrtc_loc}/third_party/pipewire/spa/include
+        ${webrtc_loc}/third_party/pipewire/src
+        ${webrtc_loc}/third_party/pipewire/build/src
+    )
 endif()
 
 set_target_properties(tg_owt PROPERTIES SOVERSION 0 VERSION 0.0.0)
