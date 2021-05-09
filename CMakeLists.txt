@@ -153,6 +153,7 @@ target_link_libraries(tg_owt PUBLIC tg_owt::libwebrtcbuild)
 
 if (UNIX AND NOT APPLE)
     link_x11(tg_owt)
+    link_glib(tg_owt)
 endif()
 
 function(add_sublibrary postfix)
