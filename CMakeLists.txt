@@ -151,6 +151,10 @@ endif()
 include(cmake/libwebrtcbuild.cmake)
 target_link_libraries(tg_owt PUBLIC tg_owt::libwebrtcbuild)
 
+if (UNIX AND NOT APPLE)
+    link_x11(tg_owt)
+endif()
+
 function(add_sublibrary postfix)
     add_library(tg_owt_${postfix} OBJECT)
     init_feature_target(tg_owt_${postfix} ${postfix})
@@ -1876,8 +1880,10 @@ PRIVATE
     modules/desktop_capture/screen_drawer.cc
     modules/desktop_capture/screen_drawer.h
     modules/desktop_capture/screen_drawer_mac.cc
+    modules/desktop_capture/screen_drawer_linux.cc
     modules/desktop_capture/screen_drawer_lock_posix.cc
     modules/desktop_capture/screen_drawer_lock_posix.h
+    modules/desktop_capture/screen_drawer_win.cc
 
     # primitives
     modules/desktop_capture/desktop_capture_types.h
@@ -1929,6 +1935,7 @@ PRIVATE
     modules/desktop_capture/mouse_cursor.cc
     modules/desktop_capture/mouse_cursor.h
     modules/desktop_capture/mouse_cursor_monitor.h
+    modules/desktop_capture/mouse_cursor_monitor_linux.cc
     modules/desktop_capture/mouse_cursor_monitor_mac.mm
     modules/desktop_capture/mouse_cursor_monitor_win.cc
     modules/desktop_capture/resolution_tracker.cc
@@ -1939,8 +1946,9 @@ PRIVATE
     modules/desktop_capture/screen_capturer_helper.cc
     modules/desktop_capture/screen_capturer_helper.h
     modules/desktop_capture/screen_capturer_darwin.mm
+    modules/desktop_capture/screen_capturer_linux.cc
     modules/desktop_capture/screen_capturer_win.cc
-    modules/desktop_capture/screen_drawer_win.cc
+    modules/desktop_capture/window_capturer_linux.cc
     modules/desktop_capture/window_capturer_mac.mm
     modules/desktop_capture/window_capturer_win.cc
     modules/desktop_capture/window_finder.cc
@@ -1949,11 +1957,35 @@ PRIVATE
     modules/desktop_capture/window_finder_mac.mm
     modules/desktop_capture/window_finder_win.cc
     modules/desktop_capture/window_finder_win.h
-    
+
     # stubs for non-supported
     modules/desktop_capture/mouse_cursor_monitor_null.cc
     modules/desktop_capture/screen_capturer_null.cc
     modules/desktop_capture/window_capturer_null.cc
+
+    # linux specific
+    modules/desktop_capture/linux/base_capturer_pipewire.cc
+    modules/desktop_capture/linux/base_capturer_pipewire.h
+    modules/desktop_capture/linux/mouse_cursor_monitor_x11.cc
+    modules/desktop_capture/linux/mouse_cursor_monitor_x11.h
+    modules/desktop_capture/linux/screen_capturer_x11.cc
+    modules/desktop_capture/linux/screen_capturer_x11.h
+    modules/desktop_capture/linux/shared_x_display.cc
+    modules/desktop_capture/linux/shared_x_display.h
+    modules/desktop_capture/linux/window_capturer_x11.cc
+    modules/desktop_capture/linux/window_capturer_x11.h
+    modules/desktop_capture/linux/window_finder_x11.cc
+    modules/desktop_capture/linux/window_finder_x11.h
+    modules/desktop_capture/linux/window_list_utils.cc
+    modules/desktop_capture/linux/window_list_utils.h
+    modules/desktop_capture/linux/x_atom_cache.cc
+    modules/desktop_capture/linux/x_atom_cache.h
+    modules/desktop_capture/linux/x_error_trap.cc
+    modules/desktop_capture/linux/x_error_trap.h
+    modules/desktop_capture/linux/x_server_pixel_buffer.cc
+    modules/desktop_capture/linux/x_server_pixel_buffer.h
+    modules/desktop_capture/linux/x_window_property.cc
+    modules/desktop_capture/linux/x_window_property.h
 
     # mac specific
     modules/desktop_capture/mac/desktop_configuration.mm
@@ -2064,7 +2096,7 @@ if (NOT WIN32)
     )
 endif()
 
-if (APPLE OR WIN32)
+if (APPLE OR WIN32 OR UNIX)
     remove_target_sources(tg_owt ${webrtc_loc}
         modules/desktop_capture/window_capturer_null.cc
         modules/desktop_capture/screen_capturer_null.cc
