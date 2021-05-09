@@ -200,11 +200,29 @@ endfunction()
 # x11
 function(link_x11 target_name)
     if (TG_OWT_PACKAGED_BUILD)
-        find_package(X11 REQUIRED COMPONENTS Xtst)
-        target_include_directories(${target_name} PRIVATE ${X11_X11_INCLUDE_PATH})
-        target_include_directories(${target_name} PRIVATE ${X11_Xlib_INCLUDE_PATH})
-        target_link_libraries(${target_name} PRIVATE ${X11_X11_LIB})
-        target_include_directories(${target_name} PRIVATE ${X11_Xtst_INCLUDE_PATH})
-        target_link_libraries(${target_name} PRIVATE ${X11_Xtst_LIB})
+        find_package(X11 REQUIRED COMPONENTS Xcomposite Xdamage Xext Xfixes Xrender Xrandr Xtst)
+        target_include_directories(${target_name}
+        PRIVATE
+            ${X11_X11_INCLUDE_PATH}
+            ${X11_Xlib_INCLUDE_PATH}
+            ${X11_Xcomposite_INCLUDE_PATH}
+            ${X11_Xdamage_INCLUDE_PATH}
+            ${X11_Xext_INCLUDE_PATH}
+            ${X11_Xfixes_INCLUDE_PATH}
+            ${X11_Xrender_INCLUDE_PATH}
+            ${X11_Xrandr_INCLUDE_PATH}
+            ${X11_Xtst_INCLUDE_PATH}
+        )
+        target_link_libraries(${target_name}
+        PRIVATE
+            ${X11_X11_LIB}
+            ${X11_Xcomposite_LIB}
+            ${X11_Xdamage_LIB}
+            ${X11_Xext_LIB}
+            ${X11_Xfixes_LIB}
+            ${X11_Xrender_LIB}
+            ${X11_Xrandr_LIB}
+            ${X11_Xtst_LIB}
+        )
     endif()
 endfunction()
