@@ -92,7 +92,11 @@ if (TG_OWT_USE_PIPEWIRE)
         pipewire_stubs
         ${stubs_loc}/pipewire03.sigs
     )
-    target_compile_definitions(tg_owt PRIVATE WEBRTC_DLOPEN_PIPEWIRE)
+    target_compile_definitions(tg_owt
+    PRIVATE
+        WEBRTC_USE_PIPEWIRE
+        WEBRTC_DLOPEN_PIPEWIRE
+    )
     target_include_directories(tg_owt
     PRIVATE
         ${webrtc_loc}/third_party/pipewire/spa/include
