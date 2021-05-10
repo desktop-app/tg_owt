@@ -509,21 +509,10 @@ void BaseCapturerPipeWire::InitPortal() {
 }
 
 void BaseCapturerPipeWire::InitPipeWire() {
-#if defined(WEBRTC_DLOPEN_PIPEWIRE)
-  StubPathMap paths;
-
-  // Check if the PipeWire library is available.
-#if PW_CHECK_VERSION(0, 3, 0)
-  paths[kModulePipewire03].push_back(kPipeWireLib);
-#else
-  paths[kModulePipewire02].push_back(kPipeWireLib);
-#endif
-  if (!InitializeStubs(paths)) {
-    RTC_LOG(LS_ERROR) << "Failed to load the PipeWire library and symbols.";
+  if (!Supported()) {
     portal_init_failed_ = true;
     return;
   }
-#endif  // defined(WEBRTC_DLOPEN_PIPEWIRE)
 
   pw_init(/*argc=*/nullptr, /*argc=*/nullptr);
 
@@ -1330,9 +1319,30 @@ bool BaseCapturerPipeWire::SelectSource(SourceId id) {
   return true;
 }
 
+bool BaseCapturerPipeWire::Supported() {
+#if defined(WEBRTC_DLOPEN_PIPEWIRE)
+  StubPathMap paths;
+
+  // Check if the PipeWire library is available.
+#if PW_CHECK_VERSION(0, 3, 0)
+  paths[kModulePipewire03].push_back(kPipeWireLib);
+#else
+  paths[kModulePipewire02].push_back(kPipeWireLib);
+#endif
+  if (!InitializeStubs(paths)) {
+    RTC_LOG(LS_ERROR) << "Failed to load the PipeWire library and symbols.";
+    return false;
+  }
+#endif  // defined(WEBRTC_DLOPEN_PIPEWIRE)
+  return true;
+}
+
 // static
 std::unique_ptr<DesktopCapturer> BaseCapturerPipeWire::CreateRawCapturer(
     const DesktopCaptureOptions& options) {
+  if (!BaseCapturerPipeWire::Supported()) {
+    return nullptr;
+  }
   return std::make_unique<BaseCapturerPipeWire>(
       BaseCapturerPipeWire::CaptureSourceType::kAny);
 }
