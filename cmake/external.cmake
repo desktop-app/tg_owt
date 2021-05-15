@@ -199,26 +199,24 @@ endfunction()
 
 function(link_glib target_name)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(GLIB2 REQUIRED IMPORTED_TARGET glib-2.0)
-    pkg_check_modules(GOBJECT REQUIRED IMPORTED_TARGET gobject-2.0)
-    pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
-    pkg_check_modules(GIO_UNIX REQUIRED IMPORTED_TARGET gio-unix-2.0)
-
+    pkg_check_modules(GLIB2 REQUIRED glib-2.0)
+    pkg_check_modules(GOBJECT REQUIRED gobject-2.0)
+    pkg_check_modules(GIO REQUIRED gio-2.0)
+    pkg_check_modules(GIO_UNIX REQUIRED  gio-unix-2.0)
+    target_include_directories(${target_name}
+    PRIVATE
+        ${GIO_UNIX_INCLUDE_DIRS}
+        ${GIO_INCLUDE_DIRS}
+        ${GOBJECT_INCLUDE_DIRS}
+        ${GLIB2_INCLUDE_DIRS}
+    )
     if (TG_OWT_PACKAGED_BUILD)
         target_link_libraries(${target_name}
         PRIVATE
-            PkgConfig::GIO_UNIX
-            PkgConfig::GIO
-            PkgConfig::GOBJECT
-            PkgConfig::GLIB2
-        )
-    else()
-        target_include_directories(${target_name}
-        PRIVATE
-            ${GIO_UNIX_INCLUDE_DIRS}
-            ${GIO_INCLUDE_DIRS}
-            ${GOBJECT_INCLUDE_DIRS}
-            ${GLIB2_INCLUDE_DIRS}
+            ${GIO_UNIX_LINK_LIBRARIES}
+            ${GIO_LINK_LIBRARIES}
+            ${GOBJECT_LINK_LIBRARIES}
+            ${GLIB2_LINK_LIBRARIES}
         )
     endif()
 endfunction()
