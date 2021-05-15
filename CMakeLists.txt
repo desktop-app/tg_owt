@@ -18,9 +18,15 @@ else()
     set(TG_OWT_PACKAGED_BUILD 1)
 endif()
 
+set(not_packaged_build 0)
+if (NOT TG_OWT_PACKAGED_BUILD)
+    set(not_packaged_build 1)
+endif()
+
 option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." ${TG_OWT_PACKAGED_BUILD})
 option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
-option(TG_OWT_USE_PIPEWIRE "Use dlopen-ed pipewire 0.3 for desktop capture on non-Apple Unix." ON)
+option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture on non-Apple Unix." ON)
+option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire 0.3 for desktop capture on non-Apple Unix." ${not_packaged_build})
 
 if (NOT UNIX OR APPLE)
     set(TG_OWT_USE_PIPEWIRE OFF)
@@ -85,24 +91,31 @@ add_library(tg_owt)
 init_target(tg_owt)
 
 if (TG_OWT_USE_PIPEWIRE)
-    include(cmake/generate_stubs.cmake)
-    set(stubs_loc ${webrtc_loc}/modules/desktop_capture/linux)
-    generate_stubs(tg_owt
-        ${stubs_loc}/pipewire_stub_header.fragment
-        pipewire_stubs
-        ${stubs_loc}/pipewire03.sigs
-    )
     target_compile_definitions(tg_owt
     PRIVATE
         WEBRTC_USE_PIPEWIRE
-        WEBRTC_DLOPEN_PIPEWIRE
     )
-    target_include_directories(tg_owt
-    PRIVATE
-        ${webrtc_loc}/third_party/pipewire/spa/include
-        ${webrtc_loc}/third_party/pipewire/src
-        ${webrtc_loc}/third_party/pipewire/build/src
-    )
+    if (TG_OWT_DLOPEN_PIPEWIRE)
+        include(cmake/generate_stubs.cmake)
+        set(stubs_loc ${webrtc_loc}/modules/desktop_capture/linux)
+        generate_stubs(tg_owt
+            ${stubs_loc}/pipewire_stub_header.fragment
+            pipewire_stubs
+            ${stubs_loc}/pipewire03.sigs
+        )
+        target_compile_definitions(tg_owt
+        PRIVATE
+            WEBRTC_DLOPEN_PIPEWIRE
+        )
+        target_include_directories(tg_owt
+        PRIVATE
+            ${webrtc_loc}/third_party/pipewire/spa/include
+            ${webrtc_loc}/third_party/pipewire/src
+            ${webrtc_loc}/third_party/pipewire/build/src
+        )
+    else()
+        link_pipewire(tg_owt)
+    endif()
 endif()
 
 set_target_properties(tg_owt PROPERTIES SOVERSION 0 VERSION 0.0.0)

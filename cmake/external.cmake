@@ -252,3 +252,11 @@ function(link_x11 target_name)
         )
     endif()
 endfunction()
+
+# pipewire
+function(link_pipewire target_name)
+    find_package(PkgConfig REQUIRED)
+    pkg_search_module(PIPEWIRE REQUIRED libpipewire-0.3 libpipewire-0.2)
+    target_include_directories(${target_name} PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
+    target_link_libraries(${target_name} PRIVATE ${PIPEWIRE_LINK_LIBRARIES})
+endfunction()
