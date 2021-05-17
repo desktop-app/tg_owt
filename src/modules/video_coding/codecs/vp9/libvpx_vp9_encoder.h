@@ -28,6 +28,7 @@
 #include "modules/video_coding/codecs/vp9/vp9_frame_buffer_pool.h"
 #include "modules/video_coding/svc/scalable_video_controller.h"
 #include "modules/video_coding/utility/framerate_controller.h"
+#include "rtc_base/experiments/encoder_info_settings.h"
 #include "vpx/vp8cx.h"
 
 namespace webrtc {
@@ -64,7 +65,7 @@ class LibvpxVp9Encoder : public VP9Encoder {
   // Call encoder initialize function and set control settings.
   int InitAndSetControlSettings(const VideoCodec* inst);
 
-  void PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
+  bool PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
                              absl::optional<int>* spatial_idx,
                              const vpx_codec_cx_pkt& pkt,
                              uint32_t timestamp);
@@ -81,7 +82,7 @@ class LibvpxVp9Encoder : public VP9Encoder {
   bool ExplicitlyConfiguredSpatialLayers() const;
   bool SetSvcRates(const VideoBitrateAllocation& bitrate_allocation);
 
-  virtual int GetEncodedLayerFrame(const vpx_codec_cx_pkt* pkt);
+  void GetEncodedLayerFrame(const vpx_codec_cx_pkt* pkt);
 
   // Callback function for outputting packets per spatial layer.
   static void EncoderOutputCodedPacketCallback(vpx_codec_cx_pkt* pkt,
@@ -230,6 +231,8 @@ class LibvpxVp9Encoder : public VP9Encoder {
   int num_steady_state_frames_;
   // Only set config when this flag is set.
   bool config_changed_;
+
+  const LibvpxVp9EncoderInfoSettings encoder_info_override_;
 };
 
 }  // namespace webrtc

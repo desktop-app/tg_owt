@@ -49,8 +49,6 @@
 
 namespace webrtc {
 
-constexpr int kRuntimeSettingQueueSize = 100;
-
 namespace {
 
 static bool LayoutHasKeyboard(AudioProcessing::ChannelLayout layout) {
@@ -253,8 +251,8 @@ AudioProcessingImpl::AudioProcessingImpl(
           new ApmDataDumper(rtc::AtomicOps::Increment(&instance_count_))),
       use_setup_specific_default_aec3_config_(
           UseSetupSpecificDefaultAec3Congfig()),
-      capture_runtime_settings_(kRuntimeSettingQueueSize),
-      render_runtime_settings_(kRuntimeSettingQueueSize),
+      capture_runtime_settings_(RuntimeSettingQueueSize()),
+      render_runtime_settings_(RuntimeSettingQueueSize()),
       capture_runtime_settings_enqueuer_(&capture_runtime_settings_),
       render_runtime_settings_enqueuer_(&render_runtime_settings_),
       echo_control_factory_(std::move(echo_control_factory)),
@@ -304,8 +302,6 @@ AudioProcessingImpl::AudioProcessingImpl(
       config.Get<ExperimentalAgc>().startup_min_volume;
   config_.gain_controller1.analog_gain_controller.clipped_level_min =
       config.Get<ExperimentalAgc>().clipped_level_min;
-  config_.gain_controller1.analog_gain_controller.enable_agc2_level_estimator =
-      config.Get<ExperimentalAgc>().enabled_agc2_level_estimator;
   config_.gain_controller1.analog_gain_controller.enable_digital_adaptive =
       !config.Get<ExperimentalAgc>().digital_adaptive_disabled;
 #endif
@@ -666,35 +662,53 @@ size_t AudioProcessingImpl::num_output_channels() const {
 
 void AudioProcessingImpl::set_output_will_be_muted(bool muted) {
   MutexLock lock(&mutex_capture_);
-  capture_.output_will_be_muted = muted;
+  HandleCaptureOutputUsedSetting(!muted);
+}
+
+void AudioProcessingImpl::HandleCaptureOutputUsedSetting(
+    bool capture_output_used) {
+  capture_.capture_output_used = capture_output_used;
   if (submodules_.agc_manager.get()) {
-    submodules_.agc_manager->SetCaptureMuted(capture_.output_will_be_muted);
+    submodules_.agc_manager->HandleCaptureOutputUsedChange(
+        capture_.capture_output_used);
+  }
+  if (submodules_.echo_controller) {
+    submodules_.echo_controller->SetCaptureOutputUsage(
+        capture_.capture_output_used);
   }
 }
 
 void AudioProcessingImpl::SetRuntimeSetting(RuntimeSetting setting) {
+  PostRuntimeSetting(setting);
+}
+
+bool AudioProcessingImpl::PostRuntimeSetting(RuntimeSetting setting) {
   switch (setting.type()) {
     case RuntimeSetting::Type::kCustomRenderProcessingRuntimeSetting:
     case RuntimeSetting::Type::kPlayoutAudioDeviceChange:
-      render_runtime_settings_enqueuer_.Enqueue(setting);
-      return;
+      return render_runtime_settings_enqueuer_.Enqueue(setting);
     case RuntimeSetting::Type::kCapturePreGain:
     case RuntimeSetting::Type::kCaptureCompressionGain:
     case RuntimeSetting::Type::kCaptureFixedPostGain:
     case RuntimeSetting::Type::kCaptureOutputUsed:
-      capture_runtime_settings_enqueuer_.Enqueue(setting);
-      return;
-    case RuntimeSetting::Type::kPlayoutVolumeChange:
-      capture_runtime_settings_enqueuer_.Enqueue(setting);
-      render_runtime_settings_enqueuer_.Enqueue(setting);
-      return;
+      return capture_runtime_settings_enqueuer_.Enqueue(setting);
+    case RuntimeSetting::Type::kPlayoutVolumeChange: {
+      bool enqueueing_successful;
+      enqueueing_successful =
+          capture_runtime_settings_enqueuer_.Enqueue(setting);
+      enqueueing_successful =
+          render_runtime_settings_enqueuer_.Enqueue(setting) &&
+          enqueueing_successful;
+      return enqueueing_successful;
+    }
     case RuntimeSetting::Type::kNotSpecified:
       RTC_NOTREACHED();
-      return;
+      return true;
   }
   // The language allows the enum to have a non-enumerator
   // value. Check that this doesn't happen.
   RTC_NOTREACHED();
+  return true;
 }
 
 AudioProcessingImpl::RuntimeSettingEnqueuer::RuntimeSettingEnqueuer(
@@ -706,20 +720,15 @@ AudioProcessingImpl::RuntimeSettingEnqueuer::RuntimeSettingEnqueuer(
 AudioProcessingImpl::RuntimeSettingEnqueuer::~RuntimeSettingEnqueuer() =
     default;
 
-void AudioProcessingImpl::RuntimeSettingEnqueuer::Enqueue(
+bool AudioProcessingImpl::RuntimeSettingEnqueuer::Enqueue(
     RuntimeSetting setting) {
-  int remaining_attempts = 10;
-  while (!runtime_settings_.Insert(&setting) && remaining_attempts-- > 0) {
-    RuntimeSetting setting_to_discard;
-    if (runtime_settings_.Remove(&setting_to_discard)) {
-      RTC_LOG(LS_ERROR)
-          << "The runtime settings queue is full. Oldest setting discarded.";
-    }
-  }
-  if (remaining_attempts == 0) {
+  const bool successful_insert = runtime_settings_.Insert(&setting);
+
+  if (!successful_insert) {
     RTC_HISTOGRAM_BOOLEAN("WebRTC.Audio.ApmRuntimeSettingCannotEnqueue", 1);
     RTC_LOG(LS_ERROR) << "Cannot enqueue a new runtime setting.";
   }
+  return successful_insert;
 }
 
 int AudioProcessingImpl::MaybeInitializeCapture(
@@ -793,6 +802,7 @@ int AudioProcessingImpl::ProcessStream(const float* const* src,
 
 void AudioProcessingImpl::HandleCaptureRuntimeSettings() {
   RuntimeSetting setting;
+  int num_settings_processed = 0;
   while (capture_runtime_settings_.Remove(&setting)) {
     if (aec_dump_) {
       aec_dump_->WriteRuntimeSetting(setting);
@@ -846,10 +856,28 @@ void AudioProcessingImpl::HandleCaptureRuntimeSettings() {
         RTC_NOTREACHED();
         break;
       case RuntimeSetting::Type::kCaptureOutputUsed:
-        // TODO(b/154437967): Add support for reducing complexity when it is
-        // known that the capture output will not be used.
+        bool value;
+        setting.GetBool(&value);
+        HandleCaptureOutputUsedSetting(value);
         break;
     }
+    ++num_settings_processed;
+  }
+
+  if (num_settings_processed >= RuntimeSettingQueueSize()) {
+    // Handle overrun of the runtime settings queue, which likely will has
+    // caused settings to be discarded.
+    HandleOverrunInCaptureRuntimeSettingsQueue();
+  }
+}
+
+void AudioProcessingImpl::HandleOverrunInCaptureRuntimeSettingsQueue() {
+  // Fall back to a safe state for the case when a setting for capture output
+  // usage setting has been missed.
+  capture_.capture_output_used = true;
+  if (submodules_.echo_controller) {
+    submodules_.echo_controller->SetCaptureOutputUsage(
+        capture_.capture_output_used);
   }
 }
 
@@ -1576,14 +1604,6 @@ void AudioProcessingImpl::DetachAecDump() {
   }
 }
 
-void AudioProcessingImpl::MutateConfig(
-    rtc::FunctionView<void(AudioProcessing::Config*)> mutator) {
-  MutexLock lock_render(&mutex_render_);
-  MutexLock lock_capture(&mutex_capture_);
-  mutator(&config_);
-  ApplyConfig(config_);
-}
-
 AudioProcessing::Config AudioProcessingImpl::GetConfig() const {
   MutexLock lock_render(&mutex_render_);
   MutexLock lock_capture(&mutex_capture_);
@@ -1782,8 +1802,6 @@ void AudioProcessingImpl::InitializeGainController1() {
         num_proc_channels(),
         config_.gain_controller1.analog_gain_controller.startup_min_volume,
         config_.gain_controller1.analog_gain_controller.clipped_level_min,
-        config_.gain_controller1.analog_gain_controller
-            .enable_agc2_level_estimator,
         !config_.gain_controller1.analog_gain_controller
              .enable_digital_adaptive,
         capture_nonlocked_.split_rate));
@@ -1794,7 +1812,8 @@ void AudioProcessingImpl::InitializeGainController1() {
   submodules_.agc_manager->Initialize();
   submodules_.agc_manager->SetupDigitalGainControl(
       submodules_.gain_control.get());
-  submodules_.agc_manager->SetCaptureMuted(capture_.output_will_be_muted);
+  submodules_.agc_manager->HandleCaptureOutputUsedChange(
+      capture_.capture_output_used);
 }
 
 void AudioProcessingImpl::InitializeGainController2() {
@@ -2005,7 +2024,7 @@ void AudioProcessingImpl::RecordAudioProcessingState() {
 
 AudioProcessingImpl::ApmCaptureState::ApmCaptureState()
     : was_stream_delay_set(false),
-      output_will_be_muted(false),
+      capture_output_used(true),
       key_pressed(false),
       capture_processing_format(kSampleRate16kHz),
       split_rate(kSampleRate16kHz),

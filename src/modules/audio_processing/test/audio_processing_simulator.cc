@@ -122,7 +122,16 @@ AudioProcessingSimulator::AudioProcessingSimulator(
           settings_.simulate_mic_gain ? *settings.simulated_mic_kind : 0),
       worker_queue_("file_writer_task_queue") {
   RTC_CHECK(!settings_.dump_internal_data || WEBRTC_APM_DEBUG_DUMP == 1);
-  ApmDataDumper::SetActivated(settings_.dump_internal_data);
+  if (settings_.dump_start_frame || settings_.dump_end_frame) {
+    ApmDataDumper::SetActivated(!settings_.dump_start_frame);
+  } else {
+    ApmDataDumper::SetActivated(settings_.dump_internal_data);
+  }
+
+  if (settings_.dump_set_to_use) {
+    ApmDataDumper::SetDumpSetToUse(*settings_.dump_set_to_use);
+  }
+
   if (settings_.dump_internal_data_output_dir.has_value()) {
     ApmDataDumper::SetOutputDirectory(
         settings_.dump_internal_data_output_dir.value());
@@ -215,6 +224,20 @@ void AudioProcessingSimulator::ProcessStream(bool fixed_interface) {
     ap_->set_stream_analog_level(settings_.aec_dump_input_filename
                                      ? aec_dump_mic_level_
                                      : analog_mic_level_);
+  }
+
+  // Post any scheduled runtime settings.
+  if (settings_.frame_for_sending_capture_output_used_false &&
+      *settings_.frame_for_sending_capture_output_used_false ==
+          static_cast<int>(num_process_stream_calls_)) {
+    ap_->PostRuntimeSetting(
+        AudioProcessing::RuntimeSetting::CreateCaptureOutputUsedSetting(false));
+  }
+  if (settings_.frame_for_sending_capture_output_used_true &&
+      *settings_.frame_for_sending_capture_output_used_true ==
+          static_cast<int>(num_process_stream_calls_)) {
+    ap_->PostRuntimeSetting(
+        AudioProcessing::RuntimeSetting::CreateCaptureOutputUsedSetting(true));
   }
 
   // Process the current audio frame.
@@ -357,6 +380,28 @@ void AudioProcessingSimulator::SetupBuffersConfigsOutputs(
   SetupOutput();
 }
 
+void AudioProcessingSimulator::SelectivelyToggleDataDumping(
+    int init_index,
+    int capture_frames_since_init) const {
+  if (!(settings_.dump_start_frame || settings_.dump_end_frame)) {
+    return;
+  }
+
+  if (settings_.init_to_process && *settings_.init_to_process != init_index) {
+    return;
+  }
+
+  if (settings_.dump_start_frame &&
+      *settings_.dump_start_frame == capture_frames_since_init) {
+    ApmDataDumper::SetActivated(true);
+  }
+
+  if (settings_.dump_end_frame &&
+      *settings_.dump_end_frame == capture_frames_since_init) {
+    ApmDataDumper::SetActivated(false);
+  }
+}
+
 void AudioProcessingSimulator::SetupOutput() {
   if (settings_.output_filename) {
     std::string filename;
@@ -496,11 +541,6 @@ void AudioProcessingSimulator::ConfigureAudioProcessor() {
   if (settings_.use_analog_agc) {
     apm_config.gain_controller1.analog_gain_controller.enabled =
         *settings_.use_analog_agc;
-  }
-  if (settings_.use_analog_agc_agc2_level_estimator) {
-    apm_config.gain_controller1.analog_gain_controller
-        .enable_agc2_level_estimator =
-        *settings_.use_analog_agc_agc2_level_estimator;
   }
   if (settings_.analog_agc_disable_digital_adaptive) {
     apm_config.gain_controller1.analog_gain_controller.enable_digital_adaptive =

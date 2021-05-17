@@ -13,6 +13,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <functional>
 #include <map>
 #include <memory>
@@ -33,6 +34,7 @@
 #include "api/rtp_transceiver_direction.h"
 #include "api/rtp_transceiver_interface.h"
 #include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
 #include "api/set_local_description_observer_interface.h"
 #include "api/set_remote_description_observer_interface.h"
 #include "api/transport/data_channel_transport_interface.h"
@@ -69,7 +71,6 @@
 #include "rtc_base/race_checker.h"
 #include "rtc_base/rtc_certificate.h"
 #include "rtc_base/ssl_stream_adapter.h"
-#include "rtc_base/synchronization/sequence_checker.h"
 #include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
@@ -455,31 +456,14 @@ class SdpOfferAnswerHandler : public SdpStateProvider,
       cricket::MediaType media_type,
       StreamCollection* new_streams);
 
+  // Enables media channels to allow sending of media.
+  // This enables media to flow on all configured audio/video channels and the
+  // RtpDataChannel.
+  void EnableSending();
   // Push the media parts of the local or remote session description
-  // down to all of the channels, and enable sending if applicable.
+  // down to all of the channels.
   RTCError PushdownMediaDescription(SdpType type,
                                     cricket::ContentSource source);
-
-  struct PayloadTypeDemuxingUpdate {
-    PayloadTypeDemuxingUpdate(cricket::ChannelInterface* channel, bool enabled)
-        : channel(channel), enabled(enabled) {}
-    cricket::ChannelInterface* channel;
-    bool enabled;
-  };
-  struct ContentUpdate {
-    ContentUpdate(cricket::ChannelInterface* channel,
-                  const cricket::MediaContentDescription* content_description)
-        : channel(channel), content_description(content_description) {}
-    cricket::ChannelInterface* channel;
-    const cricket::MediaContentDescription* content_description;
-  };
-  // Helper method used by PushdownMediaDescription to apply a batch of updates
-  // to BaseChannels on the worker thread.
-  RTCError ApplyChannelUpdates(
-      SdpType type,
-      cricket::ContentSource source,
-      std::vector<PayloadTypeDemuxingUpdate> payload_type_demuxing_updates,
-      std::vector<ContentUpdate> content_updates);
 
   RTCError PushdownTransportDescription(cricket::ContentSource source,
                                         SdpType type);
@@ -510,8 +494,6 @@ class SdpOfferAnswerHandler : public SdpStateProvider,
   bool ReadyToUseRemoteCandidate(const IceCandidateInterface* candidate,
                                  const SessionDescriptionInterface* remote_desc,
                                  bool* valid);
-  void ReportRemoteIceCandidateAdded(const cricket::Candidate& candidate)
-      RTC_RUN_ON(signaling_thread());
 
   RTCErrorOr<const cricket::ContentInfo*> FindContentInfo(
       const SessionDescriptionInterface* description,
@@ -567,14 +549,9 @@ class SdpOfferAnswerHandler : public SdpStateProvider,
       const std::string& mid) const;
 
   const std::string GetTransportName(const std::string& content_name);
-
-  // Based on number of transceivers per media type, and their bundle status and
-  // payload types, determine whether payload type based demuxing should be
-  // enabled or disabled. Returns a list of channels and the corresponding
-  // value to be passed into SetPayloadTypeDemuxingEnabled, so that this action
-  // can be combined with other operations on the worker thread.
-  std::vector<PayloadTypeDemuxingUpdate> GetPayloadTypeDemuxingUpdates(
-      cricket::ContentSource source);
+  // Based on number of transceivers per media type, enabled or disable
+  // payload type based demuxing in the affected channels.
+  bool UpdatePayloadTypeDemuxingState(cricket::ContentSource source);
 
   // ==================================================================
   // Access to pc_ variables

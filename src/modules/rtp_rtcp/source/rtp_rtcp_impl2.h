@@ -21,6 +21,7 @@
 
 #include "absl/types/optional.h"
 #include "api/rtp_headers.h"
+#include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/video/video_bitrate_allocation.h"
 #include "modules/include/module_fec_types.h"
@@ -36,7 +37,6 @@
 #include "modules/rtp_rtcp/source/rtp_sender_egress.h"
 #include "rtc_base/gtest_prod_util.h"
 #include "rtc_base/synchronization/mutex.h"
-#include "rtc_base/synchronization/sequence_checker.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/task_utils/pending_task_safety_flag.h"
 #include "rtc_base/task_utils/repeating_task.h"
@@ -239,10 +239,6 @@ class ModuleRtpRtcpImpl2 final : public RtpRtcpInterface,
                                uint16_t last_received_seq_num,
                                bool decodability_flag,
                                bool buffering_allowed) override;
-
-  bool LastReceivedNTP(uint32_t* NTPsecs,
-                       uint32_t* NTPfrac,
-                       uint32_t* remote_sr) const;
 
   RtpSendRates GetSendRates() const override;
 

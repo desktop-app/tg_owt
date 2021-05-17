@@ -331,18 +331,15 @@ class ChannelTest : public ::testing::Test, public sigslot::has_slots<> {
 
   bool SendInitiate() {
     bool result = channel1_->SetLocalContent(&local_media_content1_,
-                                             SdpType::kOffer, NULL) &&
-                  channel1_->UpdateRtpTransport(nullptr);
+                                             SdpType::kOffer, NULL);
     if (result) {
       channel1_->Enable(true);
       result = channel2_->SetRemoteContent(&remote_media_content1_,
-                                           SdpType::kOffer, NULL) &&
-               channel2_->UpdateRtpTransport(nullptr);
+                                           SdpType::kOffer, NULL);
       if (result) {
         ConnectFakeTransports();
         result = channel2_->SetLocalContent(&local_media_content2_,
-                                            SdpType::kAnswer, NULL) &&
-                 channel2_->UpdateRtpTransport(nullptr);
+                                            SdpType::kAnswer, NULL);
       }
     }
     return result;
@@ -351,32 +348,27 @@ class ChannelTest : public ::testing::Test, public sigslot::has_slots<> {
   bool SendAccept() {
     channel2_->Enable(true);
     return channel1_->SetRemoteContent(&remote_media_content2_,
-                                       SdpType::kAnswer, NULL) &&
-           channel1_->UpdateRtpTransport(nullptr);
+                                       SdpType::kAnswer, NULL);
   }
 
   bool SendOffer() {
     bool result = channel1_->SetLocalContent(&local_media_content1_,
-                                             SdpType::kOffer, NULL) &&
-                  channel1_->UpdateRtpTransport(nullptr);
+                                             SdpType::kOffer, NULL);
     if (result) {
       channel1_->Enable(true);
       result = channel2_->SetRemoteContent(&remote_media_content1_,
-                                           SdpType::kOffer, NULL) &&
-               channel2_->UpdateRtpTransport(nullptr);
+                                           SdpType::kOffer, NULL);
     }
     return result;
   }
 
   bool SendProvisionalAnswer() {
     bool result = channel2_->SetLocalContent(&local_media_content2_,
-                                             SdpType::kPrAnswer, NULL) &&
-                  channel2_->UpdateRtpTransport(nullptr);
+                                             SdpType::kPrAnswer, NULL);
     if (result) {
       channel2_->Enable(true);
       result = channel1_->SetRemoteContent(&remote_media_content2_,
-                                           SdpType::kPrAnswer, NULL) &&
-               channel1_->UpdateRtpTransport(nullptr);
+                                           SdpType::kPrAnswer, NULL);
       ConnectFakeTransports();
     }
     return result;
@@ -384,12 +376,10 @@ class ChannelTest : public ::testing::Test, public sigslot::has_slots<> {
 
   bool SendFinalAnswer() {
     bool result = channel2_->SetLocalContent(&local_media_content2_,
-                                             SdpType::kAnswer, NULL) &&
-                  channel2_->UpdateRtpTransport(nullptr);
+                                             SdpType::kAnswer, NULL);
     if (result)
       result = channel1_->SetRemoteContent(&remote_media_content2_,
-                                           SdpType::kAnswer, NULL) &&
-               channel1_->UpdateRtpTransport(nullptr);
+                                           SdpType::kAnswer, NULL);
     return result;
   }
 
@@ -622,12 +612,10 @@ class ChannelTest : public ::testing::Test, public sigslot::has_slots<> {
     CreateContent(0, kPcmuCodec, kH264Codec, &content1);
     content1.AddStream(stream1);
     EXPECT_TRUE(channel1_->SetLocalContent(&content1, SdpType::kOffer, NULL));
-    EXPECT_TRUE(channel1_->UpdateRtpTransport(nullptr));
     EXPECT_TRUE(channel1_->Enable(true));
     EXPECT_EQ(1u, media_channel1_->send_streams().size());
 
     EXPECT_TRUE(channel2_->SetRemoteContent(&content1, SdpType::kOffer, NULL));
-    EXPECT_TRUE(channel2_->UpdateRtpTransport(nullptr));
     EXPECT_EQ(1u, media_channel2_->recv_streams().size());
     ConnectFakeTransports();
 
@@ -635,10 +623,8 @@ class ChannelTest : public ::testing::Test, public sigslot::has_slots<> {
     typename T::Content content2;
     CreateContent(0, kPcmuCodec, kH264Codec, &content2);
     EXPECT_TRUE(channel1_->SetRemoteContent(&content2, SdpType::kAnswer, NULL));
-    EXPECT_TRUE(channel1_->UpdateRtpTransport(nullptr));
     EXPECT_EQ(0u, media_channel1_->recv_streams().size());
     EXPECT_TRUE(channel2_->SetLocalContent(&content2, SdpType::kAnswer, NULL));
-    EXPECT_TRUE(channel2_->UpdateRtpTransport(nullptr));
     EXPECT_TRUE(channel2_->Enable(true));
     EXPECT_EQ(0u, media_channel2_->send_streams().size());
 
@@ -651,12 +637,10 @@ class ChannelTest : public ::testing::Test, public sigslot::has_slots<> {
     CreateContent(0, kPcmuCodec, kH264Codec, &content3);
     content3.AddStream(stream2);
     EXPECT_TRUE(channel2_->SetLocalContent(&content3, SdpType::kOffer, NULL));
-    EXPECT_TRUE(channel2_->UpdateRtpTransport(nullptr));
     ASSERT_EQ(1u, media_channel2_->send_streams().size());
     EXPECT_EQ(stream2, media_channel2_->send_streams()[0]);
 
     EXPECT_TRUE(channel1_->SetRemoteContent(&content3, SdpType::kOffer, NULL));
-    EXPECT_TRUE(channel1_->UpdateRtpTransport(nullptr));
     ASSERT_EQ(1u, media_channel1_->recv_streams().size());
     EXPECT_EQ(stream2, media_channel1_->recv_streams()[0]);
 
@@ -664,11 +648,9 @@ class ChannelTest : public ::testing::Test, public sigslot::has_slots<> {
     typename T::Content content4;
     CreateContent(0, kPcmuCodec, kH264Codec, &content4);
     EXPECT_TRUE(channel1_->SetLocalContent(&content4, SdpType::kAnswer, NULL));
-    EXPECT_TRUE(channel1_->UpdateRtpTransport(nullptr));
     EXPECT_EQ(0u, media_channel1_->send_streams().size());
 
     EXPECT_TRUE(channel2_->SetRemoteContent(&content4, SdpType::kAnswer, NULL));
-    EXPECT_TRUE(channel2_->UpdateRtpTransport(nullptr));
     EXPECT_EQ(0u, media_channel2_->recv_streams().size());
 
     SendCustomRtp2(kSsrc2, 0);
@@ -1223,11 +1205,13 @@ class ChannelTest : public ::testing::Test, public sigslot::has_slots<> {
     CreateChannels(0, 0);
     EXPECT_FALSE(media_channel1_->ready_to_send());
 
-    channel1_->OnTransportReadyToSend(true);
+    network_thread_->PostTask(
+        RTC_FROM_HERE, [this] { channel1_->OnTransportReadyToSend(true); });
     WaitForThreads();
     EXPECT_TRUE(media_channel1_->ready_to_send());
 
-    channel1_->OnTransportReadyToSend(false);
+    network_thread_->PostTask(
+        RTC_FROM_HERE, [this] { channel1_->OnTransportReadyToSend(false); });
     WaitForThreads();
     EXPECT_FALSE(media_channel1_->ready_to_send());
   }

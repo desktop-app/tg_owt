@@ -316,8 +316,6 @@ RtpVideoStreamReceiver2::RtpVideoStreamReceiver2(
 }
 
 RtpVideoStreamReceiver2::~RtpVideoStreamReceiver2() {
-  RTC_DCHECK(secondary_sinks_.empty());
-
   process_thread_->DeRegisterModule(rtp_rtcp_.get());
 
   if (packet_router_)
@@ -704,8 +702,8 @@ void RtpVideoStreamReceiver2::OnRtpPacket(const RtpPacketReceived& packet) {
     rtp_receive_statistics_->OnRtpPacket(packet);
   }
 
-  for (RtpPacketSinkInterface* secondary_sink : secondary_sinks_) {
-    secondary_sink->OnRtpPacket(packet);
+  if (config_.rtp.packet_sink_) {
+    config_.rtp.packet_sink_->OnRtpPacket(packet);
   }
 }
 
@@ -895,11 +893,10 @@ void RtpVideoStreamReceiver2::OnCompleteFrame(
   RTC_DCHECK_RUN_ON(&worker_task_checker_);
   video_coding::RtpFrameObject* rtp_frame =
       static_cast<video_coding::RtpFrameObject*>(frame.get());
-  last_seq_num_for_pic_id_[rtp_frame->id.picture_id] =
-      rtp_frame->last_seq_num();
+  last_seq_num_for_pic_id_[rtp_frame->Id()] = rtp_frame->last_seq_num();
 
   last_completed_picture_id_ =
-      std::max(last_completed_picture_id_, frame->id.picture_id);
+      std::max(last_completed_picture_id_, frame->Id());
   complete_frame_callback_->OnCompleteFrame(std::move(frame));
 }
 
@@ -945,32 +942,13 @@ void RtpVideoStreamReceiver2::UpdateRtt(int64_t max_rtt_ms) {
 }
 
 absl::optional<int64_t> RtpVideoStreamReceiver2::LastReceivedPacketMs() const {
-  return packet_buffer_.LastReceivedPacketMs();
+  RTC_DCHECK_RUN_ON(&worker_task_checker_);
+  return last_received_rtp_system_time_ms_;
 }
 
 absl::optional<int64_t> RtpVideoStreamReceiver2::LastReceivedKeyframePacketMs()
     const {
   return packet_buffer_.LastReceivedKeyframePacketMs();
-}
-
-void RtpVideoStreamReceiver2::AddSecondarySink(RtpPacketSinkInterface* sink) {
-  RTC_DCHECK_RUN_ON(&worker_task_checker_);
-  RTC_DCHECK(!absl::c_linear_search(secondary_sinks_, sink));
-  secondary_sinks_.push_back(sink);
-}
-
-void RtpVideoStreamReceiver2::RemoveSecondarySink(
-    const RtpPacketSinkInterface* sink) {
-  RTC_DCHECK_RUN_ON(&worker_task_checker_);
-  auto it = absl::c_find(secondary_sinks_, sink);
-  if (it == secondary_sinks_.end()) {
-    // We might be rolling-back a call whose setup failed mid-way. In such a
-    // case, it's simpler to remove "everything" rather than remember what
-    // has already been added.
-    RTC_LOG(LS_WARNING) << "Removal of unknown sink.";
-    return;
-  }
-  secondary_sinks_.erase(it);
 }
 
 void RtpVideoStreamReceiver2::ManageFrame(

@@ -18,6 +18,7 @@
 
 #include "absl/types/optional.h"
 #include "api/crypto/frame_decryptor_interface.h"
+#include "api/sequence_checker.h"
 #include "api/video/color_space.h"
 #include "api/video_codecs/video_codec.h"
 #include "call/rtp_packet_sink_interface.h"
@@ -45,7 +46,6 @@
 #include "rtc_base/constructor_magic.h"
 #include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/numerics/sequence_number_util.h"
-#include "rtc_base/synchronization/sequence_checker.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/thread_annotations.h"
 #include "video/buffered_frame_decryptor.h"
@@ -177,13 +177,6 @@ class RtpVideoStreamReceiver2 : public LossNotificationSender,
 
   absl::optional<int64_t> LastReceivedPacketMs() const;
   absl::optional<int64_t> LastReceivedKeyframePacketMs() const;
-
-  // RtpDemuxer only forwards a given RTP packet to one sink. However, some
-  // sinks, such as FlexFEC, might wish to be informed of all of the packets
-  // a given sink receives (or any set of sinks). They may do so by registering
-  // themselves as secondary sinks.
-  void AddSecondarySink(RtpPacketSinkInterface* sink);
-  void RemoveSecondarySink(const RtpPacketSinkInterface* sink);
 
  private:
   // Implements RtpVideoFrameReceiver.
@@ -345,9 +338,6 @@ class RtpVideoStreamReceiver2 : public LossNotificationSender,
   int16_t last_payload_type_ RTC_GUARDED_BY(worker_task_checker_) = -1;
 
   bool has_received_frame_ RTC_GUARDED_BY(worker_task_checker_);
-
-  std::vector<RtpPacketSinkInterface*> secondary_sinks_
-      RTC_GUARDED_BY(worker_task_checker_);
 
   absl::optional<uint32_t> last_received_rtp_timestamp_
       RTC_GUARDED_BY(worker_task_checker_);

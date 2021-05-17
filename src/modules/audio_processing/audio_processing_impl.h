@@ -82,6 +82,7 @@ class AudioProcessingImpl : public AudioProcessing {
   void AttachAecDump(std::unique_ptr<AecDump> aec_dump) override;
   void DetachAecDump() override;
   void SetRuntimeSetting(RuntimeSetting setting) override;
+  bool PostRuntimeSetting(RuntimeSetting setting) override;
 
   // Capture-side exclusive methods possibly running APM in a
   // multi-threaded manner. Acquire the capture lock.
@@ -96,6 +97,8 @@ class AudioProcessingImpl : public AudioProcessing {
   bool GetLinearAecOutput(
       rtc::ArrayView<std::array<float, 160>> linear_output) const override;
   void set_output_will_be_muted(bool muted) override;
+  void HandleCaptureOutputUsedSetting(bool capture_output_used)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
   int set_stream_delay_ms(int delay) override;
   void set_stream_key_pressed(bool key_pressed) override;
   void set_stream_analog_level(int level) override;
@@ -133,8 +136,6 @@ class AudioProcessingImpl : public AudioProcessing {
     return stats_reporter_.GetStatistics();
   }
 
-  // TODO(peah): Remove MutateConfig once the new API allows that.
-  void MutateConfig(rtc::FunctionView<void(AudioProcessing::Config*)> mutator);
   AudioProcessing::Config GetConfig() const override;
 
  protected:
@@ -168,7 +169,9 @@ class AudioProcessingImpl : public AudioProcessing {
     explicit RuntimeSettingEnqueuer(
         SwapQueue<RuntimeSetting>* runtime_settings);
     ~RuntimeSettingEnqueuer();
-    void Enqueue(RuntimeSetting setting);
+
+    // Enqueue setting and return whether the setting was successfully enqueued.
+    bool Enqueue(RuntimeSetting setting);
 
    private:
     SwapQueue<RuntimeSetting>& runtime_settings_;
@@ -339,6 +342,12 @@ class AudioProcessingImpl : public AudioProcessing {
   void RecordAudioProcessingState()
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
+  // Ensures that overruns in the capture runtime settings queue is properly
+  // handled by the code, providing safe-fallbacks to mitigate the implications
+  // of any settings being missed.
+  void HandleOverrunInCaptureRuntimeSettingsQueue()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+
   // AecDump instance used for optionally logging APM config, input
   // and output to file in the AEC-dump format defined in debug.proto.
   std::unique_ptr<AecDump> aec_dump_;
@@ -423,7 +432,7 @@ class AudioProcessingImpl : public AudioProcessing {
     ApmCaptureState();
     ~ApmCaptureState();
     bool was_stream_delay_set;
-    bool output_will_be_muted;
+    bool capture_output_used;
     bool key_pressed;
     std::unique_ptr<AudioBuffer> capture_audio;
     std::unique_ptr<AudioBuffer> capture_fullband_audio;

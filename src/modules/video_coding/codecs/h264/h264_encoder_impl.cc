@@ -29,10 +29,10 @@
 #include "system_wrappers/include/metrics.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/scale.h"
-#include <wels/codec_api.h>
-#include <wels/codec_app_def.h>
-#include <wels/codec_def.h>
-#include <wels/codec_ver.h>
+#include "third_party/openh264/src/codec/api/svc/codec_api.h"
+#include "third_party/openh264/src/codec/api/svc/codec_app_def.h"
+#include "third_party/openh264/src/codec/api/svc/codec_def.h"
+#include "third_party/openh264/src/codec/api/svc/codec_ver.h"
 
 namespace webrtc {
 
@@ -481,9 +481,9 @@ int32_t H264EncoderImpl::Encode(
     // |encoded_images_[i]._length| == 0.
     if (encoded_images_[i].size() > 0) {
       // Parse QP.
-      h264_bitstream_parser_.ParseBitstream(encoded_images_[i].data(),
-                                            encoded_images_[i].size());
-      h264_bitstream_parser_.GetLastSliceQp(&encoded_images_[i].qp_);
+      h264_bitstream_parser_.ParseBitstream(encoded_images_[i]);
+      encoded_images_[i].qp_ =
+          h264_bitstream_parser_.GetLastSliceQp().value_or(-1);
 
       // Deliver encoded image.
       CodecSpecificInfo codec_specific;

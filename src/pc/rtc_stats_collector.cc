@@ -10,23 +10,52 @@
 
 #include "pc/rtc_stats_collector.h"
 
+#include <stdio.h>
+
+#include <algorithm>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "api/array_view.h"
 #include "api/candidate.h"
 #include "api/media_stream_interface.h"
-#include "api/peer_connection_interface.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_receiver_interface.h"
+#include "api/rtp_sender_interface.h"
+#include "api/sequence_checker.h"
+#include "api/stats/rtc_stats.h"
+#include "api/stats/rtcstats_objects.h"
+#include "api/task_queue/queued_task.h"
 #include "api/video/video_content_type.h"
+#include "common_video/include/quality_limitation_reason.h"
 #include "media/base/media_channel.h"
+#include "modules/audio_processing/include/audio_processing_statistics.h"
+#include "modules/rtp_rtcp/include/report_block_data.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "p2p/base/connection_info.h"
+#include "p2p/base/dtls_transport_internal.h"
+#include "p2p/base/ice_transport_internal.h"
 #include "p2p/base/p2p_constants.h"
 #include "p2p/base/port.h"
-#include "pc/peer_connection.h"
+#include "pc/channel.h"
+#include "pc/channel_interface.h"
+#include "pc/data_channel_utils.h"
 #include "pc/rtc_stats_traversal.h"
 #include "pc/webrtc_sdp.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/ip_address.h"
+#include "rtc_base/location.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/network_constants.h"
+#include "rtc_base/ref_counted_object.h"
+#include "rtc_base/rtc_certificate.h"
+#include "rtc_base/socket_address.h"
+#include "rtc_base/ssl_stream_adapter.h"
+#include "rtc_base/string_encode.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/time_utils.h"
 #include "rtc_base/trace_event.h"
@@ -345,6 +374,8 @@ void SetInboundRTPStreamStatsFromVideoReceiverInfo(
     inbound_video->codec_id = RTCCodecStatsIDFromMidDirectionAndPayload(
         mid, true, *video_receiver_info.codec_payload_type);
   }
+  inbound_video->jitter = static_cast<double>(video_receiver_info.jitter_ms) /
+                          rtc::kNumMillisecsPerSec;
   inbound_video->fir_count =
       static_cast<uint32_t>(video_receiver_info.firs_sent);
   inbound_video->pli_count =
@@ -510,9 +541,16 @@ ProduceRemoteInboundRtpStreamStatsFromReportBlockData(
   remote_inbound->kind =
       media_type == cricket::MEDIA_TYPE_AUDIO ? "audio" : "video";
   remote_inbound->packets_lost = report_block.packets_lost;
+  remote_inbound->fraction_lost =
+      static_cast<double>(report_block.fraction_lost) / (1 << 8);
   remote_inbound->round_trip_time =
       static_cast<double>(report_block_data.last_rtt_ms()) /
       rtc::kNumMillisecsPerSec;
+  remote_inbound->total_round_trip_time =
+      static_cast<double>(report_block_data.sum_rtt_ms()) /
+      rtc::kNumMillisecsPerSec;
+  remote_inbound->round_trip_time_measurements =
+      report_block_data.num_rtts();
 
   std::string local_id = RTCOutboundRTPStreamStatsIDFromSSRC(
       media_type == cricket::MEDIA_TYPE_AUDIO, report_block.source_ssrc);
@@ -1060,9 +1098,30 @@ void RTCStatsCollector::GetStatsReportInternal(
     // reentrancy problems.
     std::vector<RequestInfo> requests;
     requests.swap(requests_);
-    signaling_thread_->PostTask(
-        RTC_FROM_HERE, rtc::Bind(&RTCStatsCollector::DeliverCachedReport, this,
-                                 cached_report_, std::move(requests)));
+
+    // Task subclass to take ownership of the requests.
+    // TODO(nisse): Delete when we can use C++14, and do lambda capture with
+    // std::move.
+    class DeliveryTask : public QueuedTask {
+     public:
+      DeliveryTask(rtc::scoped_refptr<RTCStatsCollector> collector,
+                   rtc::scoped_refptr<const RTCStatsReport> cached_report,
+                   std::vector<RequestInfo> requests)
+          : collector_(collector),
+            cached_report_(cached_report),
+            requests_(std::move(requests)) {}
+      bool Run() override {
+        collector_->DeliverCachedReport(cached_report_, std::move(requests_));
+        return true;
+      }
+
+     private:
+      rtc::scoped_refptr<RTCStatsCollector> collector_;
+      rtc::scoped_refptr<const RTCStatsReport> cached_report_;
+      std::vector<RequestInfo> requests_;
+    };
+    signaling_thread_->PostTask(std::make_unique<DeliveryTask>(
+        this, cached_report_, std::move(requests)));
   } else if (!num_pending_partial_reports_) {
     // Only start gathering stats if we're not already gathering stats. In the
     // case of already gathering stats, |callback_| will be invoked when there
@@ -1088,10 +1147,10 @@ void RTCStatsCollector::GetStatsReportInternal(
     // ProducePartialResultsOnNetworkThread() has signaled the
     // |network_report_event_|.
     network_report_event_.Reset();
-    network_thread_->PostTask(
-        RTC_FROM_HERE,
-        rtc::Bind(&RTCStatsCollector::ProducePartialResultsOnNetworkThread,
-                  this, timestamp_us));
+    rtc::scoped_refptr<RTCStatsCollector> collector(this);
+    network_thread_->PostTask(RTC_FROM_HERE, [collector, timestamp_us] {
+      collector->ProducePartialResultsOnNetworkThread(timestamp_us);
+    });
     ProducePartialResultsOnSignalingThread(timestamp_us);
   }
 }
@@ -1160,8 +1219,9 @@ void RTCStatsCollector::ProducePartialResultsOnNetworkThread(
   // Signal that it is now safe to touch |network_report_| on the signaling
   // thread, and post a task to merge it into the final results.
   network_report_event_.Set();
+  rtc::scoped_refptr<RTCStatsCollector> collector(this);
   signaling_thread_->PostTask(
-      RTC_FROM_HERE, rtc::Bind(&RTCStatsCollector::MergeNetworkReport_s, this));
+      RTC_FROM_HERE, [collector] { collector->MergeNetworkReport_s(); });
 }
 
 void RTCStatsCollector::ProducePartialResultsOnNetworkThreadImpl(
@@ -1560,6 +1620,7 @@ void RTCStatsCollector::ProduceMediaSourceStats_s(
           if (video_sender_info) {
             video_source_stats->frames_per_second =
                 video_sender_info->framerate_input;
+            video_source_stats->frames = video_sender_info->frames;
           }
         }
         media_source_stats = std::move(video_source_stats);

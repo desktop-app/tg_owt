@@ -346,6 +346,15 @@ void TurnPort::PrepareAddress() {
     server_address_.address.SetPort(TURN_DEFAULT_PORT);
   }
 
+  if (!AllowedTurnPort(server_address_.address.port())) {
+    // This can only happen after a 300 ALTERNATE SERVER, since the port can't
+    // be created with a disallowed port number.
+    RTC_LOG(LS_ERROR) << "Attempt to start allocation with disallowed port# "
+                      << server_address_.address.port();
+    OnAllocateError(STUN_ERROR_SERVER_ERROR,
+                    "Attempt to start allocation to a disallowed port");
+    return;
+  }
   if (server_address_.address.IsUnresolvedIP()) {
     ResolveTurnAddress(server_address_.address);
   } else {
@@ -715,16 +724,6 @@ bool TurnPort::HandleIncomingPacket(rtc::AsyncPacketSocket* socket,
     return false;
   }
 
-  // This must be a response for one of our requests.
-  // Check success responses, but not errors, for MESSAGE-INTEGRITY.
-  if (IsStunSuccessResponseType(msg_type) &&
-      !StunMessage::ValidateMessageIntegrity(data, size, hash())) {
-    RTC_LOG(LS_WARNING) << ToString()
-                        << ": Received TURN message with invalid "
-                           "message integrity, msg_type: "
-                        << msg_type;
-    return true;
-  }
   request_manager_.CheckResponse(data, size);
 
   return true;
@@ -941,6 +940,21 @@ void TurnPort::Close() {
 
 rtc::DiffServCodePoint TurnPort::StunDscpValue() const {
   return stun_dscp_value_;
+}
+
+// static
+bool TurnPort::AllowedTurnPort(int port) {
+  // Port 80 and 443 are used for existing deployments.
+  // Ports above 1024 are assumed to be OK to use.
+  if (port == 80 || port == 443 || port >= 1024) {
+    return true;
+  }
+  // Allow any port if relevant field trial is set. This allows disabling the
+  // check.
+  if (webrtc::field_trial::IsEnabled("WebRTC-Turn-AllowSystemPorts")) {
+    return true;
+  }
+  return false;
 }
 
 void TurnPort::OnMessage(rtc::Message* message) {
@@ -1276,7 +1290,9 @@ void TurnPort::ScheduleEntryDestruction(TurnEntry* entry) {
   entry->set_destruction_timestamp(timestamp);
   invoker_.AsyncInvokeDelayed<void>(
       RTC_FROM_HERE, thread(),
-      rtc::Bind(&TurnPort::DestroyEntryIfNotCancelled, this, entry, timestamp),
+      [this, entry, timestamp] {
+        DestroyEntryIfNotCancelled(entry, timestamp);
+      },
       TURN_PERMISSION_TIMEOUT);
 }
 

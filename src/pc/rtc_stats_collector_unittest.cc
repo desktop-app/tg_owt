@@ -1895,6 +1895,7 @@ TEST_F(RTCStatsCollectorTest, CollectRTCInboundRTPStreamStats_Video) {
   video_media_info.receivers[0].total_decode_time_ms = 9000;
   video_media_info.receivers[0].total_inter_frame_delay = 0.123;
   video_media_info.receivers[0].total_squared_inter_frame_delay = 0.00456;
+  video_media_info.receivers[0].jitter_ms = 1199;
 
   video_media_info.receivers[0].last_packet_received_timestamp_ms =
       absl::nullopt;
@@ -1942,6 +1943,7 @@ TEST_F(RTCStatsCollectorTest, CollectRTCInboundRTPStreamStats_Video) {
   expected_video.total_decode_time = 9.0;
   expected_video.total_inter_frame_delay = 0.123;
   expected_video.total_squared_inter_frame_delay = 0.00456;
+  expected_video.jitter = 1.199;
   // |expected_video.last_packet_received_timestamp| should be undefined.
   // |expected_video.content_type| should be undefined.
   // |expected_video.decoder_implementation| should be undefined.
@@ -2472,6 +2474,7 @@ TEST_F(RTCStatsCollectorTest, RTCVideoSourceStatsCollectedForSenderWithTrack) {
       cricket::SsrcSenderInfo());
   video_media_info.aggregated_senders[0].local_stats[0].ssrc = kSsrc;
   video_media_info.aggregated_senders[0].framerate_input = 29;
+  video_media_info.aggregated_senders[0].frames = 10001;
   auto* video_media_channel = pc_->AddVideoChannel("VideoMid", "TransportName");
   video_media_channel->SetStats(video_media_info);
 
@@ -2491,9 +2494,8 @@ TEST_F(RTCStatsCollectorTest, RTCVideoSourceStatsCollectedForSenderWithTrack) {
   expected_video.kind = "video";
   expected_video.width = kVideoSourceWidth;
   expected_video.height = kVideoSourceHeight;
-  // |expected_video.frames| is expected to be undefined because it is not set.
-  // TODO(hbos): When implemented, set its expected value here.
   expected_video.frames_per_second = 29;
+  expected_video.frames = 10001;
 
   ASSERT_TRUE(report->Get(expected_video.id()));
   EXPECT_EQ(report->Get(expected_video.id())->cast_to<RTCVideoSourceStats>(),
@@ -2533,6 +2535,7 @@ TEST_F(RTCStatsCollectorTest,
   auto video_stats =
       report->Get("RTCVideoSource_42")->cast_to<RTCVideoSourceStats>();
   EXPECT_FALSE(video_stats.frames_per_second.is_defined());
+  EXPECT_FALSE(video_stats.frames.is_defined());
 }
 
 // The track not having a source is not expected to be true in practise, but
@@ -2674,8 +2677,11 @@ class RTCStatsCollectorTestWithParamKind
 TEST_P(RTCStatsCollectorTestWithParamKind,
        RTCRemoteInboundRtpStreamStatsCollectedFromReportBlock) {
   const int64_t kReportBlockTimestampUtcUs = 123456789;
-  const int64_t kRoundTripTimeMs = 13000;
-  const double kRoundTripTimeSeconds = 13.0;
+  const uint8_t kFractionLost = 12;
+  const int64_t kRoundTripTimeSample1Ms = 1234;
+  const double kRoundTripTimeSample1Seconds = 1.234;
+  const int64_t kRoundTripTimeSample2Ms = 13000;
+  const double kRoundTripTimeSample2Seconds = 13;
 
   // The report block's timestamp cannot be from the future, set the fake clock
   // to match.
@@ -2688,12 +2694,13 @@ TEST_P(RTCStatsCollectorTestWithParamKind,
     // |source_ssrc|, "SSRC of the RTP packet sender".
     report_block.source_ssrc = ssrc;
     report_block.packets_lost = 7;
+    report_block.fraction_lost = kFractionLost;
     ReportBlockData report_block_data;
     report_block_data.SetReportBlock(report_block, kReportBlockTimestampUtcUs);
-    report_block_data.AddRoundTripTimeSample(1234);
+    report_block_data.AddRoundTripTimeSample(kRoundTripTimeSample1Ms);
     // Only the last sample should be exposed as the
     // |RTCRemoteInboundRtpStreamStats::round_trip_time|.
-    report_block_data.AddRoundTripTimeSample(kRoundTripTimeMs);
+    report_block_data.AddRoundTripTimeSample(kRoundTripTimeSample2Ms);
     report_block_datas.push_back(report_block_data);
   }
   AddSenderInfoAndMediaChannel("TransportName", report_block_datas,
@@ -2706,6 +2713,8 @@ TEST_P(RTCStatsCollectorTestWithParamKind,
         "RTCRemoteInboundRtp" + MediaTypeUpperCase() + stream_id,
         kReportBlockTimestampUtcUs);
     expected_remote_inbound_rtp.ssrc = ssrc;
+    expected_remote_inbound_rtp.fraction_lost =
+        static_cast<double>(kFractionLost) / (1 << 8);
     expected_remote_inbound_rtp.kind = MediaTypeLowerCase();
     expected_remote_inbound_rtp.transport_id =
         "RTCTransport_TransportName_1";  // 1 for RTP (we have no RTCP
@@ -2713,7 +2722,10 @@ TEST_P(RTCStatsCollectorTestWithParamKind,
     expected_remote_inbound_rtp.packets_lost = 7;
     expected_remote_inbound_rtp.local_id =
         "RTCOutboundRTP" + MediaTypeUpperCase() + stream_id;
-    expected_remote_inbound_rtp.round_trip_time = kRoundTripTimeSeconds;
+    expected_remote_inbound_rtp.round_trip_time = kRoundTripTimeSample2Seconds;
+    expected_remote_inbound_rtp.total_round_trip_time =
+        kRoundTripTimeSample1Seconds + kRoundTripTimeSample2Seconds;
+    expected_remote_inbound_rtp.round_trip_time_measurements = 2;
     // This test does not set up RTCCodecStats, so |codec_id| and |jitter| are
     // expected to be missing. These are tested separately.
 
