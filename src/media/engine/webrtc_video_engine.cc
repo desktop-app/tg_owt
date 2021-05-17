@@ -139,7 +139,7 @@ std::vector<VideoCodec> GetPayloadTypesAndDefaultCodecs(
   static const int kFirstDynamicPayloadTypeLowerRange = 35;
   static const int kLastDynamicPayloadTypeLowerRange = 65;
 
-  static const int kFirstDynamicPayloadTypeUpperRange = 96;
+  static const int kFirstDynamicPayloadTypeUpperRange = 100;
   static const int kLastDynamicPayloadTypeUpperRange = 127;
   int payload_type_upper = kFirstDynamicPayloadTypeUpperRange;
   int payload_type_lower = kFirstDynamicPayloadTypeLowerRange;
