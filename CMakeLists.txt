@@ -206,6 +206,8 @@ PRIVATE
     rtc_base/async_packet_socket.h
     rtc_base/async_resolver_interface.cc
     rtc_base/async_resolver_interface.h
+    rtc_base/async_resolver.cc
+    rtc_base/async_resolver.h
     rtc_base/async_socket.cc
     rtc_base/async_socket.h
     rtc_base/async_tcp_socket.cc
@@ -235,7 +237,7 @@ PRIVATE
     rtc_base/ip_address.h
     rtc_base/logging.cc
     rtc_base/logging.h
-    rtc_base/keep_ref_until_done.h
+    # rtc_base/keep_ref_until_done.h
     rtc_base/mdns_responder_interface.h
     rtc_base/memory/aligned_malloc.cc
     rtc_base/memory/aligned_malloc.h
@@ -326,7 +328,7 @@ PRIVATE
     rtc_base/thread_message.h
     rtc_base/unique_id_generator.cc
     rtc_base/unique_id_generator.h
-    rtc_base/bind.h
+    # rtc_base/bind.h
     rtc_base/bit_buffer.cc
     rtc_base/bit_buffer.h
     rtc_base/buffer.h
@@ -379,6 +381,8 @@ PRIVATE
     rtc_base/win32_window.h
     rtc_base/win/scoped_com_initializer.cc
     rtc_base/win/scoped_com_initializer.h
+    rtc_base/win/create_direct3d_device.cc
+    rtc_base/win/create_direct3d_device.h
     rtc_base/strings/string_builder.cc
     rtc_base/strings/string_builder.h
     rtc_base/strings/string_format.cc
@@ -423,8 +427,8 @@ PRIVATE
     # rtc_base/synchronization/rw_lock_win.h
     # rtc_base/synchronization/rw_lock_wrapper.cc
     # rtc_base/synchronization/rw_lock_wrapper.h
-    rtc_base/synchronization/sequence_checker.cc
-    rtc_base/synchronization/sequence_checker.h
+    rtc_base/synchronization/sequence_checker_internal.cc
+    rtc_base/synchronization/sequence_checker_internal.h
     rtc_base/synchronization/yield_policy.cc
     rtc_base/synchronization/yield_policy.h
     rtc_base/system/file_wrapper.cc
@@ -434,6 +438,8 @@ PRIVATE
     rtc_base/system/cocoa_threading.mm
     rtc_base/system/gcd_helpers.h
     rtc_base/system/gcd_helpers.m
+    rtc_base/system_time.cc
+    rtc_base/system_time.h
     rtc_base/task_queue.cc
     rtc_base/task_queue_gcd.cc
     rtc_base/task_queue_gcd.h
@@ -577,7 +583,7 @@ PRIVATE
     api/video/video_frame_metadata.h
     api/video/video_source_interface.cc
     api/video/video_stream_decoder_create.cc
-    api/video/video_stream_encoder_create.cc
+    # api/video/video_stream_encoder_create.cc
     api/video/video_timing.cc
     api/video/video_stream_encoder_interface.h
     # api/video/video_stream_encoder_observer.cc
@@ -603,8 +609,8 @@ PRIVATE
     pc/channel_manager.h
     # pc/composite_data_channel_transport.cc
     # pc/composite_data_channel_transport.h
-    pc/composite_rtp_transport.cc
-    pc/composite_rtp_transport.h
+    # pc/composite_rtp_transport.cc
+    # pc/composite_rtp_transport.h
     # pc/datagram_rtp_transport.cc
     # pc/datagram_rtp_transport.h
     pc/dtls_srtp_transport.cc
@@ -757,7 +763,7 @@ PRIVATE
     media/base/video_source_base.cc
     media/base/vp9_profile.cc
     media/engine/adm_helpers.cc
-    media/engine/constants.cc
+    # media/engine/constants.cc
     media/engine/encoder_simulcast_proxy.cc
     media/engine/internal_decoder_factory.cc
     media/engine/internal_encoder_factory.cc
@@ -1090,7 +1096,7 @@ PRIVATE
     modules/audio_processing/agc2/adaptive_agc.cc
     modules/audio_processing/agc2/adaptive_digital_gain_applier.cc
     modules/audio_processing/agc2/adaptive_mode_level_estimator.cc
-    modules/audio_processing/agc2/adaptive_mode_level_estimator_agc.cc
+    # modules/audio_processing/agc2/adaptive_mode_level_estimator_agc.cc
     # modules/audio_processing/agc2/agc2_common.cc
     modules/audio_processing/agc2/agc2_testing_common.cc
     modules/audio_processing/agc2/biquad_filter.cc
@@ -1278,6 +1284,8 @@ PRIVATE
     modules/rtp_rtcp/source/forward_error_correction_internal.h
     modules/rtp_rtcp/source/packet_loss_stats.cc
     modules/rtp_rtcp/source/packet_loss_stats.h
+    modules/rtp_rtcp/source/packet_sequencer.cc
+    modules/rtp_rtcp/source/packet_sequencer.h
     modules/rtp_rtcp/source/receive_statistics_impl.cc
     modules/rtp_rtcp/source/receive_statistics_impl.h
     modules/rtp_rtcp/source/remote_ntp_time_estimator.cc
@@ -1538,24 +1546,26 @@ PRIVATE
     modules/video_coding/svc/scalability_structure_full_svc.h
     modules/video_coding/svc/scalability_structure_key_svc.cc
     modules/video_coding/svc/scalability_structure_key_svc.h
-    modules/video_coding/svc/scalability_structure_l1t2.cc
-    modules/video_coding/svc/scalability_structure_l1t2.h
-    modules/video_coding/svc/scalability_structure_l1t3.cc
-    modules/video_coding/svc/scalability_structure_l1t3.h
-    modules/video_coding/svc/scalability_structure_l2t1.cc
-    modules/video_coding/svc/scalability_structure_l2t1.h
-    modules/video_coding/svc/scalability_structure_l2t1h.cc
-    modules/video_coding/svc/scalability_structure_l2t1h.h
-    modules/video_coding/svc/scalability_structure_l2t2.cc
-    modules/video_coding/svc/scalability_structure_l2t2.h
+    # modules/video_coding/svc/scalability_structure_l1t2.cc
+    # modules/video_coding/svc/scalability_structure_l1t2.h
+    # modules/video_coding/svc/scalability_structure_l1t3.cc
+    # modules/video_coding/svc/scalability_structure_l1t3.h
+    # modules/video_coding/svc/scalability_structure_l2t1.cc
+    # modules/video_coding/svc/scalability_structure_l2t1.h
+    # modules/video_coding/svc/scalability_structure_l2t1h.cc
+    # modules/video_coding/svc/scalability_structure_l2t1h.h
+    # modules/video_coding/svc/scalability_structure_l2t2.cc
+    # modules/video_coding/svc/scalability_structure_l2t2.h
     modules/video_coding/svc/scalability_structure_l2t2_key_shift.cc
     modules/video_coding/svc/scalability_structure_l2t2_key_shift.h
-    modules/video_coding/svc/scalability_structure_l3t1.cc
-    modules/video_coding/svc/scalability_structure_l3t1.h
-    modules/video_coding/svc/scalability_structure_l3t3.cc
-    modules/video_coding/svc/scalability_structure_l3t3.h
-    modules/video_coding/svc/scalability_structure_s2t1.cc
-    modules/video_coding/svc/scalability_structure_s2t1.h
+    # modules/video_coding/svc/scalability_structure_l3t1.cc
+    # modules/video_coding/svc/scalability_structure_l3t1.h
+    # modules/video_coding/svc/scalability_structure_l3t3.cc
+    # modules/video_coding/svc/scalability_structure_l3t3.h
+    # modules/video_coding/svc/scalability_structure_s2t1.cc
+    # modules/video_coding/svc/scalability_structure_s2t1.h
+    modules/video_coding/svc/scalability_structure_simulcast.cc
+    modules/video_coding/svc/scalability_structure_simulcast.h
     modules/video_coding/svc/scalable_video_controller.h
     modules/video_coding/svc/scalable_video_controller_no_layering.cc
     modules/video_coding/svc/scalable_video_controller_no_layering.h
@@ -2068,12 +2078,16 @@ PRIVATE
     modules/desktop_capture/win/selected_window_context.h
     modules/desktop_capture/win/wgc_capture_session.cc
     modules/desktop_capture/win/wgc_capture_session.h
+    modules/desktop_capture/win/wgc_capture_source.cc
+    modules/desktop_capture/win/wgc_capture_source.h
+    modules/desktop_capture/win/wgc_capturer_win.cc
+    modules/desktop_capture/win/wgc_capturer_win.h
+    modules/desktop_capture/win/wgc_desktop_frame.cc
+    modules/desktop_capture/win/wgc_desktop_frame.h
     modules/desktop_capture/win/window_capture_utils.cc
     modules/desktop_capture/win/window_capture_utils.h
     modules/desktop_capture/win/window_capturer_win_gdi.cc
     modules/desktop_capture/win/window_capturer_win_gdi.h
-    modules/desktop_capture/win/window_capturer_win_wgc.cc
-    modules/desktop_capture/win/window_capturer_win_wgc.h
 
     stats/rtc_stats_report.cc
     stats/rtc_stats.cc
