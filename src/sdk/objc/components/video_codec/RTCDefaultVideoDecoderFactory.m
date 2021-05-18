@@ -82,13 +82,13 @@
   } else if ([info.name isEqualToString:kRTCVideoCodecAv1Name] &&
              [RTC_OBJC_TYPE(RTCVideoDecoderAV1) isSupported]) {
     return [RTC_OBJC_TYPE(RTCVideoDecoderAV1) av1Decoder];
-  }
 #if !defined(DISABLE_H265)
-} else if (@available(iOS 11, *)) {
+  } else if (@available(iOS 11, *)) {
     if ([info.name isEqualToString:kRTCVideoCodecH265Name]) {
         return [[RTCVideoDecoderH265 alloc] init];
     }
 #endif
+  }
   return nil;
 }
 
