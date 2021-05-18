@@ -494,7 +494,9 @@ void AudioDeviceBuffer::LogStats(LogState state) {
   last_stats_ = stats;
 
   int64_t time_to_wait_ms = next_callback_time - rtc::TimeMillis();
-  RTC_DCHECK_GT(time_to_wait_ms, 0) << "Invalid timer interval";
+  if (time_to_wait_ms <= 0) {
+      time_to_wait_ms = 1;
+  }
 
   // Keep posting new (delayed) tasks until state is changed to kLogStop.
   task_queue_.PostDelayedTask(
