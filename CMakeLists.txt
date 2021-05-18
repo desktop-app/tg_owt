@@ -27,6 +27,7 @@ option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." ${TG_OWT_P
 option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
 option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture on non-Apple Unix." ON)
 option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire 0.3 for desktop capture on non-Apple Unix." ${not_packaged_build})
+option(TG_OWT_BUILD_AUDIO_BACKENDS "Build webrtc audio backends." ON)
 
 if (NOT UNIX OR APPLE)
     set(TG_OWT_USE_PIPEWIRE OFF)
@@ -160,6 +161,12 @@ link_libabsl(tg_owt)
 link_libopenh264(tg_owt)
 link_libusrsctp(tg_owt)
 link_libvpx(tg_owt)
+
+if (TG_OWT_BUILD_AUDIO_BACKENDS AND (UNIX AND NOT APPLE))
+    link_libalsa(tg_owt)
+    link_libpulse(tg_owt)
+    link_dl(tg_owt)
+endif()
 
 if (NOT WIN32 AND NOT APPLE)
     link_libevent(tg_owt)
@@ -381,6 +388,8 @@ PRIVATE
     rtc_base/win32_window.h
     rtc_base/win/scoped_com_initializer.cc
     rtc_base/win/scoped_com_initializer.h
+    rtc_base/win/windows_version.cc
+    rtc_base/win/windows_version.h
     rtc_base/win/create_direct3d_device.cc
     rtc_base/win/create_direct3d_device.h
     rtc_base/strings/string_builder.cc
@@ -1003,6 +1012,8 @@ PRIVATE
     modules/audio_coding/neteq/sync_buffer.cc
     modules/audio_coding/neteq/time_stretch.cc
     modules/audio_coding/neteq/timestamp_scaler.cc
+    modules/audio_device/include/audio_device_factory.cc
+    modules/audio_device/include/audio_device_factory.h
     # modules/audio_device/android/audio_manager.cc
     # modules/audio_device/android/audio_record_jni.cc
     # modules/audio_device/android/audio_track_jni.cc
@@ -1010,10 +1021,36 @@ PRIVATE
     # modules/audio_device/android/opensles_common.cc
     # modules/audio_device/android/opensles_player.cc
     # modules/audio_device/android/opensles_recorder.cc
+    modules/audio_device/linux/alsasymboltable_linux.cc
+    modules/audio_device/linux/alsasymboltable_linux.h
+    modules/audio_device/linux/audio_device_alsa_linux.cc
+    modules/audio_device/linux/audio_device_alsa_linux.h
+    modules/audio_device/linux/audio_mixer_manager_alsa_linux.cc
+    modules/audio_device/linux/audio_mixer_manager_alsa_linux.h
+    modules/audio_device/linux/latebindingsymboltable_linux.cc
+    modules/audio_device/linux/latebindingsymboltable_linux.h
+    modules/audio_device/linux/audio_device_pulse_linux.cc
+    modules/audio_device/linux/audio_device_pulse_linux.h
+    modules/audio_device/linux/audio_mixer_manager_pulse_linux.cc
+    modules/audio_device/linux/audio_mixer_manager_pulse_linux.h
+    modules/audio_device/linux/pulseaudiosymboltable_linux.cc
+    modules/audio_device/linux/pulseaudiosymboltable_linux.h
     modules/audio_device/mac/audio_device_mac.cc
     modules/audio_device/mac/audio_device_mac.h
     modules/audio_device/mac/audio_mixer_manager_mac.cc
     modules/audio_device/mac/audio_mixer_manager_mac.h
+    modules/audio_device/win/audio_device_module_win.cc
+    modules/audio_device/win/audio_device_module_win.h
+    modules/audio_device/win/core_audio_base_win.cc
+    modules/audio_device/win/core_audio_base_win.h
+    modules/audio_device/win/core_audio_input_win.cc
+    modules/audio_device/win/core_audio_input_win.h
+    modules/audio_device/win/core_audio_output_win.cc
+    modules/audio_device/win/core_audio_output_win.h
+    modules/audio_device/win/core_audio_utility_win.cc
+    modules/audio_device/win/core_audio_utility_win.h
+    modules/audio_device/win/audio_device_core_win.cc
+    modules/audio_device/win/audio_device_core_win.h
     modules/audio_device/audio_device_buffer.cc
     modules/audio_device/audio_device_data_observer.cc
     modules/audio_device/audio_device_generic.cc
@@ -2123,12 +2160,56 @@ if (NOT TG_OWT_USE_PROTOBUF)
     )
 endif()
 
+if (NOT TG_OWT_BUILD_AUDIO_BACKENDS)
+    remove_target_sources(tg_owt ${webrtc_loc}
+        rtc_base/win/windows_version.cc
+        rtc_base/win/windows_version.h
+        modules/audio_device/include/audio_device_factory.cc
+        modules/audio_device/include/audio_device_factory.h
+        modules/audio_device/linux/alsasymboltable_linux.cc
+        modules/audio_device/linux/alsasymboltable_linux.h
+        modules/audio_device/linux/audio_device_alsa_linux.cc
+        modules/audio_device/linux/audio_device_alsa_linux.h
+        modules/audio_device/linux/audio_mixer_manager_alsa_linux.cc
+        modules/audio_device/linux/audio_mixer_manager_alsa_linux.h
+        modules/audio_device/linux/latebindingsymboltable_linux.cc
+        modules/audio_device/linux/latebindingsymboltable_linux.h
+        modules/audio_device/linux/audio_device_pulse_linux.cc
+        modules/audio_device/linux/audio_device_pulse_linux.h
+        modules/audio_device/linux/audio_mixer_manager_pulse_linux.cc
+        modules/audio_device/linux/audio_mixer_manager_pulse_linux.h
+        modules/audio_device/linux/pulseaudiosymboltable_linux.cc
+        modules/audio_device/linux/pulseaudiosymboltable_linux.h
+        modules/audio_device/mac/audio_device_mac.cc
+        modules/audio_device/mac/audio_device_mac.h
+        modules/audio_device/mac/audio_mixer_manager_mac.cc
+        modules/audio_device/mac/audio_mixer_manager_mac.h
+        modules/audio_device/win/audio_device_module_win.cc
+        modules/audio_device/win/audio_device_module_win.h
+        modules/audio_device/win/core_audio_base_win.cc
+        modules/audio_device/win/core_audio_base_win.h
+        modules/audio_device/win/core_audio_input_win.cc
+        modules/audio_device/win/core_audio_input_win.h
+        modules/audio_device/win/core_audio_output_win.cc
+        modules/audio_device/win/core_audio_output_win.h
+        modules/audio_device/win/core_audio_utility_win.cc
+        modules/audio_device/win/core_audio_utility_win.h
+        modules/audio_device/win/audio_device_core_win.cc
+        modules/audio_device/win/audio_device_core_win.h
+    )
+endif()
+
 if (NOT WIN32)
     remove_target_sources(tg_owt ${webrtc_loc}
         rtc_base/win32.cc
         rtc_base/win32.h
         rtc_base/win32_window.cc
         rtc_base/win32_window.h
+        rtc_base/task_queue_win.cc
+        rtc_base/task_queue_win.h
+        api/task_queue/default_task_queue_factory_win.cc
+        modules/audio_device/include/audio_device_factory.cc
+        modules/audio_device/include/audio_device_factory.h
     )
 endif()
 
