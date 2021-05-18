@@ -389,6 +389,8 @@ PRIVATE
     rtc_base/strings/string_format.h
     # rtc_base/experiments/experimental_screenshare_settings.cc
     # rtc_base/experiments/experimental_screenshare_settings.h
+    rtc_base/experiments/encoder_info_settings.cc
+    rtc_base/experiments/encoder_info_settings.h
     rtc_base/experiments/alr_experiment.cc
     rtc_base/experiments/balanced_degradation_settings.cc
     rtc_base/experiments/cpu_speed_experiment.cc
@@ -449,6 +451,8 @@ PRIVATE
     rtc_base/task_queue_win.h
     rtc_base/ifaddrs_converter.cc
     rtc_base/ifaddrs_converter.h
+    rtc_base/internal/default_socket_server.cc
+    rtc_base/internal/default_socket_server.h
     rtc_base/mac_ifaddrs_converter.cc
     rtc_base/task_utils/repeating_task.cc
     rtc_base/task_utils/repeating_task.h
