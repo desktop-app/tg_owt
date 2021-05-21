@@ -251,34 +251,10 @@ function(link_x11 target_name)
     endif()
 endfunction()
 
-# PipeWire
+# pipewire
 function(link_pipewire target_name)
     find_package(PkgConfig REQUIRED)
     pkg_search_module(PIPEWIRE REQUIRED libpipewire-0.3 libpipewire-0.2)
     target_include_directories(${target_name} PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
     target_link_libraries(${target_name} PRIVATE ${PIPEWIRE_LINK_LIBRARIES})
-endfunction()
-
-# Alsa
-function(link_libalsa target_name)
-    if (TG_OWT_PACKAGED_BUILD)
-        find_package(ALSA REQUIRED)
-        target_include_directories(${target_name} PRIVATE ${ALSA_INCLUDE_DIRS})
-    endif()
-endfunction()
-
-# PulseAudio
-function(link_libpulse target_name)
-    if (TG_OWT_PACKAGED_BUILD)
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(PULSE REQUIRED libpulse)
-        target_include_directories(${target_name} PRIVATE ${PULSE_INCLUDE_DIRS})
-    endif()
-endfunction()
-
-# dl
-function(link_dl target_name)
-    if (TG_OWT_PACKAGED_BUILD)
-        target_link_libraries(${target_name} PRIVATE ${CMAKE_DL_LIBS})
-    endif()
 endfunction()
