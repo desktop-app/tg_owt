@@ -24,16 +24,16 @@ INTERFACE
     RTC_ENABLE_VP9
 )
 
-if (TG_OWT_BUILD_AUDIO_BACKENDS AND UNIX AND NOT APPLE)
+if (NOT TG_OWT_BUILD_AUDIO_BACKENDS)
+    target_compile_definitions(libwebrtcbuild
+    INTERFACE
+        WEBRTC_DUMMY_AUDIO_BUILD
+    )
+elseif (UNIX AND NOT APPLE)
     target_compile_definitions(libwebrtcbuild
     INTERFACE
         WEBRTC_ENABLE_LINUX_ALSA
         WEBRTC_ENABLE_LINUX_PULSE
-    )
-else()
-    target_compile_definitions(libwebrtcbuild
-    INTERFACE
-        WEBRTC_DUMMY_AUDIO_BUILD
     )
 endif()
 
