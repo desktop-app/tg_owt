@@ -36,7 +36,7 @@
 // passed to ffmpeg.
 
 extern "C" {
-#include "libavcodec/avcodec.h"
+#include "third_party/ffmpeg/libavcodec/avcodec.h"
 }  // extern "C"
 
 #include "common_video/h264/h264_bitstream_parser.h"

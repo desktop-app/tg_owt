@@ -502,6 +502,7 @@ PRIVATE
     api/audio_codecs/opus/audio_encoder_opus_config.cc
     api/audio_codecs/opus_audio_decoder_factory.cc
     api/audio_codecs/opus_audio_encoder_factory.cc
+    api/async_dns_resolver.h
     api/audio_options.cc
     api/call/transport.cc
     api/candidate.cc
@@ -1153,6 +1154,8 @@ PRIVATE
     modules/audio_processing/agc2/noise_level_estimator.cc
     modules/audio_processing/agc2/noise_spectrum_estimator.cc
     modules/audio_processing/agc2/saturation_protector.cc
+    modules/audio_processing/agc2/saturation_protector_buffer.cc
+    modules/audio_processing/agc2/saturation_protector_buffer.h
     modules/audio_processing/agc2/signal_classifier.cc
     modules/audio_processing/agc2/vad_with_level.cc
     modules/audio_processing/agc2/vector_float_frame.cc
@@ -1172,6 +1175,10 @@ PRIVATE
     modules/audio_processing/audio_processing_impl.cc
     modules/audio_processing/audio_processing_impl.h
     modules/audio_processing/audio_processing_builder_impl.cc
+    modules/audio_processing/capture_levels_adjuster/audio_samples_scaler.cc
+    modules/audio_processing/capture_levels_adjuster/audio_samples_scaler.h
+    modules/audio_processing/capture_levels_adjuster/capture_levels_adjuster.cc
+    modules/audio_processing/capture_levels_adjuster/capture_levels_adjuster.h
     modules/audio_processing/common.h
     modules/audio_processing/echo_control_mobile_impl.cc
     modules/audio_processing/echo_control_mobile_impl.h
@@ -1560,6 +1567,8 @@ PRIVATE
     modules/video_coding/utility/framerate_controller.cc
     modules/video_coding/utility/ivf_file_reader.cc
     modules/video_coding/utility/ivf_file_writer.cc
+    modules/video_coding/utility/qp_parser.cc
+    modules/video_coding/utility/qp_parser.h
     modules/video_coding/utility/quality_scaler.cc
     modules/video_coding/utility/simulcast_rate_allocator.cc
     modules/video_coding/utility/simulcast_utility.cc

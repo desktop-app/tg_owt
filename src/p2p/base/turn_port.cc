@@ -28,6 +28,7 @@
 #include "rtc_base/net_helpers.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/strings/string_builder.h"
+#include "rtc_base/task_utils/to_queued_task.h"
 #include "system_wrappers/include/field_trial.h"
 
 namespace cricket {
@@ -944,9 +945,9 @@ rtc::DiffServCodePoint TurnPort::StunDscpValue() const {
 
 // static
 bool TurnPort::AllowedTurnPort(int port) {
-  // Port 80 and 443 are used for existing deployments.
+  // Port 53, 80 and 443 are used for existing deployments.
   // Ports above 1024 are assumed to be OK to use.
-  if (port == 80 || port == 443 || port >= 1024) {
+  if (port == 53 || port == 80 || port == 443 || port >= 1024) {
     return true;
   }
   // Allow any port if relevant field trial is set. This allows disabling the
@@ -1288,12 +1289,12 @@ void TurnPort::ScheduleEntryDestruction(TurnEntry* entry) {
   RTC_DCHECK(!entry->destruction_timestamp().has_value());
   int64_t timestamp = rtc::TimeMillis();
   entry->set_destruction_timestamp(timestamp);
-  invoker_.AsyncInvokeDelayed<void>(
-      RTC_FROM_HERE, thread(),
-      [this, entry, timestamp] {
-        DestroyEntryIfNotCancelled(entry, timestamp);
-      },
-      TURN_PERMISSION_TIMEOUT);
+  thread()->PostDelayedTask(ToQueuedTask(task_safety_.flag(),
+                                         [this, entry, timestamp] {
+                                           DestroyEntryIfNotCancelled(
+                                               entry, timestamp);
+                                         }),
+                            TURN_PERMISSION_TIMEOUT);
 }
 
 bool TurnPort::SetEntryChannelId(const rtc::SocketAddress& address,

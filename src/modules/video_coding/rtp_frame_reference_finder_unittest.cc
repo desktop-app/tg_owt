@@ -24,7 +24,6 @@
 #include "test/gtest.h"
 
 namespace webrtc {
-namespace video_coding {
 
 namespace {
 std::unique_ptr<RtpFrameObject> CreateFrame(
@@ -315,5 +314,4 @@ TEST_F(TestRtpFrameReferenceFinder, Av1FrameNoDependencyDescriptor) {
   CheckReferencesGeneric(sn);
 }
 
-}  // namespace video_coding
 }  // namespace webrtc

@@ -11,6 +11,7 @@
 #include "media/engine/webrtc_voice_engine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -210,7 +211,9 @@ bool IsEnabled(const webrtc::WebRtcKeyValueConfig& config,
 struct AdaptivePtimeConfig {
   bool enabled = false;
   webrtc::DataRate min_payload_bitrate = webrtc::DataRate::KilobitsPerSec(16);
-  webrtc::DataRate min_encoder_bitrate = webrtc::DataRate::KilobitsPerSec(12);
+  // Value is chosen to ensure FEC can be encoded, see LBRR_WB_MIN_RATE_BPS in
+  // libopus.
+  webrtc::DataRate min_encoder_bitrate = webrtc::DataRate::KilobitsPerSec(16);
   bool use_slow_adaptation = true;
 
   absl::optional<std::string> audio_network_adaptor_config;
@@ -1167,7 +1170,7 @@ class WebRtcVoiceMediaChannel::WebRtcAudioSendStream
   // TODO(webrtc:11717): Remove this once audio_network_adaptor in AudioOptions
   // has been removed.
   absl::optional<std::string> audio_network_adaptor_config_from_options_;
-  int num_encoded_channels_ = -1;
+  std::atomic<int> num_encoded_channels_{-1};
 };
 
 class WebRtcVoiceMediaChannel::WebRtcAudioReceiveStream {
@@ -2067,6 +2070,13 @@ void WebRtcVoiceMediaChannel::ResetUnsignaledRecvStream() {
   }
 }
 
+// Not implemented.
+// TODO(https://crbug.com/webrtc/12676): Implement a fix for the unsignalled
+// SSRC race that can happen when an m= section goes from receiving to not
+// receiving.
+void WebRtcVoiceMediaChannel::OnDemuxerCriteriaUpdatePending() {}
+void WebRtcVoiceMediaChannel::OnDemuxerCriteriaUpdateComplete() {}
+
 bool WebRtcVoiceMediaChannel::SetLocalSource(uint32_t ssrc,
                                              AudioSource* source) {
   auto it = send_streams_.find(ssrc);
@@ -2458,6 +2468,13 @@ bool WebRtcVoiceMediaChannel::GetStats(VoiceMediaInfo* info,
         stats.relative_packet_arrival_delay_seconds;
     rinfo.interruption_count = stats.interruption_count;
     rinfo.total_interruption_duration_ms = stats.total_interruption_duration_ms;
+    rinfo.last_sender_report_timestamp_ms =
+        stats.last_sender_report_timestamp_ms;
+    rinfo.last_sender_report_remote_timestamp_ms =
+        stats.last_sender_report_remote_timestamp_ms;
+    rinfo.sender_reports_packets_sent = stats.sender_reports_packets_sent;
+    rinfo.sender_reports_bytes_sent = stats.sender_reports_bytes_sent;
+    rinfo.sender_reports_reports_count = stats.sender_reports_reports_count;
 
     info->receivers.push_back(rinfo);
   }

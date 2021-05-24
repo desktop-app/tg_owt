@@ -61,6 +61,8 @@ static const SocketAddress kTurnAlternateIntAddr("99.99.99.6",
                                                  cricket::TURN_SERVER_PORT);
 // Port for redirecting to a TCP Web server. Should not work.
 static const SocketAddress kTurnDangerousAddr("99.99.99.7", 81);
+// Port 53 (the DNS port); should work.
+static const SocketAddress kTurnPort53Addr("99.99.99.7", 53);
 // Port 80 (the HTTP port); should work.
 static const SocketAddress kTurnPort80Addr("99.99.99.7", 80);
 // Port 443 (the HTTPS port); should work.
@@ -105,6 +107,8 @@ static const cricket::ProtocolAddress kTurnUdpIPv6ProtoAddr(kTurnUdpIPv6IntAddr,
 static const cricket::ProtocolAddress kTurnDangerousProtoAddr(
     kTurnDangerousAddr,
     cricket::PROTO_TCP);
+static const cricket::ProtocolAddress kTurnPort53ProtoAddr(kTurnPort53Addr,
+                                                           cricket::PROTO_TCP);
 static const cricket::ProtocolAddress kTurnPort80ProtoAddr(kTurnPort80Addr,
                                                            cricket::PROTO_TCP);
 static const cricket::ProtocolAddress kTurnPort443ProtoAddr(kTurnPort443Addr,
@@ -630,6 +634,11 @@ class TurnPortTest : public ::testing::Test,
                                                     Port::ORIGIN_MESSAGE);
     Connection* conn2 = turn_port_->CreateConnection(udp_port_->Candidates()[0],
                                                      Port::ORIGIN_MESSAGE);
+
+    // Increased to 10 minutes, to ensure that the TurnEntry times out before
+    // the TurnPort.
+    turn_port_->set_timeout_delay(10 * 60 * 1000);
+
     ASSERT_TRUE(conn2 != NULL);
     ASSERT_TRUE_SIMULATED_WAIT(turn_create_permission_success_, kSimulatedRtt,
                                fake_clock_);
@@ -646,11 +655,11 @@ class TurnPortTest : public ::testing::Test,
     EXPECT_TRUE_SIMULATED_WAIT(turn_unknown_address_, kSimulatedRtt,
                                fake_clock_);
 
-    // Flush all requests in the invoker to destroy the TurnEntry.
+    // Wait for TurnEntry to expire. Timeout is 5 minutes.
     // Expect that it still processes an incoming ping and signals the
     // unknown address.
     turn_unknown_address_ = false;
-    turn_port_->invoker()->Flush(rtc::Thread::Current());
+    fake_clock_.AdvanceTime(webrtc::TimeDelta::Seconds(5 * 60));
     conn1->Ping(0);
     EXPECT_TRUE_SIMULATED_WAIT(turn_unknown_address_, kSimulatedRtt,
                                fake_clock_);
@@ -1805,13 +1814,18 @@ TEST_F(TurnPortTest, TestTurnDangerousServer) {
   ASSERT_FALSE(turn_port_);
 }
 
-TEST_F(TurnPortTest, TestTurnDangerousServerPermits443) {
-  CreateTurnPort(kTurnUsername, kTurnPassword, kTurnPort443ProtoAddr);
+TEST_F(TurnPortTest, TestTurnDangerousServerPermits53) {
+  CreateTurnPort(kTurnUsername, kTurnPassword, kTurnPort53ProtoAddr);
   ASSERT_TRUE(turn_port_);
 }
 
 TEST_F(TurnPortTest, TestTurnDangerousServerPermits80) {
   CreateTurnPort(kTurnUsername, kTurnPassword, kTurnPort80ProtoAddr);
+  ASSERT_TRUE(turn_port_);
+}
+
+TEST_F(TurnPortTest, TestTurnDangerousServerPermits443) {
+  CreateTurnPort(kTurnUsername, kTurnPassword, kTurnPort443ProtoAddr);
   ASSERT_TRUE(turn_port_);
 }
 
