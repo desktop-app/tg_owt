@@ -61,7 +61,7 @@ float SineGenerator::operator()() {
   if (x_radians_ >= 2 * kPi) {
     x_radians_ -= 2 * kPi;
   }
-  return amplitude_ * std::sinf(x_radians_);
+  return amplitude_ * std::sin(float(x_radians_));
 }
 
 PulseGenerator::PulseGenerator(float pulse_amplitude,

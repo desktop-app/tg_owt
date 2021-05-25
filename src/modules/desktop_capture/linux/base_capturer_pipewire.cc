@@ -1340,7 +1340,8 @@ bool BaseCapturerPipeWire::Supported() {
 // static
 std::unique_ptr<DesktopCapturer> BaseCapturerPipeWire::CreateRawCapturer(
     const DesktopCaptureOptions& options) {
-  if (!BaseCapturerPipeWire::Supported()) {
+  static const bool supported = BaseCapturerPipeWire::Supported();
+  if (!supported) {
     return nullptr;
   }
   return std::make_unique<BaseCapturerPipeWire>(
