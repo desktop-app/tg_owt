@@ -224,7 +224,7 @@ static const NSInteger kMaxInflightBuffers = 1;
 
 - (BOOL)setupMetal {
   // Set the view to use the default device.
-  _device = MTLCreateSystemDefaultDevice();
+  _device = CGDirectDisplayCopyCurrentMetalDevice(CGMainDisplayID());
   if (!_device) {
     return NO;
   }
