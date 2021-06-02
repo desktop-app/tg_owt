@@ -24,6 +24,13 @@ INTERFACE
     RTC_ENABLE_VP9
 )
 
+if (TG_OWT_USE_PIPEWIRE)
+    target_compile_definitions(libwebrtcbuild
+    INTERFACE
+        WEBRTC_USE_PIPEWIRE
+    )
+endif()
+
 if (NOT TG_OWT_BUILD_AUDIO_BACKENDS)
     target_compile_definitions(libwebrtcbuild
     INTERFACE
