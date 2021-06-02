@@ -92,10 +92,6 @@ add_library(tg_owt)
 init_target(tg_owt)
 
 if (TG_OWT_USE_PIPEWIRE)
-    target_compile_definitions(tg_owt
-    PRIVATE
-        WEBRTC_USE_PIPEWIRE
-    )
     if (TG_OWT_DLOPEN_PIPEWIRE)
         include(cmake/generate_stubs.cmake)
         set(stubs_loc ${webrtc_loc}/modules/desktop_capture/linux)
