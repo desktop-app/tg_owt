@@ -36,6 +36,7 @@ function(init_target target_name) # init_target(my_target folder_name)
     target_compile_definitions(${target_name}
     PRIVATE
         HAVE_SCTP
+        ABSL_ALLOCATOR_NOTHROW=1
     )
     if (WIN32)
         target_compile_definitions(${target_name}
@@ -44,7 +45,6 @@ function(init_target target_name) # init_target(my_target folder_name)
             HAVE_WINSOCK2_H
             NOMINMAX
             HAVE_SSE2
-            ABSL_ALLOCATOR_NOTHROW=1
         )
 
         target_compile_options(${target_name}
