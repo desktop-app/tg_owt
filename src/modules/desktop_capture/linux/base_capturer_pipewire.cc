@@ -1025,6 +1025,9 @@ void BaseCapturerPipeWire::SourcesRequest() {
   // We don't want to allow selection of multiple sources.
   g_variant_builder_add(&builder, "{sv}", "multiple",
                         g_variant_new_boolean(false));
+  // Embedded cursor.
+  g_variant_builder_add(&builder, "{sv}", "cursor_mode",
+                        g_variant_new_uint32(2));
   variant_string = g_strdup_printf("webrtc%d", g_random_int_range(0, G_MAXINT));
   g_variant_builder_add(&builder, "{sv}", "handle_token",
                         g_variant_new_string(variant_string.get()));
