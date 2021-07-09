@@ -19,7 +19,7 @@ if (NOT TG_OWT_PACKAGED_BUILD)
     set(not_packaged_build 1)
 endif()
 
-option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." ${TG_OWT_PACKAGED_BUILD})
+option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." OFF)
 option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
 option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture on non-Apple Unix." ON)
 option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire 0.3 for desktop capture on non-Apple Unix." ${not_packaged_build})
@@ -31,6 +31,11 @@ endif()
 
 if (BUILD_SHARED_LIBS)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    message(WARNING
+        "tg_owt is a fork of Google's webrtc library and is developed by them as a static library without stable ABI in mind."
+        "The feature of building tg_owt as a shared library is community maintained, it may and will break at any time without guarantee to work again."
+        "Please reconsider your decision. Good luck."
+    )
 endif()
 
 project(tg_owt
