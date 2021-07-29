@@ -100,6 +100,8 @@ if (TG_OWT_USE_PIPEWIRE)
         PRIVATE
             WEBRTC_DLOPEN_PIPEWIRE
         )
+    endif()
+    if (NOT TG_OWT_PACKAGED_BUILD)
         target_include_directories(tg_owt
         PRIVATE
             ${webrtc_loc}/third_party/pipewire/spa/include
