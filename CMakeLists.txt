@@ -88,19 +88,6 @@ add_library(tg_owt)
 init_target(tg_owt)
 
 if (TG_OWT_USE_PIPEWIRE)
-    if (TG_OWT_DLOPEN_PIPEWIRE)
-        include(cmake/generate_stubs.cmake)
-        set(stubs_loc ${webrtc_loc}/modules/desktop_capture/linux)
-        generate_stubs(tg_owt
-            ${stubs_loc}/pipewire_stub_header.fragment
-            pipewire_stubs
-            ${stubs_loc}/pipewire03.sigs
-        )
-        target_compile_definitions(tg_owt
-        PRIVATE
-            WEBRTC_DLOPEN_PIPEWIRE
-        )
-    endif()
     if (NOT TG_OWT_PACKAGED_BUILD)
         target_include_directories(tg_owt
         PRIVATE
@@ -110,6 +97,27 @@ if (TG_OWT_USE_PIPEWIRE)
         )
     else()
         link_pipewire(tg_owt)
+    endif()
+    if (TG_OWT_DLOPEN_PIPEWIRE)
+        include(cmake/generate_stubs.cmake)
+        set(stubs_loc ${webrtc_loc}/modules/desktop_capture/linux)
+        if (NOT DEFINED PIPEWIRE_VERSION OR PIPEWIRE_VERSION VERSION_GREATER_EQUAL 0.3)
+            generate_stubs(tg_owt
+                ${stubs_loc}/pipewire_stub_header.fragment
+                pipewire_stubs
+                ${stubs_loc}/pipewire03.sigs
+            )
+        else()
+            generate_stubs(tg_owt
+                ${stubs_loc}/pipewire_stub_header.fragment
+                pipewire_stubs
+                ${stubs_loc}/pipewire02.sigs
+            )
+        endif()
+        target_compile_definitions(tg_owt
+        PRIVATE
+            WEBRTC_DLOPEN_PIPEWIRE
+        )
     endif()
 endif()
 
