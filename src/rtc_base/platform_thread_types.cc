@@ -25,6 +25,11 @@ typedef HRESULT(WINAPI* RTC_SetThreadDescription)(HANDLE hThread,
                                                   PCWSTR lpThreadDescription);
 #endif
 
+#if defined(WEBRTC_FREEBSD)
+#include <sys/thr.h>
+#include <pthread_np.h>
+#endif
+
 namespace rtc {
 
 PlatformThreadId CurrentThreadId() {
@@ -39,6 +44,10 @@ PlatformThreadId CurrentThreadId() {
   return zx_thread_self();
 #elif defined(WEBRTC_LINUX)
   return syscall(__NR_gettid);
+#elif defined(WEBRTC_FREEBSD)
+  long tid;
+  thr_self(&tid);
+  return tid;
 #elif defined(__EMSCRIPTEN__)
   return static_cast<PlatformThreadId>(pthread_self());
 #else
@@ -107,6 +116,8 @@ void SetCurrentThreadName(const char* name) {
 #pragma warning(pop)
 #elif defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
   prctl(PR_SET_NAME, reinterpret_cast<unsigned long>(name));  // NOLINT
+#elif defined(WEBRTC_FREEBSD)
+  pthread_setname_np(pthread_self(), name);
 #elif defined(WEBRTC_MAC) || defined(WEBRTC_IOS)
   pthread_setname_np(name);
 #endif
