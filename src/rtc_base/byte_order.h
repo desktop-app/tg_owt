@@ -88,8 +88,10 @@
 #error WEBRTC_ARCH_BIG_ENDIAN or WEBRTC_ARCH_LITTLE_ENDIAN must be defined.
 #endif  // defined(WEBRTC_ARCH_LITTLE_ENDIAN)
 
-#elif defined(WEBRTC_POSIX)
+#elif defined(WEBRTC_LINUX)
 #include <endian.h>
+#elif defined(WEBRTC_FREEBSD)
+#include <sys/endian.h>
 #else
 #error "Missing byte order functions for this arch."
 #endif  // defined(WEBRTC_MAC)
