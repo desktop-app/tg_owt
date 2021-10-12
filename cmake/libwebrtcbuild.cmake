@@ -52,19 +52,35 @@ if (WIN32)
     INTERFACE
         WEBRTC_WIN
     )
-elseif (APPLE)
-    target_compile_definitions(libwebrtcbuild
-    INTERFACE
-        WEBRTC_POSIX
-        WEBRTC_MAC
-    )
 else()
     target_compile_definitions(libwebrtcbuild
     INTERFACE
         WEBRTC_POSIX
-        WEBRTC_LINUX
-        WEBRTC_USE_X11
     )
+
+    if (APPLE)
+        target_compile_definitions(libwebrtcbuild
+        INTERFACE
+            WEBRTC_MAC
+        )
+    else()
+        target_compile_definitions(libwebrtcbuild
+        INTERFACE
+            WEBRTC_USE_X11
+        )
+    endif()
+
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(libwebrtcbuild
+        INTERFACE
+            WEBRTC_LINUX
+        )
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+        target_compile_definitions(libwebrtcbuild
+        INTERFACE
+            WEBRTC_FREEBSD
+        )
+    endif()
 endif()
 
 target_include_directories(libwebrtcbuild
