@@ -29,7 +29,7 @@
 #include <unistd.h>
 #elif defined(WEBRTC_FUCHSIA)
 #include <zircon/syscalls.h>
-#elif defined(WEBRTC_LINUX)
+#elif defined(WEBRTC_LINUX) || defined(WEBRTC_FREEBSD)
 #include <unistd.h>
 #endif  // WEBRTC_LINUX
 
@@ -54,7 +54,7 @@ uint32_t DetectNumberOfCoresHelper() {
   SYSTEM_INFO si;
   GetNativeSystemInfo(&si);
   number_of_cores = static_cast<int>(si.dwNumberOfProcessors);
-#elif defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
+#elif defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID) || defined(WEBRTC_FREEBSD)
   number_of_cores = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
   if (number_of_cores <= 0) {
     RTC_LOG(LS_ERROR) << "Failed to get number of cores";
