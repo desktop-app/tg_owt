@@ -445,7 +445,7 @@ int PhysicalSocket::SetOption(Option opt, int value) {
 int PhysicalSocket::Send(const void* pv, size_t cb) {
   int sent = DoSend(
       s_, reinterpret_cast<const char*>(pv), static_cast<int>(cb),
-#if defined(WEBRTC_LINUX) && !defined(WEBRTC_ANDROID)
+#if defined(WEBRTC_POSIX) && !defined(WEBRTC_ANDROID) && !defined(WEBRTC_MAC)
       // Suppress SIGPIPE. Without this, attempting to send on a socket whose
       // other end is closed will result in a SIGPIPE signal being raised to
       // our process, which by default will terminate the process, which we
@@ -474,7 +474,7 @@ int PhysicalSocket::SendTo(const void* buffer,
   size_t len = addr.ToSockAddrStorage(&saddr);
   int sent =
       DoSendTo(s_, static_cast<const char*>(buffer), static_cast<int>(length),
-#if defined(WEBRTC_LINUX) && !defined(WEBRTC_ANDROID)
+#if defined(WEBRTC_POSIX) && !defined(WEBRTC_ANDROID) && !defined(WEBRTC_MAC)
                // Suppress SIGPIPE. See above for explanation.
                MSG_NOSIGNAL,
 #else
@@ -765,13 +765,13 @@ int PhysicalSocket::TranslateOption(Option opt, int* slevel, int* sopt) {
       *slevel = IPPROTO_IP;
       *sopt = IP_DONTFRAGMENT;
       break;
-#elif defined(WEBRTC_MAC) || defined(BSD)
-      RTC_LOG(LS_WARNING) << "Socket::OPT_DONTFRAGMENT not supported.";
-      return -1;
-#elif defined(WEBRTC_POSIX)
+#elif defined(WEBRTC_LINUX)
       *slevel = IPPROTO_IP;
       *sopt = IP_MTU_DISCOVER;
       break;
+#else
+      RTC_LOG(LS_WARNING) << "Socket::OPT_DONTFRAGMENT not supported.";
+      return -1;
 #endif
     case OPT_RCVBUF:
       *slevel = SOL_SOCKET;
