@@ -71,9 +71,6 @@ include(cmake/libsrtp.cmake)
 include(cmake/libusrsctp.cmake)
 include(cmake/libvpx.cmake)
 include(cmake/libyuv.cmake)
-if (NOT WIN32 AND NOT APPLE)
-    include(cmake/libevent.cmake)
-endif()
 if (APPLE)
     include(cmake/libsdkmacos.cmake)
 endif()
@@ -158,10 +155,6 @@ if (TG_OWT_BUILD_AUDIO_BACKENDS AND (UNIX AND NOT APPLE))
     link_libalsa(tg_owt)
     link_libpulse(tg_owt)
     link_dl(tg_owt)
-endif()
-
-if (NOT WIN32 AND NOT APPLE)
-    link_libevent(tg_owt)
 endif()
 
 include(cmake/libwebrtcbuild.cmake)
@@ -446,8 +439,8 @@ PRIVATE
     rtc_base/task_queue.cc
     rtc_base/task_queue_gcd.cc
     rtc_base/task_queue_gcd.h
-    rtc_base/task_queue_libevent.cc
-    rtc_base/task_queue_libevent.h
+    rtc_base/task_queue_stdlib.cc
+    rtc_base/task_queue_stdlib.h
     rtc_base/task_queue_win.cc
     rtc_base/task_queue_win.h
     rtc_base/ifaddrs_converter.cc
@@ -527,7 +520,7 @@ PRIVATE
     api/stats_types.cc
     api/task_queue/default_task_queue_factory.h
     api/task_queue/default_task_queue_factory_gcd.cc
-    api/task_queue/default_task_queue_factory_libevent.cc
+    api/task_queue/default_task_queue_factory_stdlib.cc
     api/task_queue/default_task_queue_factory_win.cc
     api/task_queue/task_queue_base.cc
     api/transport/bitrate_settings.cc
@@ -2309,9 +2302,9 @@ endif()
 
 if (WIN32 OR APPLE)
     remove_target_sources(tg_owt ${webrtc_loc}
-        rtc_base/task_queue_libevent.cc
-        rtc_base/task_queue_libevent.h
-        api/task_queue/default_task_queue_factory_libevent.cc
+        rtc_base/task_queue_stdlib.cc
+        rtc_base/task_queue_stdlib.h
+        api/task_queue/default_task_queue_factory_stdlib.cc
     )
 endif()
 
@@ -2319,15 +2312,10 @@ if (WIN32)
     remove_target_sources(tg_owt ${webrtc_loc}
         rtc_base/ifaddrs_converter.cc
     )
-else()
 endif()
 
 set(platform_export)
-if (NOT WIN32 AND NOT APPLE AND NOT LIBEVENT_FOUND)
-    set(platform_export
-        libevent
-    )
-elseif (APPLE)
+if (APPLE)
     set(platform_export
         libsdkmacos
     )
