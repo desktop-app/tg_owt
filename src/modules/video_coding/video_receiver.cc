@@ -141,7 +141,7 @@ void VideoReceiver::RegisterExternalDecoder(VideoDecoder* externalDecoder,
     RTC_CHECK(_codecDataBase.DeregisterExternalDecoder(payloadType));
     return;
   }
-  _codecDataBase.RegisterExternalDecoder(externalDecoder, payloadType);
+  _codecDataBase.RegisterExternalDecoder(payloadType, externalDecoder);
 }
 
 // Register a frame type request callback.
@@ -253,7 +253,7 @@ int32_t VideoReceiver::RegisterReceiveCodec(uint8_t payload_type,
   if (receiveCodec == nullptr) {
     return VCM_PARAMETER_ERROR;
   }
-  if (!_codecDataBase.RegisterReceiveCodec(payload_type, receiveCodec,
+  if (!_codecDataBase.RegisterReceiveCodec(payload_type, *receiveCodec,
                                            numberOfCores)) {
     return -1;
   }
@@ -279,7 +279,7 @@ int32_t VideoReceiver::IncomingPacket(const uint8_t* incomingPayload,
   // Callers don't provide any ntp time.
   const VCMPacket packet(incomingPayload, payloadLength, rtp_header,
                          video_header, /*ntp_time_ms=*/0,
-                         clock_->TimeInMilliseconds());
+                         clock_->CurrentTime());
   int32_t ret = _receiver.InsertPacket(packet);
 
   // TODO(holmer): Investigate if this somehow should use the key frame

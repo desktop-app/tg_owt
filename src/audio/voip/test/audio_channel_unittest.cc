@@ -17,7 +17,6 @@
 #include "modules/audio_mixer/audio_mixer_impl.h"
 #include "modules/audio_mixer/sine_wave_generator.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
-#include "modules/utility/include/process_thread.h"
 #include "rtc_base/logging.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -43,7 +42,6 @@ class AudioChannelTest : public ::testing::Test {
   AudioChannelTest()
       : fake_clock_(kStartTime), wave_generator_(1000.0, kAudioLevel) {
     task_queue_factory_ = std::make_unique<MockTaskQueueFactory>(&task_queue_);
-    process_thread_ = ProcessThread::Create("ModuleProcessThread");
     audio_mixer_ = AudioMixerImpl::Create();
     encoder_factory_ = CreateBuiltinAudioEncoderFactory();
     decoder_factory_ = CreateBuiltinAudioDecoderFactory();
@@ -65,9 +63,9 @@ class AudioChannelTest : public ::testing::Test {
     // Also this uses the same transport object for different audio channel to
     // simplify network routing logic.
     rtc::scoped_refptr<AudioChannel> audio_channel =
-        new rtc::RefCountedObject<AudioChannel>(
-            &transport_, ssrc, task_queue_factory_.get(), process_thread_.get(),
-            audio_mixer_.get(), decoder_factory_);
+        rtc::make_ref_counted<AudioChannel>(
+            &transport_, ssrc, task_queue_factory_.get(), audio_mixer_.get(),
+            decoder_factory_);
     audio_channel->SetEncoder(kPcmuPayload, kPcmuFormat,
                               encoder_factory_->MakeAudioEncoder(
                                   kPcmuPayload, kPcmuFormat, absl::nullopt));
@@ -95,7 +93,6 @@ class AudioChannelTest : public ::testing::Test {
   rtc::scoped_refptr<AudioMixer> audio_mixer_;
   rtc::scoped_refptr<AudioDecoderFactory> decoder_factory_;
   rtc::scoped_refptr<AudioEncoderFactory> encoder_factory_;
-  std::unique_ptr<ProcessThread> process_thread_;
   rtc::scoped_refptr<AudioChannel> audio_channel_;
 };
 

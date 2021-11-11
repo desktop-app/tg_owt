@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "absl/types/optional.h"
+#include "api/array_view.h"
 #include "api/network_state_predictor.h"
 #include "api/rtp_headers.h"
 #include "api/rtp_parameters.h"
@@ -60,7 +61,7 @@ RTC_PUSH_IGNORING_WUNDEF()
 #ifdef WEBRTC_ANDROID_PLATFORM_BUILD
 #include "external/webrtc/webrtc/logging/rtc_event_log/rtc_event_log.pb.h"
 #else
-#include <rtc_event_log.pb.h>
+#include "logging/rtc_event_log/rtc_event_log.pb.h"
 #endif
 RTC_POP_IGNORING_WUNDEF()
 
@@ -593,14 +594,14 @@ std::string RtcEventLogEncoderLegacy::EncodeRtcpPacketOutgoing(
 
 std::string RtcEventLogEncoderLegacy::EncodeRtpPacketIncoming(
     const RtcEventRtpPacketIncoming& event) {
-  return EncodeRtpPacket(event.timestamp_us(), event.header(),
+  return EncodeRtpPacket(event.timestamp_us(), event.RawHeader(),
                          event.packet_length(), PacedPacketInfo::kNotAProbe,
                          true);
 }
 
 std::string RtcEventLogEncoderLegacy::EncodeRtpPacketOutgoing(
     const RtcEventRtpPacketOutgoing& event) {
-  return EncodeRtpPacket(event.timestamp_us(), event.header(),
+  return EncodeRtpPacket(event.timestamp_us(), event.RawHeader(),
                          event.packet_length(), event.probe_cluster_id(),
                          false);
 }
@@ -736,7 +737,7 @@ std::string RtcEventLogEncoderLegacy::EncodeRtcpPacket(
 
 std::string RtcEventLogEncoderLegacy::EncodeRtpPacket(
     int64_t timestamp_us,
-    const webrtc::RtpPacket& header,
+    rtc::ArrayView<const uint8_t> header,
     size_t packet_length,
     int probe_cluster_id,
     bool is_incoming) {

@@ -14,6 +14,7 @@ rtc_library("repeating_task") {
     "repeating_task.h",
   ]
   deps = [
+    ":pending_task_safety_flag",
     ":to_queued_task",
     "..:logging",
     "..:timeutils",
@@ -33,7 +34,7 @@ rtc_library("pending_task_safety_flag") {
   ]
   deps = [
     "..:checks",
-    "..:refcount",
+    "../../api:refcountedbase",
     "../../api:scoped_refptr",
     "../../api:sequence_checker",
     "../system:no_unique_address",

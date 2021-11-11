@@ -499,7 +499,7 @@ class WindowsAudioDeviceModule : public AudioDeviceModuleForTest {
 
   // The AudioDeviceBuffer (ADB) instance is needed for sending/receiving audio
   // to/from the WebRTC layer. Created and owned by this object. Used by
-  // both |input_| and |output_| but they use orthogonal parts of the ADB.
+  // both `input_` and `output_` but they use orthogonal parts of the ADB.
   std::unique_ptr<AudioDeviceBuffer> audio_device_buffer_;
 
   // Set to true after a successful call to Init(). Cleared by Terminate().
@@ -514,7 +514,7 @@ CreateWindowsCoreAudioAudioDeviceModuleFromInputAndOutput(
     std::unique_ptr<AudioOutput> audio_output,
     TaskQueueFactory* task_queue_factory) {
   RTC_DLOG(INFO) << __FUNCTION__;
-  return new rtc::RefCountedObject<WindowsAudioDeviceModule>(
+  return rtc::make_ref_counted<WindowsAudioDeviceModule>(
       std::move(audio_input), std::move(audio_output), task_queue_factory);
 }
 

@@ -27,7 +27,7 @@ namespace test {
 namespace {
 
 void SetAudioBufferSamples(float value, AudioBuffer* ab) {
-  // Sets all the samples in |ab| to |value|.
+  // Sets all the samples in `ab` to `value`.
   for (size_t k = 0; k < ab->num_channels(); ++k) {
     std::fill(ab->channels()[k], ab->channels()[k] + ab->num_frames(), value);
   }
@@ -65,7 +65,7 @@ std::unique_ptr<GainController2> CreateAgc2FixedDigitalMode(
     size_t sample_rate_hz) {
   auto agc2 = std::make_unique<GainController2>();
   agc2->ApplyConfig(CreateAgc2FixedDigitalModeConfig(fixed_gain_db));
-  agc2->Initialize(sample_rate_hz);
+  agc2->Initialize(sample_rate_hz, /*num_channels=*/1);
   return agc2;
 }
 
@@ -310,7 +310,7 @@ INSTANTIATE_TEST_SUITE_P(
     GainController2,
     FixedDigitalTest,
     ::testing::Values(
-        // When gain < |test::kLimiterMaxInputLevelDbFs|, the limiter will not
+        // When gain < `test::kLimiterMaxInputLevelDbFs`, the limiter will not
         // saturate the signal (at any sample rate).
         FixedDigitalTestParams(0.1f,
                                test::kLimiterMaxInputLevelDbFs - 0.01f,
@@ -320,7 +320,7 @@ INSTANTIATE_TEST_SUITE_P(
                                test::kLimiterMaxInputLevelDbFs - 0.01f,
                                48000,
                                false),
-        // When gain > |test::kLimiterMaxInputLevelDbFs|, the limiter will
+        // When gain > `test::kLimiterMaxInputLevelDbFs`, the limiter will
         // saturate the signal (at any sample rate).
         FixedDigitalTestParams(test::kLimiterMaxInputLevelDbFs + 0.01f,
                                10.f,
@@ -337,9 +337,10 @@ TEST(GainController2, CheckGainAdaptiveDigital) {
   constexpr float kExpectedGainDb = 4.3f;
   constexpr float kToleranceDb = 0.5f;
   GainController2 gain_controller2;
-  gain_controller2.Initialize(AudioProcessing::kSampleRate48kHz);
+  gain_controller2.Initialize(AudioProcessing::kSampleRate48kHz,
+                              /*num_channels=*/1);
   AudioProcessing::Config::GainController2 config;
-  config.fixed_digital.gain_db = 0.f;
+  config.fixed_digital.gain_db = 0.0f;
   config.adaptive_digital.enabled = true;
   gain_controller2.ApplyConfig(config);
   EXPECT_NEAR(

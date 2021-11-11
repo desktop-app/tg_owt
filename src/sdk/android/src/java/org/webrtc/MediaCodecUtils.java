@@ -29,8 +29,6 @@ class MediaCodecUtils {
   static final String INTEL_PREFIX = "OMX.Intel.";
   static final String NVIDIA_PREFIX = "OMX.Nvidia.";
   static final String QCOM_PREFIX = "OMX.qcom.";
-  static final String HISI_PREFIX = "OMX.hisi.";
-  static final String IMG_PREFIX = "OMX.IMG.";
   static final String[] SOFTWARE_IMPLEMENTATION_PREFIXES = {
       "OMX.google.", "OMX.SEC.", "c2.android"};
 
@@ -93,7 +91,7 @@ class MediaCodecUtils {
     switch (type) {
       case VP8:
       case VP9:
-      case H265:
+      case AV1:
         return new HashMap<String, String>();
       case H264:
         return H264Utils.getDefaultH264Params(highProfile);

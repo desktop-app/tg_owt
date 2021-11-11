@@ -65,9 +65,7 @@ rtc::scoped_refptr<DtmfSender> DtmfSender::Create(
   if (!signaling_thread) {
     return nullptr;
   }
-  rtc::scoped_refptr<DtmfSender> dtmf_sender(
-      new rtc::RefCountedObject<DtmfSender>(signaling_thread, provider));
-  return dtmf_sender;
+  return rtc::make_ref_counted<DtmfSender>(signaling_thread, provider);
 }
 
 DtmfSender::DtmfSender(rtc::Thread* signaling_thread,
@@ -194,7 +192,7 @@ void DtmfSender::DoInsertDtmf() {
   } else {
     char tone = tones_[first_tone_pos];
     if (!GetDtmfCode(tone, &code)) {
-      // The find_first_of(kDtmfValidTones) should have guarantee |tone| is
+      // The find_first_of(kDtmfValidTones) should have guarantee `tone` is
       // a valid DTMF tone.
       RTC_NOTREACHED();
     }
@@ -218,7 +216,7 @@ void DtmfSender::DoInsertDtmf() {
       RTC_LOG(LS_ERROR) << "The DtmfProvider can no longer send DTMF.";
       return;
     }
-    // Wait for the number of milliseconds specified by |duration_|.
+    // Wait for the number of milliseconds specified by `duration_`.
     tone_gap += duration_;
   }
 

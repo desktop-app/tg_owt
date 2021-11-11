@@ -10,7 +10,7 @@ absl_source_set("civil_time") {
     "include/cctz/civil_time.h",
     "include/cctz/civil_time_detail.h",
   ]
-  deps = [ "../../../base:config" ]
+  deps = [ "//third_party/abseil-cpp/absl/base:config" ]
 }
 
 absl_source_set("time_zone") {
@@ -36,11 +36,20 @@ absl_source_set("time_zone") {
     "include/cctz/time_zone.h",
     "include/cctz/zone_info_source.h",
   ]
-  if (is_mac || is_ios) {
-    libs = [ "Foundation.framework" ]
+  if (is_apple) {
+    frameworks = [ "Foundation.framework" ]
   }
   deps = [
     ":civil_time",
-    "../../../base:config",
+    "//third_party/abseil-cpp/absl/base:config",
   ]
+  if (is_fuchsia) {
+    deps += [
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.intl",
+      "//third_party/fuchsia-sdk/sdk/pkg/async",
+      "//third_party/fuchsia-sdk/sdk/pkg/async-loop-cpp",
+      "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
+      "//third_party/fuchsia-sdk/sdk/pkg/zx",
+    ]
+  }
 }

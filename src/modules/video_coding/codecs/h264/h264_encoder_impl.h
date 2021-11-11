@@ -25,7 +25,7 @@
 #include "common_video/h264/h264_bitstream_parser.h"
 #include "modules/video_coding/codecs/h264/include/h264.h"
 #include "modules/video_coding/utility/quality_scaler.h"
-#include <wels/codec_app_def.h>
+#include "third_party/openh264/src/codec/api/svc/codec_app_def.h"
 
 class ISVCEncoder;
 
@@ -53,8 +53,8 @@ class H264EncoderImpl : public H264Encoder {
   explicit H264EncoderImpl(const cricket::VideoCodec& codec);
   ~H264EncoderImpl() override;
 
-  // |settings.max_payload_size| is ignored.
-  // The following members of |codec_settings| are used. The rest are ignored.
+  // `settings.max_payload_size` is ignored.
+  // The following members of `codec_settings` are used. The rest are ignored.
   // - codecType (must be kVideoCodecH264)
   // - targetBitrate
   // - maxFramerate

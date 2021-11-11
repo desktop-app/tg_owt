@@ -10,7 +10,6 @@
 
 #include "modules/audio_device/linux/audio_device_alsa_linux.h"
 
-#include <assert.h>
 
 #include "modules/audio_device/audio_device_config.h"
 #include "rtc_base/logging.h"
@@ -178,26 +177,13 @@ int32_t AudioDeviceLinuxALSA::Terminate() {
   _mixerManager.Close();
 
   // RECORDING
-  if (_ptrThreadRec) {
-    rtc::PlatformThread* tmpThread = _ptrThreadRec.release();
-    mutex_.Unlock();
-
-    tmpThread->Stop();
-    delete tmpThread;
-
-    mutex_.Lock();
-  }
+  mutex_.Unlock();
+  _ptrThreadRec.Finalize();
 
   // PLAYOUT
-  if (_ptrThreadPlay) {
-    rtc::PlatformThread* tmpThread = _ptrThreadPlay.release();
-    mutex_.Unlock();
+  _ptrThreadPlay.Finalize();
+  mutex_.Lock();
 
-    tmpThread->Stop();
-    delete tmpThread;
-
-    mutex_.Lock();
-  }
 #if defined(WEBRTC_USE_X11)
   if (_XDisplay) {
     XCloseDisplay(_XDisplay);
@@ -1040,11 +1026,13 @@ int32_t AudioDeviceLinuxALSA::StartRecording() {
     return -1;
   }
   // RECORDING
-  _ptrThreadRec.reset(new rtc::PlatformThread(
-      RecThreadFunc, this, "webrtc_audio_module_capture_thread",
-      rtc::kRealtimePriority));
-
-  _ptrThreadRec->Start();
+  _ptrThreadRec = rtc::PlatformThread::SpawnJoinable(
+      [this] {
+        while (RecThreadProcess()) {
+        }
+      },
+      "webrtc_audio_module_capture_thread",
+      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
 
   errVal = LATE(snd_pcm_prepare)(_handleRecord);
   if (errVal < 0) {
@@ -1088,10 +1076,7 @@ int32_t AudioDeviceLinuxALSA::StopRecordingLocked() {
   _recIsInitialized = false;
   _recording = false;
 
-  if (_ptrThreadRec) {
-    _ptrThreadRec->Stop();
-    _ptrThreadRec.reset();
-  }
+  _ptrThreadRec.Finalize();
 
   _recordingFramesLeft = 0;
   if (_recordingBuffer) {
@@ -1158,10 +1143,13 @@ int32_t AudioDeviceLinuxALSA::StartPlayout() {
   }
 
   // PLAYOUT
-  _ptrThreadPlay.reset(new rtc::PlatformThread(
-      PlayThreadFunc, this, "webrtc_audio_module_play_thread",
-      rtc::kRealtimePriority));
-  _ptrThreadPlay->Start();
+  _ptrThreadPlay = rtc::PlatformThread::SpawnJoinable(
+      [this] {
+        while (PlayThreadProcess()) {
+        }
+      },
+      "webrtc_audio_module_play_thread",
+      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
 
   int errVal = LATE(snd_pcm_prepare)(_handlePlayout);
   if (errVal < 0) {
@@ -1191,10 +1179,7 @@ int32_t AudioDeviceLinuxALSA::StopPlayoutLocked() {
   _playing = false;
 
   // stop playout thread first
-  if (_ptrThreadPlay) {
-    _ptrThreadPlay->Stop();
-    _ptrThreadPlay.reset();
-  }
+  _ptrThreadPlay.Finalize();
 
   _playoutFramesLeft = 0;
   delete[] _playoutBuffer;
@@ -1469,18 +1454,6 @@ int32_t AudioDeviceLinuxALSA::ErrorRecovery(int32_t error,
 //                                  Thread Methods
 // ============================================================================
 
-void AudioDeviceLinuxALSA::PlayThreadFunc(void* pThis) {
-  AudioDeviceLinuxALSA* device = static_cast<AudioDeviceLinuxALSA*>(pThis);
-  while (device->PlayThreadProcess()) {
-  }
-}
-
-void AudioDeviceLinuxALSA::RecThreadFunc(void* pThis) {
-  AudioDeviceLinuxALSA* device = static_cast<AudioDeviceLinuxALSA*>(pThis);
-  while (device->RecThreadProcess()) {
-  }
-}
-
 bool AudioDeviceLinuxALSA::PlayThreadProcess() {
   if (!_playing)
     return false;
@@ -1516,7 +1489,7 @@ bool AudioDeviceLinuxALSA::PlayThreadProcess() {
     Lock();
 
     _playoutFramesLeft = _ptrAudioBuffer->GetPlayoutData(_playoutBuffer);
-    assert(_playoutFramesLeft == _playoutFramesIn10MS);
+    RTC_DCHECK_EQ(_playoutFramesLeft, _playoutFramesIn10MS);
   }
 
   if (static_cast<uint32_t>(avail_frames) > _playoutFramesLeft)
@@ -1535,7 +1508,7 @@ bool AudioDeviceLinuxALSA::PlayThreadProcess() {
     UnLock();
     return true;
   } else {
-    assert(frames == avail_frames);
+    RTC_DCHECK_EQ(frames, avail_frames);
     _playoutFramesLeft -= frames;
   }
 
@@ -1585,7 +1558,7 @@ bool AudioDeviceLinuxALSA::RecThreadProcess() {
     UnLock();
     return true;
   } else if (frames > 0) {
-    assert(frames == avail_frames);
+    RTC_DCHECK_EQ(frames, avail_frames);
 
     int left_size =
         LATE(snd_pcm_frames_to_bytes)(_handleRecord, _recordingFramesLeft);

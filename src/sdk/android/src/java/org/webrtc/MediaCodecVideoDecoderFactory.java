@@ -46,7 +46,7 @@ class MediaCodecVideoDecoderFactory implements VideoDecoderFactory {
   @Nullable
   @Override
   public VideoDecoder createDecoder(VideoCodecInfo codecType) {
-    VideoCodecMimeType type = VideoCodecMimeType.valueOf(codecType.getName());
+    VideoCodecMimeType type = VideoCodecMimeType.fromSdpCodecName(codecType.getName());
     MediaCodecInfo info = findCodecForType(type);
 
     if (info == null) {
@@ -63,13 +63,12 @@ class MediaCodecVideoDecoderFactory implements VideoDecoderFactory {
   public VideoCodecInfo[] getSupportedCodecs() {
     List<VideoCodecInfo> supportedCodecInfos = new ArrayList<VideoCodecInfo>();
     // Generate a list of supported codecs in order of preference:
-    // VP8, VP9, H.265(optional), H264 (high profile), and H264 (baseline profile).
-    for (VideoCodecMimeType type : new VideoCodecMimeType[] {
-             VideoCodecMimeType.VP8, VideoCodecMimeType.VP9, VideoCodecMimeType.H264,
-			     VideoCodecMimeType.H265}) {
+    // VP8, VP9, H264 (high profile), and H264 (baseline profile).
+    for (VideoCodecMimeType type : new VideoCodecMimeType[] {VideoCodecMimeType.VP8,
+             VideoCodecMimeType.VP9, VideoCodecMimeType.H264, VideoCodecMimeType.AV1}) {
       MediaCodecInfo codec = findCodecForType(type);
       if (codec != null) {
-        String name = type.name();
+        String name = type.toSdpCodecName();
         if (type == VideoCodecMimeType.H264 && isH264HighProfileSupported(codec)) {
           supportedCodecInfos.add(new VideoCodecInfo(
               name, MediaCodecUtils.getCodecProperties(type, /* highProfile= */ true)));

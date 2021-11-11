@@ -17,11 +17,11 @@
 
 #include "rtc_base/checks.h"
 #include "rtc_base/constructor_magic.h"
-#include "rtc_base/deprecated/recursive_critical_section.h"
 #include "rtc_base/event.h"
 #include "rtc_base/fake_clock.h"
 #include "rtc_base/message_handler.h"
 #include "rtc_base/socket_server.h"
+#include "rtc_base/synchronization/mutex.h"
 
 namespace rtc {
 
@@ -33,7 +33,7 @@ class SocketAddressPair;
 // interface can create as many addresses as you want.  All of the sockets
 // created by this network will be able to communicate with one another, unless
 // they are bound to addresses from incompatible families.
-class VirtualSocketServer : public SocketServer, public sigslot::has_slots<> {
+class VirtualSocketServer : public SocketServer {
  public:
   VirtualSocketServer();
   // This constructor needs to be used if the test uses a fake clock and
@@ -104,10 +104,10 @@ class VirtualSocketServer : public SocketServer, public sigslot::has_slots<> {
 
   size_t largest_seen_udp_payload() { return largest_seen_udp_payload_; }
 
-  // If |blocked| is true, subsequent attempts to send will result in -1 being
+  // If `blocked` is true, subsequent attempts to send will result in -1 being
   // returned, with the socket error set to EWOULDBLOCK.
   //
-  // If this method is later called with |blocked| set to false, any sockets
+  // If this method is later called with `blocked` set to false, any sockets
   // that previously failed to send with EWOULDBLOCK will emit SignalWriteEvent.
   //
   // This can be used to simulate the send buffer on a network interface being
@@ -259,11 +259,6 @@ class VirtualSocketServer : public SocketServer, public sigslot::has_slots<> {
                                             uint32_t samples);
   static double Evaluate(const Function* f, double x);
 
-  // Null out our message queue if it goes away. Necessary in the case where
-  // our lifetime is greater than that of the thread we are using, since we
-  // try to send Close messages for all connected sockets when we shutdown.
-  void OnMessageQueueDestroyed() { msg_queue_ = nullptr; }
-
   // Determine if two sockets should be able to communicate.
   // We don't (currently) specify an address family for sockets; instead,
   // the currently bound address is used to infer the address family.
@@ -399,22 +394,23 @@ class VirtualSocket : public AsyncSocket,
   typedef std::map<Option, int> OptionsMap;
 
   int InitiateConnect(const SocketAddress& addr, bool use_delay);
-  void CompleteConnect(const SocketAddress& addr, bool notify);
+  void CompleteConnect(const SocketAddress& addr);
   int SendUdp(const void* pv, size_t cb, const SocketAddress& addr);
   int SendTcp(const void* pv, size_t cb);
 
   void OnSocketServerReadyToSend();
 
-  VirtualSocketServer* server_;
-  int type_;
-  bool async_;
+  VirtualSocketServer* const server_;
+  const int type_;
+  const bool async_;
   ConnState state_;
   int error_;
   SocketAddress local_addr_;
   SocketAddress remote_addr_;
 
   // Pending sockets which can be Accepted
-  ListenQueue* listen_queue_;
+  std::unique_ptr<ListenQueue> listen_queue_ RTC_GUARDED_BY(mutex_)
+      RTC_PT_GUARDED_BY(mutex_);
 
   // Data which tcp has buffered for sending
   SendBuffer send_buffer_;
@@ -422,8 +418,8 @@ class VirtualSocket : public AsyncSocket,
   // Set back to true when the socket can send again.
   bool ready_to_send_ = true;
 
-  // Critical section to protect the recv_buffer and queue_
-  RecursiveCriticalSection crit_;
+  // Mutex to protect the recv_buffer and listen_queue_
+  webrtc::Mutex mutex_;
 
   // Network model that enforces bandwidth and capacity constraints
   NetworkQueue network_;
@@ -433,7 +429,7 @@ class VirtualSocket : public AsyncSocket,
   int64_t last_delivery_time_ = 0;
 
   // Data which has been received from the network
-  RecvBuffer recv_buffer_;
+  RecvBuffer recv_buffer_ RTC_GUARDED_BY(mutex_);
   // The amount of data which is in flight or in recv_buffer_
   size_t recv_buffer_size_;
 

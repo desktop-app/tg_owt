@@ -203,7 +203,7 @@ class DummyDtmfObserver : public DtmfSenderObserverInterface {
   std::vector<std::string> tones_;
 };
 
-// Assumes |sender| already has an audio track added and the offer/answer
+// Assumes `sender` already has an audio track added and the offer/answer
 // exchange is done.
 void TestDtmfFromSenderToReceiver(PeerConnectionIntegrationWrapper* sender,
                                   PeerConnectionIntegrationWrapper* receiver) {
@@ -288,7 +288,7 @@ TEST_P(PeerConnectionIntegrationTest, EndToEndCallWithSdes) {
                                     webrtc::kEnumCounterKeyProtocolDtls));
 }
 
-// Basic end-to-end test specifying the |enable_encrypted_rtp_header_extensions|
+// Basic end-to-end test specifying the `enable_encrypted_rtp_header_extensions`
 // option to offer encrypted versions of all header extensions alongside the
 // unencrypted versions.
 TEST_P(PeerConnectionIntegrationTest,
@@ -1762,7 +1762,7 @@ TEST_P(PeerConnectionIntegrationTest,
   PeerConnectionFactory::Options callee_options;
   callee_options.crypto_options.srtp.enable_aes128_sha1_32_crypto_cipher =
       false;
-  int expected_cipher_suite = rtc::SRTP_AES128_CM_SHA1_80;
+  int expected_cipher_suite = rtc::kSrtpAes128CmSha1_80;
   TestNegotiatedCipherSuite(caller_options, callee_options,
                             expected_cipher_suite);
 }
@@ -1774,7 +1774,7 @@ TEST_P(PeerConnectionIntegrationTest,
       false;
   PeerConnectionFactory::Options callee_options;
   callee_options.crypto_options.srtp.enable_aes128_sha1_32_crypto_cipher = true;
-  int expected_cipher_suite = rtc::SRTP_AES128_CM_SHA1_80;
+  int expected_cipher_suite = rtc::kSrtpAes128CmSha1_80;
   TestNegotiatedCipherSuite(caller_options, callee_options,
                             expected_cipher_suite);
 }
@@ -1784,7 +1784,7 @@ TEST_P(PeerConnectionIntegrationTest, Aes128Sha1_32_CipherUsedWhenSupported) {
   caller_options.crypto_options.srtp.enable_aes128_sha1_32_crypto_cipher = true;
   PeerConnectionFactory::Options callee_options;
   callee_options.crypto_options.srtp.enable_aes128_sha1_32_crypto_cipher = true;
-  int expected_cipher_suite = rtc::SRTP_AES128_CM_SHA1_32;
+  int expected_cipher_suite = rtc::kSrtpAes128CmSha1_32;
   TestNegotiatedCipherSuite(caller_options, callee_options,
                             expected_cipher_suite);
 }
@@ -1866,8 +1866,8 @@ constexpr int kOnlyLocalPorts = cricket::PORTALLOCATOR_DISABLE_STUN |
 
 // Use a mock resolver to resolve the hostname back to the original IP on both
 // sides and check that the ICE connection connects.
-// TODO(bugs.webrtc.org/12590): Flaky on Windows.
-#if defined(WEBRTC_WIN)
+// TODO(bugs.webrtc.org/12590): Flaky on Windows and on Linux MSAN.
+#if defined(WEBRTC_WIN) || defined(WEBRTC_LINUX)
 #define MAYBE_IceStatesReachCompletionWithRemoteHostname \
   DISABLED_IceStatesReachCompletionWithRemoteHostname
 #else
@@ -2833,8 +2833,7 @@ TEST_P(PeerConnectionIntegrationTest, IceTransportFactoryUsedForConnections) {
                                              /*reset_decoder_factory=*/false);
   ASSERT_TRUE(wrapper);
   wrapper->CreateDataChannel();
-  rtc::scoped_refptr<MockSetSessionDescriptionObserver> observer(
-      new rtc::RefCountedObject<MockSetSessionDescriptionObserver>());
+  auto observer = rtc::make_ref_counted<MockSetSessionDescriptionObserver>();
   wrapper->pc()->SetLocalDescription(observer,
                                      wrapper->CreateOfferAndWait().release());
 }
@@ -3195,7 +3194,7 @@ TEST_P(PeerConnectionIntegrationTest, RegatherAfterChangingIceTransportType) {
   EXPECT_EQ_WAIT(webrtc::PeerConnectionInterface::kIceConnectionConnected,
                  callee()->ice_connection_state(), kDefaultTimeout);
   // Note that we cannot use the metric
-  // |WebRTC.PeerConnection.CandidatePairType_UDP| in this test since this
+  // `WebRTC.PeerConnection.CandidatePairType_UDP` in this test since this
   // metric is only populated when we reach kIceConnectionComplete in the
   // current implementation.
   EXPECT_EQ(cricket::RELAY_PORT_TYPE,
@@ -3319,8 +3318,7 @@ TEST_F(PeerConnectionIntegrationTestUnifiedPlan,
   SetSignalIceCandidates(false);  // Workaround candidate outrace sdp.
   caller()->AddVideoTrack();
   callee()->AddVideoTrack();
-  rtc::scoped_refptr<MockSetSessionDescriptionObserver> observer(
-      new rtc::RefCountedObject<MockSetSessionDescriptionObserver>());
+  auto observer = rtc::make_ref_counted<MockSetSessionDescriptionObserver>();
   callee()->pc()->SetLocalDescription(observer,
                                       callee()->CreateOfferAndWait().release());
   EXPECT_TRUE_WAIT(observer->called(), kDefaultTimeout);
@@ -3337,15 +3335,15 @@ TEST_F(PeerConnectionIntegrationTestUnifiedPlan,
 
   ASSERT_TRUE(CreatePeerConnectionWrappersWithConfig(config, config));
 
-  rtc::scoped_refptr<MockSetSessionDescriptionObserver> sld_observer(
-      new rtc::RefCountedObject<MockSetSessionDescriptionObserver>());
+  auto sld_observer =
+      rtc::make_ref_counted<MockSetSessionDescriptionObserver>();
   callee()->pc()->SetLocalDescription(sld_observer,
                                       callee()->CreateOfferAndWait().release());
   EXPECT_TRUE_WAIT(sld_observer->called(), kDefaultTimeout);
   EXPECT_EQ(sld_observer->error(), "");
 
-  rtc::scoped_refptr<MockSetSessionDescriptionObserver> srd_observer(
-      new rtc::RefCountedObject<MockSetSessionDescriptionObserver>());
+  auto srd_observer =
+      rtc::make_ref_counted<MockSetSessionDescriptionObserver>();
   callee()->pc()->SetRemoteDescription(
       srd_observer, caller()->CreateOfferAndWait().release());
   EXPECT_TRUE_WAIT(srd_observer->called(), kDefaultTimeout);
@@ -3639,6 +3637,20 @@ TEST_P(PeerConnectionIntegrationInteropTest,
   media_expectations.CallerExpectsSomeVideo();
   media_expectations.CalleeExpectsSomeAudio();
   ASSERT_TRUE(ExpectNewFrames(media_expectations));
+}
+
+TEST_P(PeerConnectionIntegrationTest, NewTracksDoNotCauseNewCandidates) {
+  ASSERT_TRUE(CreatePeerConnectionWrappers());
+  ConnectFakeSignaling();
+  caller()->AddAudioVideoTracks();
+  caller()->CreateAndSetAndSignalOffer();
+  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  ASSERT_TRUE_WAIT(DtlsConnected(), kDefaultTimeout);
+  caller()->ExpectCandidates(0);
+  callee()->ExpectCandidates(0);
+  caller()->AddAudioTrack();
+  caller()->CreateAndSetAndSignalOffer();
+  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
 }
 
 INSTANTIATE_TEST_SUITE_P(

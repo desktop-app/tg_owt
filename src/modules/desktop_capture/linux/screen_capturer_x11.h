@@ -78,10 +78,10 @@ class ScreenCapturerX11 : public DesktopCapturer,
   // Called when the screen configuration is changed.
   void ScreenConfigurationChanged();
 
-  // Synchronize the current buffer with |last_buffer_|, by copying pixels from
-  // the area of |last_invalid_rects|.
+  // Synchronize the current buffer with `last_buffer_`, by copying pixels from
+  // the area of `last_invalid_rects`.
   // Note this only works on the assumption that kNumBuffers == 2, as
-  // |last_invalid_rects| holds the differences from the previous buffer and
+  // `last_invalid_rects` holds the differences from the previous buffer and
   // the one prior to that (which will then be the current buffer).
   void SynchronizeFrame();
 
@@ -106,6 +106,10 @@ class ScreenCapturerX11 : public DesktopCapturer,
   // selected_monitor_rect_ should be updated as well.
   // Setting it to kFullDesktopScreenId here might be misleading.
   Atom selected_monitor_name_ = 0;
+  typedef XRRMonitorInfo* (*get_monitors_func)(Display*, Window, Bool, int*);
+  typedef void (*free_monitors_func)(XRRMonitorInfo*);
+  get_monitors_func get_monitors_ = nullptr;
+  free_monitors_func free_monitors_ = nullptr;
 
   // XFixes.
   bool has_xfixes_ = false;

@@ -10,19 +10,61 @@ absl_source_set("status") {
     "status_payload_printer.h",
   ]
   sources = [
+    "internal/status_internal.h",
     "status.cc",
     "status_payload_printer.cc",
   ]
   deps = [
-    "../base:config",
-    "../base:core_headers",
-    "../base:raw_logging_internal",
-    "../container:inlined_vector",
-    "../debugging:stacktrace",
-    "../debugging:symbolize",
-    "../strings",
-    "../strings:cord",
-    "../strings:str_format",
-    "../types:optional",
+    "//third_party/abseil-cpp/absl/base:atomic_hook",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/container:inlined_vector",
+    "//third_party/abseil-cpp/absl/debugging:stacktrace",
+    "//third_party/abseil-cpp/absl/debugging:symbolize",
+    "//third_party/abseil-cpp/absl/functional:function_ref",
+    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/strings:cord",
+    "//third_party/abseil-cpp/absl/strings:str_format",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
+
+absl_source_set("statusor") {
+  public = [
+    "statusor.h",
+  ]
+  sources = [
+    "internal/statusor_internal.h",
+    "statusor.cc",
+  ]
+  deps = [
+    ":status",
+    "//third_party/abseil-cpp/absl/base",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/meta:type_traits",
+    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/types:variant",
+    "//third_party/abseil-cpp/absl/utility",
+  ]
+}
+
+absl_source_set("statusor_test") {
+  testonly = true
+  sources = [
+    "statusor_test.cc",
+  ]
+  deps = [
+    ":status",
+    ":statusor",
+    "//third_party/abseil-cpp/absl/base",
+    "//third_party/abseil-cpp/absl/memory",
+    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/types:any",
+    "//third_party/abseil-cpp/absl/utility",
+    "//third_party/googletest:gmock",
+    "//third_party/googletest:gtest",
+  ]
+}
+

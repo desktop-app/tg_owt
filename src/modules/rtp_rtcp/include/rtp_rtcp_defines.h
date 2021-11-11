@@ -57,6 +57,7 @@ enum RTPExtensionType : int {
   kRtpExtensionNone,
   kRtpExtensionTransmissionTimeOffset,
   kRtpExtensionAudioLevel,
+  kRtpExtensionCsrcAudioLevel,
   kRtpExtensionInbandComfortNoise,
   kRtpExtensionAbsoluteSendTime,
   kRtpExtensionAbsoluteCaptureTime,
@@ -211,7 +212,7 @@ class RtcpBandwidthObserver {
   virtual ~RtcpBandwidthObserver() {}
 };
 
-// NOTE! |kNumMediaTypes| must be kept in sync with RtpPacketMediaType!
+// NOTE! `kNumMediaTypes` must be kept in sync with RtpPacketMediaType!
 static constexpr size_t kNumMediaTypes = 5;
 enum class RtpPacketMediaType : size_t {
   kAudio,                         // Audio media packets.
@@ -219,7 +220,7 @@ enum class RtpPacketMediaType : size_t {
   kRetransmission,                // Retransmisions, sent as response to NACK.
   kForwardErrorCorrection,        // FEC packets.
   kPadding = kNumMediaTypes - 1,  // RTX or plain padding sent to maintain BWE.
-  // Again, don't forget to udate |kNumMediaTypes| if you add another value!
+  // Again, don't forget to udate `kNumMediaTypes` if you add another value!
 };
 
 struct RtpPacketSendInfo {
@@ -227,8 +228,11 @@ struct RtpPacketSendInfo {
   RtpPacketSendInfo() = default;
 
   uint16_t transport_sequence_number = 0;
+  // TODO(bugs.webrtc.org/12713): Remove once downstream usage is gone.
   uint32_t ssrc = 0;
-  uint16_t rtp_sequence_number = 0;
+  absl::optional<uint32_t> media_ssrc;
+  uint16_t rtp_sequence_number = 0;  // Only valid if `media_ssrc` is set.
+  uint32_t rtp_timestamp = 0;
   size_t length = 0;
   absl::optional<RtpPacketMediaType> packet_type;
   PacedPacketInfo pacing_info;
@@ -265,9 +269,13 @@ class RtcpFeedbackSenderInterface {
 class StreamFeedbackObserver {
  public:
   struct StreamPacketInfo {
-    uint32_t ssrc;
-    uint16_t rtp_sequence_number;
     bool received;
+
+    // `rtp_sequence_number` and `is_retransmission` are only valid if `ssrc`
+    // is populated.
+    absl::optional<uint32_t> ssrc;
+    uint16_t rtp_sequence_number;
+    bool is_retransmission;
   };
   virtual ~StreamFeedbackObserver() = default;
 
@@ -426,7 +434,7 @@ class StreamDataCountersCallback {
 
 // Information exposed through the GetStats api.
 struct RtpReceiveStats {
-  // |packets_lost| and |jitter| are defined by RFC 3550, and exposed in the
+  // `packets_lost` and `jitter` are defined by RFC 3550, and exposed in the
   // RTCReceivedRtpStreamStats dictionary, see
   // https://w3c.github.io/webrtc-stats/#receivedrtpstats-dict*
   int32_t packets_lost = 0;

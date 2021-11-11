@@ -10,7 +10,6 @@
 
 #include "modules/audio_coding/neteq/decision_logic.h"
 
-#include <assert.h>
 #include <stdio.h>
 
 #include <string>
@@ -96,7 +95,8 @@ void DecisionLogic::SoftReset() {
 
 void DecisionLogic::SetSampleRate(int fs_hz, size_t output_size_samples) {
   // TODO(hlundin): Change to an enumerator and skip assert.
-  assert(fs_hz == 8000 || fs_hz == 16000 || fs_hz == 32000 || fs_hz == 48000);
+  RTC_DCHECK(fs_hz == 8000 || fs_hz == 16000 || fs_hz == 32000 ||
+             fs_hz == 48000);
   sample_rate_ = fs_hz;
   output_size_samples_ = output_size_samples;
 }
@@ -309,8 +309,8 @@ NetEq::Operation DecisionLogic::ExpectedPacketAvailable(NetEq::Mode prev_mode,
         std::max(target_level_samples * 3 / 4,
                  target_level_samples -
                      kDecelerationTargetLevelOffsetMs * samples_per_ms);
-    // |higher_limit| is equal to |target_level|, but should at
-    // least be 20 ms higher than |lower_limit|.
+    // `higher_limit` is equal to `target_level`, but should at
+    // least be 20 ms higher than `lower_limit`.
     const int high_limit =
         std::max(target_level_samples, low_limit + 20 * samples_per_ms);
 

@@ -31,8 +31,8 @@
 #include "api/video_codecs/video_encoder.h"
 #include "call/adaptation/resource_adaptation_processor.h"
 #include "call/adaptation/video_stream_adapter.h"
-#include "modules/video_coding/codecs/vp9/svc_rate_allocator.h"
 #include "modules/video_coding/include/video_codec_initializer.h"
+#include "modules/video_coding/svc/svc_rate_allocator.h"
 #include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/constructor_magic.h"
@@ -667,6 +667,7 @@ VideoStreamEncoder::VideoStreamEncoder(
       encoder_queue_(task_queue_factory->CreateTaskQueue(
           "EncoderQueue",
           TaskQueueFactory::Priority::NORMAL)) {
+  TRACE_EVENT0("webrtc", "VideoStreamEncoder::VideoStreamEncoder");
   RTC_DCHECK(main_queue_);
   RTC_DCHECK(encoder_stats_observer);
   RTC_DCHECK_GE(number_of_cores, 1);
@@ -749,11 +750,16 @@ void VideoStreamEncoder::SetFecControllerOverride(
 void VideoStreamEncoder::AddAdaptationResource(
     rtc::scoped_refptr<Resource> resource) {
   RTC_DCHECK_RUN_ON(main_queue_);
+  TRACE_EVENT0("webrtc", "VideoStreamEncoder::AddAdaptationResource");
   // Map any externally added resources as kCpu for the sake of stats reporting.
   // TODO(hbos): Make the manager map any unknown resources to kCpu and get rid
   // of this MapResourceToReason() call.
+  TRACE_EVENT_ASYNC_BEGIN0(
+      "webrtc", "VideoStreamEncoder::AddAdaptationResource(latency)", this);
   rtc::Event map_resource_event;
   encoder_queue_.PostTask([this, resource, &map_resource_event] {
+    TRACE_EVENT_ASYNC_END0(
+        "webrtc", "VideoStreamEncoder::AddAdaptationResource(latency)", this);
     RTC_DCHECK_RUN_ON(&encoder_queue_);
     additional_resources_.push_back(resource);
     stream_resource_manager_.AddResource(resource, VideoAdaptationReason::kCpu);
@@ -878,7 +884,7 @@ void VideoStreamEncoder::ReconfigureEncoder() {
     encoder_reset_required = true;
   }
 
-  // Possibly adjusts scale_resolution_down_by in |encoder_config_| to limit the
+  // Possibly adjusts scale_resolution_down_by in `encoder_config_` to limit the
   // alignment value.
   AlignmentAdjuster::GetAlignmentAndMaybeAdjustScaleFactors(
       encoder_->GetEncoderInfo(), &encoder_config_, absl::nullopt);
@@ -1039,7 +1045,7 @@ void VideoStreamEncoder::ReconfigureEncoder() {
 
   // The resolutions that we're actually encoding with.
   std::vector<rtc::VideoSinkWants::FrameSize> encoder_resolutions;
-  // TODO(hbos): For the case of SVC, also make use of |codec.spatialLayers|.
+  // TODO(hbos): For the case of SVC, also make use of `codec.spatialLayers`.
   // For now, SVC layers are handled by the VP9 encoder.
   for (const auto& simulcastStream : codec.simulcastStream) {
     if (!simulcastStream.active)
@@ -1345,7 +1351,7 @@ bool VideoStreamEncoder::EncoderPaused() const {
   // Pause video if paused by caller or as long as the network is down or the
   // pacer queue has grown too large in buffered mode.
   // If the pacer queue has grown too large or the network is down,
-  // |last_encoder_rate_settings_->encoder_target| will be 0.
+  // `last_encoder_rate_settings_->encoder_target` will be 0.
   return !last_encoder_rate_settings_ ||
          last_encoder_rate_settings_->encoder_target == DataRate::Zero();
 }
@@ -1438,7 +1444,7 @@ void VideoStreamEncoder::SetEncoderRates(
     return;
   }
 
-  // |bitrate_allocation| is 0 it means that the network is down or the send
+  // `bitrate_allocation` is 0 it means that the network is down or the send
   // pacer is full. We currently only report this if the encoder has an internal
   // source. If the encoder does not have an internal source, higher levels
   // are expected to not call AddVideoFrame. We do this since it is unclear
@@ -1525,7 +1531,7 @@ void VideoStreamEncoder::MaybeEncodeVideoFrame(const VideoFrame& video_frame,
     if (last_encoder_rate_settings_) {
       // Clone rate settings before update, so that SetEncoderRates() will
       // actually detect the change between the input and
-      // |last_encoder_rate_setings_|, triggering the call to SetRate() on the
+      // `last_encoder_rate_setings_`, triggering the call to SetRate() on the
       // encoder.
       EncoderRateSettings new_rate_settings = *last_encoder_rate_settings_;
       new_rate_settings.rate_control.framerate_fps =
@@ -1615,6 +1621,12 @@ void VideoStreamEncoder::EncodeVideoFrame(const VideoFrame& video_frame,
   // the WebrtcVideoSender is notified and the whole VideoSendStream is
   // recreated.
   if (encoder_failed_)
+    return;
+
+  // It's possible that EncodeVideoFrame can be called after we've completed
+  // a Stop() operation. Check if the encoder_ is set before continuing.
+  // See: bugs.webrtc.org/12857
+  if (!encoder_)
     return;
 
   TraceFrameDropEnd();
@@ -1775,6 +1787,9 @@ void VideoStreamEncoder::SendKeyFrame() {
   TRACE_EVENT0("webrtc", "OnKeyFrameRequest");
   RTC_DCHECK(!next_frame_types_.empty());
 
+  if (!encoder_)
+    return;  // Shutting down.
+
   // TODO(webrtc:10615): Map keyframe request to spatial layer.
   std::fill(next_frame_types_.begin(), next_frame_types_.end(),
             VideoFrameType::kVideoFrameKey);
@@ -1822,6 +1837,9 @@ EncodedImageCallback::Result VideoStreamEncoder::OnEncodedImage(
     const CodecSpecificInfo* codec_specific_info) {
   TRACE_EVENT_INSTANT1("webrtc", "VCMEncodedFrameCallback::Encoded",
                        "timestamp", encoded_image.Timestamp());
+
+  // TODO(bugs.webrtc.org/10520): Signal the simulcast id explicitly.
+
   const size_t spatial_idx = encoded_image.SpatialIndex().value_or(0);
   EncodedImage image_copy(encoded_image);
 
@@ -1861,7 +1879,7 @@ EncodedImageCallback::Result VideoStreamEncoder::OnEncodedImage(
   // Currently internal quality scaler is used for VP9 instead of webrtc qp
   // scaler (in no-svc case or if only a single spatial layer is encoded).
   // It has to be explicitly detected and reported to adaptation metrics.
-  // Post a task because |send_codec_| requires |encoder_queue_| lock.
+  // Post a task because `send_codec_` requires `encoder_queue_` lock.
   unsigned int image_width = image_copy._encodedWidth;
   unsigned int image_height = image_copy._encodedHeight;
   encoder_queue_.PostTask([this, codec_type, image_width, image_height] {
@@ -1890,18 +1908,6 @@ EncodedImageCallback::Result VideoStreamEncoder::OnEncodedImage(
   // on. In the case of hardware encoders, there might be several encoders
   // running in parallel on different threads.
   encoder_stats_observer_->OnSendEncodedImage(image_copy, codec_specific_info);
-
-  // The simulcast id is signaled in the SpatialIndex. This makes it impossible
-  // to do simulcast for codecs that actually support spatial layers since we
-  // can't distinguish between an actual spatial layer and a simulcast stream.
-  // TODO(bugs.webrtc.org/10520): Signal the simulcast id explicitly.
-  int simulcast_id = 0;
-  if (codec_specific_info &&
-      (codec_specific_info->codecType == kVideoCodecVP8 ||
-       codec_specific_info->codecType == kVideoCodecH264 ||
-       codec_specific_info->codecType == kVideoCodecGeneric)) {
-    simulcast_id = encoded_image.SpatialIndex().value_or(0);
-  }
 
   EncodedImageCallback::Result result =
       sink_->OnEncodedImage(image_copy, codec_specific_info);

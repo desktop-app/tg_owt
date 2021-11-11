@@ -77,33 +77,42 @@ bool Agc1Config::operator==(const Agc1Config& rhs) const {
          analog_lhs.startup_min_volume == analog_rhs.startup_min_volume &&
          analog_lhs.clipped_level_min == analog_rhs.clipped_level_min &&
          analog_lhs.enable_digital_adaptive ==
-             analog_rhs.enable_digital_adaptive;
+             analog_rhs.enable_digital_adaptive &&
+         analog_lhs.clipped_level_step == analog_rhs.clipped_level_step &&
+         analog_lhs.clipped_ratio_threshold ==
+             analog_rhs.clipped_ratio_threshold &&
+         analog_lhs.clipped_wait_frames == analog_rhs.clipped_wait_frames &&
+         analog_lhs.clipping_predictor.mode ==
+             analog_rhs.clipping_predictor.mode &&
+         analog_lhs.clipping_predictor.window_length ==
+             analog_rhs.clipping_predictor.window_length &&
+         analog_lhs.clipping_predictor.reference_window_length ==
+             analog_rhs.clipping_predictor.reference_window_length &&
+         analog_lhs.clipping_predictor.reference_window_delay ==
+             analog_rhs.clipping_predictor.reference_window_delay &&
+         analog_lhs.clipping_predictor.clipping_threshold ==
+             analog_rhs.clipping_predictor.clipping_threshold &&
+         analog_lhs.clipping_predictor.crest_factor_margin ==
+             analog_rhs.clipping_predictor.crest_factor_margin;
+}
+
+bool Agc2Config::AdaptiveDigital::operator==(
+    const Agc2Config::AdaptiveDigital& rhs) const {
+  return enabled == rhs.enabled && dry_run == rhs.dry_run &&
+         noise_estimator == rhs.noise_estimator &&
+         vad_reset_period_ms == rhs.vad_reset_period_ms &&
+         adjacent_speech_frames_threshold ==
+             rhs.adjacent_speech_frames_threshold &&
+         max_gain_change_db_per_second == rhs.max_gain_change_db_per_second &&
+         max_output_noise_level_dbfs == rhs.max_output_noise_level_dbfs &&
+         sse2_allowed == rhs.sse2_allowed && avx2_allowed == rhs.avx2_allowed &&
+         neon_allowed == rhs.neon_allowed;
 }
 
 bool Agc2Config::operator==(const Agc2Config& rhs) const {
-  const auto& adaptive_lhs = adaptive_digital;
-  const auto& adaptive_rhs = rhs.adaptive_digital;
-
   return enabled == rhs.enabled &&
          fixed_digital.gain_db == rhs.fixed_digital.gain_db &&
-         adaptive_lhs.enabled == adaptive_rhs.enabled &&
-         adaptive_lhs.vad_probability_attack ==
-             adaptive_rhs.vad_probability_attack &&
-         adaptive_lhs.level_estimator == adaptive_rhs.level_estimator &&
-         adaptive_lhs.level_estimator_adjacent_speech_frames_threshold ==
-             adaptive_rhs.level_estimator_adjacent_speech_frames_threshold &&
-         adaptive_lhs.use_saturation_protector ==
-             adaptive_rhs.use_saturation_protector &&
-         adaptive_lhs.initial_saturation_margin_db ==
-             adaptive_rhs.initial_saturation_margin_db &&
-         adaptive_lhs.extra_saturation_margin_db ==
-             adaptive_rhs.extra_saturation_margin_db &&
-         adaptive_lhs.gain_applier_adjacent_speech_frames_threshold ==
-             adaptive_rhs.gain_applier_adjacent_speech_frames_threshold &&
-         adaptive_lhs.max_gain_change_db_per_second ==
-             adaptive_rhs.max_gain_change_db_per_second &&
-         adaptive_lhs.max_output_noise_level_dbfs ==
-             adaptive_rhs.max_output_noise_level_dbfs;
+         adaptive_digital == rhs.adaptive_digital;
 }
 
 bool AudioProcessing::Config::CaptureLevelAdjustment::operator==(
@@ -156,11 +165,46 @@ std::string AudioProcessing::Config::ToString() const {
       << ", enable_limiter: " << gain_controller1.enable_limiter
       << ", analog_level_minimum: " << gain_controller1.analog_level_minimum
       << ", analog_level_maximum: " << gain_controller1.analog_level_maximum
-      << " }, gain_controller2: { enabled: " << gain_controller2.enabled
+      << ", analog_gain_controller { enabled: "
+      << gain_controller1.analog_gain_controller.enabled
+      << ", startup_min_volume: "
+      << gain_controller1.analog_gain_controller.startup_min_volume
+      << ", clipped_level_min: "
+      << gain_controller1.analog_gain_controller.clipped_level_min
+      << ", enable_digital_adaptive: "
+      << gain_controller1.analog_gain_controller.enable_digital_adaptive
+      << ", clipped_level_step: "
+      << gain_controller1.analog_gain_controller.clipped_level_step
+      << ", clipped_ratio_threshold: "
+      << gain_controller1.analog_gain_controller.clipped_ratio_threshold
+      << ", clipped_wait_frames: "
+      << gain_controller1.analog_gain_controller.clipped_wait_frames
+      << ", clipping_predictor:  { enabled: "
+      << gain_controller1.analog_gain_controller.clipping_predictor.enabled
+      << ", mode: "
+      << gain_controller1.analog_gain_controller.clipping_predictor.mode
+      << ", window_length: "
+      << gain_controller1.analog_gain_controller.clipping_predictor
+             .window_length
+      << ", reference_window_length: "
+      << gain_controller1.analog_gain_controller.clipping_predictor
+             .reference_window_length
+      << ", reference_window_delay: "
+      << gain_controller1.analog_gain_controller.clipping_predictor
+             .reference_window_delay
+      << ", clipping_threshold: "
+      << gain_controller1.analog_gain_controller.clipping_predictor
+             .clipping_threshold
+      << ", crest_factor_margin: "
+      << gain_controller1.analog_gain_controller.clipping_predictor
+             .crest_factor_margin
+      << " }}}, gain_controller2: { enabled: " << gain_controller2.enabled
       << ", fixed_digital: { gain_db: "
       << gain_controller2.fixed_digital.gain_db
       << " }, adaptive_digital: { enabled: "
-      << gain_controller2.adaptive_digital.enabled << ", noise_estimator: "
+      << gain_controller2.adaptive_digital.enabled
+      << ", dry_run: " << gain_controller2.adaptive_digital.dry_run
+      << ", noise_estimator: "
       << GainController2NoiseEstimatorToString(
              gain_controller2.adaptive_digital.noise_estimator)
       << ", vad_reset_period_ms: "

@@ -271,7 +271,7 @@ int OpenSSLAdapter::StartSSL(const char* hostname) {
 
   ssl_host_name_ = hostname;
 
-  if (socket_->GetState() != Socket::CS_CONNECTED) {
+  if (GetSocket()->GetState() != Socket::CS_CONNECTED) {
     state_ = SSL_WAIT;
     return 0;
   }
@@ -289,38 +289,34 @@ int OpenSSLAdapter::BeginSSL() {
   RTC_LOG(LS_INFO) << "OpenSSLAdapter::BeginSSL: " << ssl_host_name_;
   RTC_DCHECK(state_ == SSL_CONNECTING);
 
-  int err = 0;
-  BIO* bio = nullptr;
+  // Cleanup action to deal with on error cleanup a bit cleaner.
+  EarlyExitCatcher early_exit_catcher(*this);
 
   // First set up the context. We should either have a factory, with its own
   // pre-existing context, or be running standalone, in which case we will
-  // need to create one, and specify |false| to disable session caching.
+  // need to create one, and specify `false` to disable session caching.
   if (ssl_session_cache_ == nullptr) {
     RTC_DCHECK(!ssl_ctx_);
     ssl_ctx_ = CreateContext(ssl_mode_, false);
   }
 
   if (!ssl_ctx_) {
-    err = -1;
-    goto ssl_error;
+    return -1;
   }
 
   if (identity_ && !identity_->ConfigureIdentity(ssl_ctx_)) {
-    SSL_CTX_free(ssl_ctx_);
-    err = -1;
-    goto ssl_error;
+    return -1;
   }
 
-  bio = BIO_new_socket(socket_);
+  std::unique_ptr<BIO, decltype(&::BIO_free)> bio{BIO_new_socket(GetSocket()),
+                                                  ::BIO_free};
   if (!bio) {
-    err = -1;
-    goto ssl_error;
+    return -1;
   }
 
   ssl_ = SSL_new(ssl_ctx_);
   if (!ssl_) {
-    err = -1;
-    goto ssl_error;
+    return -1;
   }
 
   SSL_set_app_data(ssl_, this);
@@ -346,8 +342,7 @@ int OpenSSLAdapter::BeginSSL() {
       if (cached) {
         if (SSL_set_session(ssl_, cached) == 0) {
           RTC_LOG(LS_WARNING) << "Failed to apply SSL session from cache";
-          err = -1;
-          goto ssl_error;
+          return -1;
         }
 
         RTC_LOG(LS_INFO) << "Attempting to resume SSL session to "
@@ -375,26 +370,18 @@ int OpenSSLAdapter::BeginSSL() {
     SSL_set1_curves_list(ssl_, rtc::join(elliptic_curves_, ':').c_str());
   }
 
-  // Now that the initial config is done, transfer ownership of |bio| to the
+  // Now that the initial config is done, transfer ownership of `bio` to the
   // SSL object. If ContinueSSL() fails, the bio will be freed in Cleanup().
-  SSL_set_bio(ssl_, bio, bio);
-  bio = nullptr;
+  SSL_set_bio(ssl_, bio.get(), bio.get());
+  bio.release();
 
   // Do the connect.
-  err = ContinueSSL();
+  int err = ContinueSSL();
   if (err != 0) {
-    goto ssl_error;
+    return err;
   }
-
-  return err;
-
-ssl_error:
-  Cleanup();
-  if (bio) {
-    BIO_free(bio);
-  }
-
-  return err;
+  early_exit_catcher.disable();
+  return 0;
 }
 
 int OpenSSLAdapter::ContinueSSL() {
@@ -591,8 +578,8 @@ int OpenSSLAdapter::Send(const void* pv, size_t cb) {
 int OpenSSLAdapter::SendTo(const void* pv,
                            size_t cb,
                            const SocketAddress& addr) {
-  if (socket_->GetState() == Socket::CS_CONNECTED &&
-      addr == socket_->GetRemoteAddress()) {
+  if (GetSocket()->GetState() == Socket::CS_CONNECTED &&
+      addr == GetSocket()->GetRemoteAddress()) {
     return Send(pv, cb);
   }
 
@@ -653,7 +640,7 @@ int OpenSSLAdapter::RecvFrom(void* pv,
                              size_t cb,
                              SocketAddress* paddr,
                              int64_t* timestamp) {
-  if (socket_->GetState() == Socket::CS_CONNECTED) {
+  if (GetSocket()->GetState() == Socket::CS_CONNECTED) {
     int ret = Recv(pv, cb, timestamp);
     *paddr = GetRemoteAddress();
     return ret;
@@ -670,7 +657,7 @@ int OpenSSLAdapter::Close() {
 }
 
 Socket::ConnState OpenSSLAdapter::GetState() const {
-  ConnState state = socket_->GetState();
+  ConnState state = GetSocket()->GetState();
   if ((state == CS_CONNECTED) &&
       ((state_ == SSL_WAIT) || (state_ == SSL_CONNECTING))) {
     state = CS_CONNECTING;
@@ -981,6 +968,9 @@ SSL_CTX* OpenSSLAdapter::CreateContext(SSLMode mode, bool enable_cache) {
   SSL_CTX_set_custom_verify(ctx, SSL_VERIFY_PEER, SSLVerifyCallback);
 #else
   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, SSLVerifyCallback);
+  // Verify certificate chains up to a depth of 4. This is not
+  // needed for DTLS-SRTP which uses self-signed certificates
+  // (so the depth is 0) but is required to support TURN/TLS.
   SSL_CTX_set_verify_depth(ctx, 4);
 #endif
   // Use defaults, but disable HMAC-SHA256 and HMAC-SHA384 ciphers
@@ -1055,6 +1045,19 @@ OpenSSLAdapter* OpenSSLAdapterFactory::CreateAdapter(AsyncSocket* socket) {
   }
   return new OpenSSLAdapter(socket, ssl_session_cache_.get(),
                             ssl_cert_verifier_);
+}
+
+OpenSSLAdapter::EarlyExitCatcher::EarlyExitCatcher(OpenSSLAdapter& adapter_ptr)
+    : adapter_ptr_(adapter_ptr) {}
+
+void OpenSSLAdapter::EarlyExitCatcher::disable() {
+  disabled_ = true;
+}
+
+OpenSSLAdapter::EarlyExitCatcher::~EarlyExitCatcher() {
+  if (!disabled_) {
+    adapter_ptr_.Cleanup();
+  }
 }
 
 }  // namespace rtc

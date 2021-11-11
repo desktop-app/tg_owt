@@ -25,12 +25,12 @@
 #include "api/array_view.h"
 #include "api/transport/field_trial_based_config.h"
 #include "api/video/video_bitrate_allocation.h"
+#include "api/video_codecs/h264_profile_level_id.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_decoder.h"
 #include "api/video_codecs/video_encoder_config.h"
 #include "common_video/h264/h264_common.h"
-#include "media/base/h264_profile_level_id.h"
 #include "media/base/media_constants.h"
 #include "media/engine/internal_decoder_factory.h"
 #include "media/engine/internal_encoder_factory.h"
@@ -128,6 +128,8 @@ std::string CodecSpecificToString(const VideoCodec& codec) {
     case kVideoCodecH264:
       ss << "frame_dropping: " << codec.H264().frameDroppingOn;
       ss << "\nkey_frame_interval: " << codec.H264().keyFrameInterval;
+      ss << "\nnum_temporal_layers: "
+         << static_cast<int>(codec.H264().numberOfTemporalLayers);
       break;
     default:
       break;
@@ -166,7 +168,7 @@ void VideoCodecTestFixtureImpl::Config::SetCodecSettings(
   VideoCodecType codec_type = PayloadStringToCodecType(codec_name);
   webrtc::test::CodecSettings(codec_type, &codec_settings);
 
-  // TODO(brandtr): Move the setting of |width| and |height| to the tests, and
+  // TODO(brandtr): Move the setting of `width` and `height` to the tests, and
   // DCHECK that they are set before initializing the codec instead.
   codec_settings.width = static_cast<uint16_t>(width);
   codec_settings.height = static_cast<uint16_t>(height);
@@ -214,6 +216,8 @@ void VideoCodecTestFixtureImpl::Config::SetCodecSettings(
     case kVideoCodecH264:
       codec_settings.H264()->frameDroppingOn = frame_dropper_on;
       codec_settings.H264()->keyFrameInterval = kBaseKeyFrameInterval;
+      codec_settings.H264()->numberOfTemporalLayers =
+          static_cast<uint8_t>(num_temporal_layers);
       break;
     default:
       break;
@@ -236,6 +240,8 @@ size_t VideoCodecTestFixtureImpl::Config::NumberOfTemporalLayers() const {
     return codec_settings.VP8().numberOfTemporalLayers;
   } else if (codec_settings.codecType == kVideoCodecVP9) {
     return codec_settings.VP9().numberOfTemporalLayers;
+  } else if (codec_settings.codecType == kVideoCodecH264) {
+    return codec_settings.H264().numberOfTemporalLayers;
   } else {
     return 1;
   }
@@ -302,11 +308,11 @@ std::string VideoCodecTestFixtureImpl::Config::CodecName() const {
     name = CodecTypeToPayloadString(codec_settings.codecType);
   }
   if (codec_settings.codecType == kVideoCodecH264) {
-    if (h264_codec_settings.profile == H264::kProfileConstrainedHigh) {
+    if (h264_codec_settings.profile == H264Profile::kProfileConstrainedHigh) {
       return name + "-CHP";
     } else {
       RTC_DCHECK_EQ(h264_codec_settings.profile,
-                    H264::kProfileConstrainedBaseline);
+                    H264Profile::kProfileConstrainedBaseline);
       return name + "-CBP";
     }
   }
@@ -613,8 +619,8 @@ bool VideoCodecTestFixtureImpl::CreateEncoderAndDecoder() {
             ? "1"
             : "0";
     params = {{cricket::kH264FmtpProfileLevelId,
-               *H264::ProfileLevelIdToString(H264::ProfileLevelId(
-                   config_.h264_codec_settings.profile, H264::kLevel3_1))},
+               *H264ProfileLevelIdToString(H264ProfileLevelId(
+                   config_.h264_codec_settings.profile, H264Level::kLevel3_1))},
               {cricket::kH264FmtpPacketizationMode, packetization_mode}};
   } else {
     params = {};

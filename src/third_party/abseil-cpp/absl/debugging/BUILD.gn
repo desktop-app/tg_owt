@@ -10,8 +10,10 @@ absl_source_set("stacktrace") {
     "internal/stacktrace_aarch64-inl.inc",
     "internal/stacktrace_arm-inl.inc",
     "internal/stacktrace_config.h",
+    "internal/stacktrace_emscripten-inl.inc",
     "internal/stacktrace_generic-inl.inc",
     "internal/stacktrace_powerpc-inl.inc",
+    "internal/stacktrace_riscv-inl.inc",
     "internal/stacktrace_unimplemented-inl.inc",
     "internal/stacktrace_win32-inl.inc",
     "internal/stacktrace_x86-inl.inc",
@@ -20,16 +22,18 @@ absl_source_set("stacktrace") {
   public = [ "stacktrace.h" ]
   deps = [
     ":debugging_internal",
-    "../base:config",
-    "../base:core_headers",
-    "../base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:raw_logging_internal",
   ]
 }
 
 absl_source_set("symbolize") {
   sources = [
     "symbolize.cc",
+    "symbolize_darwin.inc",
     "symbolize_elf.inc",
+    "symbolize_emscripten.inc",
     "symbolize_unimplemented.inc",
     "symbolize_win32.inc",
   ]
@@ -40,12 +44,13 @@ absl_source_set("symbolize") {
   deps = [
     ":debugging_internal",
     ":demangle_internal",
-    "../base",
-    "../base:config",
-    "../base:core_headers",
-    "../base:dynamic_annotations",
-    "../base:malloc_internal",
-    "../base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/base",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:dynamic_annotations",
+    "//third_party/abseil-cpp/absl/base:malloc_internal",
+    "//third_party/abseil-cpp/absl/base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/strings",
   ]
 
   # TODO(mbonadei): The bazel file has:
@@ -56,14 +61,13 @@ absl_source_set("symbolize") {
 absl_source_set("examine_stack") {
   sources = [ "internal/examine_stack.cc" ]
   public = [ "internal/examine_stack.h" ]
-  visibility = []
-  visibility += [ ":*" ]
+  visibility = [ ":*" ]
   deps = [
     ":stacktrace",
     ":symbolize",
-    "../base:config",
-    "../base:core_headers",
-    "../base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:raw_logging_internal",
   ]
 }
 
@@ -73,11 +77,11 @@ absl_source_set("failure_signal_handler") {
   deps = [
     ":examine_stack",
     ":stacktrace",
-    "../base",
-    "../base:config",
-    "../base:core_headers",
-    "../base:errno_saver",
-    "../base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/base",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:errno_saver",
+    "//third_party/abseil-cpp/absl/base:raw_logging_internal",
   ]
 }
 
@@ -92,22 +96,24 @@ absl_source_set("debugging_internal") {
     "internal/elf_mem_image.h",
     "internal/vdso_support.h",
   ]
+  visibility = [ ":*" ]
   deps = [
-    "../base:config",
-    "../base:core_headers",
-    "../base:dynamic_annotations",
-    "../base:errno_saver",
-    "../base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:dynamic_annotations",
+    "//third_party/abseil-cpp/absl/base:errno_saver",
+    "//third_party/abseil-cpp/absl/base:raw_logging_internal",
   ]
 }
 
 absl_source_set("demangle_internal") {
   sources = [ "internal/demangle.cc" ]
   public = [ "internal/demangle.h" ]
+  visibility = [ ":*" ]
   deps = [
-    "../base",
-    "../base:config",
-    "../base:core_headers",
+    "//third_party/abseil-cpp/absl/base",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
   ]
 }
 
@@ -120,14 +126,14 @@ absl_source_set("leak_check") {
     public = [ "leak_check.h" ]
   }
   deps = [
-    "../base:config",
-    "../base:core_headers",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
   ]
 }
 
 absl_source_set("leak_check_disable") {
   sources = [ "leak_check_disable.cc" ]
-  deps = [ "../base:config" ]
+  deps = [ "//third_party/abseil-cpp/absl/base:config" ]
 }
 
 if (is_lsan) {
@@ -135,18 +141,22 @@ if (is_lsan) {
     testonly = true
     sources = [ "leak_check.cc" ]
     public = [ "leak_check.h" ]
-    visibility = []
-    visibility += [ ":*" ]
-    deps = [ "../base:config" ]
+    visibility = [ ":*" ]
+    deps = [
+      "//third_party/abseil-cpp/absl/base:config",
+      "//third_party/abseil-cpp/absl/base:core_headers",
+    ]
   }
 } else {
   absl_source_set("leak_check_api_disabled_for_testing") {
     testonly = true
     sources = [ "leak_check.cc" ]
     public = [ "leak_check.h" ]
-    visibility = []
-    visibility += [ ":*" ]
-    deps = [ "../base:config" ]
+    visibility = [ ":*" ]
+    deps = [
+      "//third_party/abseil-cpp/absl/base:config",
+      "//third_party/abseil-cpp/absl/base:core_headers",
+    ]
   }
 }
 
@@ -155,10 +165,9 @@ absl_source_set("stack_consumption") {
   sources = [ "internal/stack_consumption.cc" ]
   public = [ "internal/stack_consumption.h" ]
   deps = [
-    "../base:config",
-    "../base:core_headers",
-    "../base:raw_logging_internal",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:raw_logging_internal",
   ]
-  visibility = []
-  visibility += [ ":*" ]
+  visibility = [ ":*" ]
 }

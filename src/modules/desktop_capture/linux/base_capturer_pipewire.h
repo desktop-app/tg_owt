@@ -47,6 +47,12 @@ class BaseCapturerPipeWire : public DesktopCapturer {
     kAny = 0b11
   };
 
+  enum class CursorMode : uint32_t {
+    kHidden = 0b01,
+    kEmbedded = 0b10,
+    kMetadata = 0b100
+  };
+
   explicit BaseCapturerPipeWire(CaptureSourceType source_type);
   ~BaseCapturerPipeWire() override;
 
@@ -60,8 +66,6 @@ class BaseCapturerPipeWire : public DesktopCapturer {
   bool SelectSource(SourceId id) override;
 
  private:
-  static bool Supported();
-
   // PipeWire types -->
 #if PW_CHECK_VERSION(0, 3, 0)
   struct pw_context* pw_context_ = nullptr;

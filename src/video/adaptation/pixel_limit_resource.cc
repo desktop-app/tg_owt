@@ -28,8 +28,8 @@ constexpr TimeDelta kResourceUsageCheckIntervalMs = TimeDelta::Seconds(5);
 rtc::scoped_refptr<PixelLimitResource> PixelLimitResource::Create(
     TaskQueueBase* task_queue,
     VideoStreamInputStateProvider* input_state_provider) {
-  return new rtc::RefCountedObject<PixelLimitResource>(task_queue,
-                                                       input_state_provider);
+  return rtc::make_ref_counted<PixelLimitResource>(task_queue,
+                                                   input_state_provider);
 }
 
 PixelLimitResource::PixelLimitResource(
@@ -78,9 +78,9 @@ void PixelLimitResource::SetResourceListener(ResourceListener* listener) {
       int current_pixels = frame_size_pixels.value();
       int target_pixel_upper_bounds = max_pixels_.value();
       // To avoid toggling, we allow any resolutions between
-      // |target_pixel_upper_bounds| and video_stream_adapter.h's
+      // `target_pixel_upper_bounds` and video_stream_adapter.h's
       // GetLowerResolutionThan(). This is the pixels we end up if we adapt down
-      // from |target_pixel_upper_bounds|.
+      // from `target_pixel_upper_bounds`.
       int target_pixels_lower_bounds =
           GetLowerResolutionThan(target_pixel_upper_bounds);
       if (current_pixels > target_pixel_upper_bounds) {

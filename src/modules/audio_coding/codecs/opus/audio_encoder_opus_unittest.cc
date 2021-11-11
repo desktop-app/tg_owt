@@ -228,8 +228,8 @@ TEST_P(AudioEncoderOpusTest,
 
 TEST_P(AudioEncoderOpusTest, SetReceiverFrameLengthRange) {
   auto states = CreateCodec(sample_rate_hz_, 2);
-  // Before calling to |SetReceiverFrameLengthRange|,
-  // |supported_frame_lengths_ms| should contain only the frame length being
+  // Before calling to `SetReceiverFrameLengthRange`,
+  // `supported_frame_lengths_ms` should contain only the frame length being
   // used.
   using ::testing::ElementsAre;
   EXPECT_THAT(states->encoder->supported_frame_lengths_ms(),
@@ -348,7 +348,7 @@ TEST_P(AudioEncoderOpusTest,
   // will fail.
   constexpr float kPacketLossFraction_1 = 0.02f;
   constexpr float kPacketLossFraction_2 = 0.198f;
-  // |kSecondSampleTimeMs| is chosen to ease the calculation since
+  // `kSecondSampleTimeMs` is chosen to ease the calculation since
   // 0.9999 ^ 6931 = 0.5.
   constexpr int64_t kSecondSampleTimeMs = 6931;
 
@@ -380,7 +380,7 @@ TEST_P(AudioEncoderOpusTest, DoNotInvokeSetTargetBitrateIfOverheadUnknown) {
   states->encoder->OnReceivedUplinkBandwidth(kDefaultOpusRate * 2,
                                              absl::nullopt);
 
-  // Since |OnReceivedOverhead| has not been called, the codec bitrate should
+  // Since `OnReceivedOverhead` has not been called, the codec bitrate should
   // not change.
   EXPECT_EQ(kDefaultOpusRate, states->encoder->GetTargetBitrate());
 }
@@ -831,6 +831,7 @@ TEST(AudioEncoderOpusTest, OpusDtxFilteringHighEnergyRefreshPackets) {
   constexpr size_t kSilenceDurationSamples = kSampleRateHz * 0.2f;
   std::array<int16_t, kSilenceDurationSamples> silence;
   uint32_t rtp_timestamp = 0;
+  bool last_packet_dtx_frame = false;
   bool opus_entered_dtx = false;
   bool silence_filled = false;
   size_t timestamp_start_silence = 0;
@@ -850,10 +851,13 @@ TEST(AudioEncoderOpusTest, OpusDtxFilteringHighEnergyRefreshPackets) {
       }
       rtp_timestamp += kInputBlockSizeSamples;
     }
-    if (info.encoded_bytes < 2 && !opus_entered_dtx) {
+    EXPECT_TRUE(info.encoded_bytes > 0 || last_packet_dtx_frame);
+    last_packet_dtx_frame = info.encoded_bytes > 0 ? info.encoded_bytes <= 2
+                                                   : last_packet_dtx_frame;
+    if (info.encoded_bytes <= 2 && !opus_entered_dtx) {
       timestamp_start_silence = rtp_timestamp;
     }
-    opus_entered_dtx = info.encoded_bytes < 2;
+    opus_entered_dtx = info.encoded_bytes <= 2;
   }
 
   EXPECT_TRUE(silence_filled);
@@ -880,6 +884,9 @@ TEST(AudioEncoderOpusTest, OpusDtxFilteringHighEnergyRefreshPackets) {
         info = encoder->Encode(rtp_timestamp, silence_frame, &encoded);
         rtp_timestamp += kInputBlockSizeSamples;
       }
+      EXPECT_TRUE(info.encoded_bytes > 0 || last_packet_dtx_frame);
+      last_packet_dtx_frame = info.encoded_bytes > 0 ? info.encoded_bytes <= 2
+                                                     : last_packet_dtx_frame;
       // Tracking the number of non empty packets.
       if (increase_noise && info.encoded_bytes > 2) {
         number_non_empty_packets_during_increase++;

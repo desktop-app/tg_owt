@@ -66,7 +66,7 @@ extern const int kDefaultInputPixelsHeight;
 // resources.
 //
 // The manager is also involved with various mitigations not part of the
-// ResourceAdaptationProcessor code such as the inital frame dropping.
+// ResourceAdaptationProcessor code such as the initial frame dropping.
 class VideoStreamEncoderResourceManager
     : public VideoSourceRestrictionsListener,
       public ResourceLimitationsListener,
@@ -133,7 +133,7 @@ class VideoStreamEncoderResourceManager
   absl::optional<uint32_t> UseBandwidthAllocationBps() const;
 
   // VideoSourceRestrictionsListener implementation.
-  // Updates |video_source_restrictions_|.
+  // Updates `video_source_restrictions_`.
   void OnVideoSourceRestrictionsUpdated(
       VideoSourceRestrictions restrictions,
       const VideoAdaptationCounters& adaptation_counters,
@@ -156,10 +156,10 @@ class VideoStreamEncoderResourceManager
       rtc::scoped_refptr<Resource> resource) const;
 
   CpuOveruseOptions GetCpuOveruseOptions() const;
-  int LastInputFrameSizeOrDefault() const;
+  int LastFrameSizeOrDefault() const;
 
   // Calculates an up-to-date value of the target frame rate and informs the
-  // |encode_usage_resource_| of the new value.
+  // `encode_usage_resource_` of the new value.
   void MaybeUpdateTargetFrameRate();
 
   // Use nullopt to disable quality scaling.

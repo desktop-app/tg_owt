@@ -14,6 +14,7 @@
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xfixes.h>
 #include <X11/extensions/damagewire.h>
+#include <dlfcn.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -154,16 +155,26 @@ void ScreenCapturerX11::InitXrandr() {
   if (XRRQueryExtension(display(), &randr_event_base_, &error_base_ignored) &&
       XRRQueryVersion(display(), &major_version, &minor_version)) {
     if (major_version > 1 || (major_version == 1 && minor_version >= 5)) {
-      use_randr_ = true;
-      RTC_LOG(LS_INFO) << "Using XRandR extension v" << major_version << '.'
-                        << minor_version << '.';
-      monitors_ =
-          XRRGetMonitors(display(), root_window_, true, &num_monitors_);
+      // Dynamically link XRRGetMonitors and XRRFreeMonitors as a workaround
+      // to avoid a dependency issue with Debian 8.
+      get_monitors_ = reinterpret_cast<get_monitors_func>(
+          dlsym(RTLD_DEFAULT, "XRRGetMonitors"));
+      free_monitors_ = reinterpret_cast<free_monitors_func>(
+          dlsym(RTLD_DEFAULT, "XRRFreeMonitors"));
+      if (get_monitors_ && free_monitors_) {
+        use_randr_ = true;
+        RTC_LOG(LS_INFO) << "Using XRandR extension v" << major_version << '.'
+                         << minor_version << '.';
+        monitors_ =
+            get_monitors_(display(), root_window_, true, &num_monitors_);
 
-      // Register for screen change notifications
-      XRRSelectInput(display(), root_window_, RRScreenChangeNotifyMask);
-      options_.x_display()->AddEventHandler(
-          randr_event_base_ + RRScreenChangeNotify, this);
+        // Register for screen change notifications
+        XRRSelectInput(display(), root_window_, RRScreenChangeNotifyMask);
+        options_.x_display()->AddEventHandler(
+            randr_event_base_ + RRScreenChangeNotify, this);
+      } else {
+        RTC_LOG(LS_ERROR) << "Unable to link XRandR monitor functions.";
+      }
     } else {
       RTC_LOG(LS_ERROR) << "XRandR entension is older than v1.5.";
     }
@@ -175,11 +186,11 @@ void ScreenCapturerX11::InitXrandr() {
 RTC_NO_SANITIZE("cfi-icall")
 void ScreenCapturerX11::UpdateMonitors() {
   if (monitors_) {
-    XRRFreeMonitors(monitors_);
+    free_monitors_(monitors_);
     monitors_ = nullptr;
   }
 
-  monitors_ = XRRGetMonitors(display(), root_window_, true, &num_monitors_);
+  monitors_ = get_monitors_(display(), root_window_, true, &num_monitors_);
 
   if (selected_monitor_name_) {
     if (selected_monitor_name_ == static_cast<Atom>(kFullDesktopScreenId)) {
@@ -223,7 +234,7 @@ void ScreenCapturerX11::CaptureFrame() {
   options_.x_display()->ProcessPendingXEvents();
 
   // ProcessPendingXEvents() may call ScreenConfigurationChanged() which
-  // reinitializes |x_server_pixel_buffer_|. Check if the pixel buffer is still
+  // reinitializes `x_server_pixel_buffer_`. Check if the pixel buffer is still
   // in a good shape.
   if (!x_server_pixel_buffer_.is_initialized()) {
     // We failed to initialize pixel buffer.
@@ -265,7 +276,7 @@ bool ScreenCapturerX11::GetSourceList(SourceList* sources) {
     return true;
   }
 
-  // Ensure that |monitors_| is updated with changes that may have happened
+  // Ensure that `monitors_` is updated with changes that may have happened
   // between calls to GetSourceList().
   options_.x_display()->ProcessPendingXEvents();
 
@@ -339,7 +350,7 @@ std::unique_ptr<DesktopFrame> ScreenCapturerX11::CaptureScreen() {
 
   // In the DAMAGE case, ensure the frame is up-to-date with the previous frame
   // if any.  If there isn't a previous frame, that means a screen-resolution
-  // change occurred, and |invalid_rects| will be updated to include the whole
+  // change occurred, and `invalid_rects` will be updated to include the whole
   // screen.
   if (use_damage_ && queue_.previous_frame())
     SynchronizeFrame();
@@ -408,7 +419,7 @@ void ScreenCapturerX11::SynchronizeFrame() {
   // positives.
 
   // TODO(hclam): We can reduce the amount of copying here by subtracting
-  // |capturer_helper_|s region from |last_invalid_region_|.
+  // `capturer_helper_`s region from `last_invalid_region_`.
   // http://crbug.com/92354
   RTC_DCHECK(queue_.previous_frame());
 
@@ -428,7 +439,7 @@ void ScreenCapturerX11::SynchronizeFrame() {
 RTC_NO_SANITIZE("cfi-icall")
 void ScreenCapturerX11::DeinitXlib() {
   if (monitors_) {
-    XRRFreeMonitors(monitors_);
+    free_monitors_(monitors_);
     monitors_ = nullptr;
   }
 

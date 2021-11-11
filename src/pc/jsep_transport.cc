@@ -13,8 +13,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <functional>
 #include <memory>
-#include <utility>  // for std::pair
+#include <utility>
 
 #include "api/array_view.h"
 #include "api/candidate.h"
@@ -26,6 +27,7 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/strings/string_builder.h"
+#include "rtc_base/trace_event.h"
 
 using webrtc::SdpType;
 
@@ -79,7 +81,8 @@ JsepTransport::JsepTransport(
     std::unique_ptr<webrtc::DtlsSrtpTransport> dtls_srtp_transport,
     std::unique_ptr<DtlsTransportInternal> rtp_dtls_transport,
     std::unique_ptr<DtlsTransportInternal> rtcp_dtls_transport,
-    std::unique_ptr<SctpTransportInternal> sctp_transport)
+    std::unique_ptr<SctpTransportInternal> sctp_transport,
+    std::function<void()> rtcp_mux_active_callback)
     : network_thread_(rtc::Thread::Current()),
       mid_(mid),
       local_certificate_(local_certificate),
@@ -88,26 +91,27 @@ JsepTransport::JsepTransport(
       unencrypted_rtp_transport_(std::move(unencrypted_rtp_transport)),
       sdes_transport_(std::move(sdes_transport)),
       dtls_srtp_transport_(std::move(dtls_srtp_transport)),
-      rtp_dtls_transport_(
-          rtp_dtls_transport ? new rtc::RefCountedObject<webrtc::DtlsTransport>(
-                                   std::move(rtp_dtls_transport))
-                             : nullptr),
-      rtcp_dtls_transport_(
-          rtcp_dtls_transport
-              ? new rtc::RefCountedObject<webrtc::DtlsTransport>(
-                    std::move(rtcp_dtls_transport))
-              : nullptr),
+      rtp_dtls_transport_(rtp_dtls_transport
+                              ? rtc::make_ref_counted<webrtc::DtlsTransport>(
+                                    std::move(rtp_dtls_transport))
+                              : nullptr),
+      rtcp_dtls_transport_(rtcp_dtls_transport
+                               ? rtc::make_ref_counted<webrtc::DtlsTransport>(
+                                     std::move(rtcp_dtls_transport))
+                               : nullptr),
       sctp_data_channel_transport_(
           sctp_transport ? std::make_unique<webrtc::SctpDataChannelTransport>(
                                sctp_transport.get())
                          : nullptr),
       sctp_transport_(sctp_transport
-                          ? new rtc::RefCountedObject<webrtc::SctpTransport>(
+                          ? rtc::make_ref_counted<webrtc::SctpTransport>(
                                 std::move(sctp_transport))
-                          : nullptr) {
+                          : nullptr),
+      rtcp_mux_active_callback_(std::move(rtcp_mux_active_callback)) {
+  TRACE_EVENT0("webrtc", "JsepTransport::JsepTransport");
   RTC_DCHECK(ice_transport_);
   RTC_DCHECK(rtp_dtls_transport_);
-  // |rtcp_ice_transport_| must be present iff |rtcp_dtls_transport_| is
+  // `rtcp_ice_transport_` must be present iff `rtcp_dtls_transport_` is
   // present.
   RTC_DCHECK_EQ((rtcp_ice_transport_ != nullptr),
                 (rtcp_dtls_transport_ != nullptr));
@@ -130,6 +134,7 @@ JsepTransport::JsepTransport(
 }
 
 JsepTransport::~JsepTransport() {
+  TRACE_EVENT0("webrtc", "JsepTransport::~JsepTransport");
   if (sctp_transport_) {
     sctp_transport_->Clear();
   }
@@ -148,7 +153,7 @@ webrtc::RTCError JsepTransport::SetLocalJsepTransportDescription(
     const JsepTransportDescription& jsep_description,
     SdpType type) {
   webrtc::RTCError error;
-
+  TRACE_EVENT0("webrtc", "JsepTransport::SetLocalJsepTransportDescription");
   RTC_DCHECK_RUN_ON(network_thread_);
 
   IceParameters ice_parameters =
@@ -234,6 +239,7 @@ webrtc::RTCError JsepTransport::SetLocalJsepTransportDescription(
 webrtc::RTCError JsepTransport::SetRemoteJsepTransportDescription(
     const JsepTransportDescription& jsep_description,
     webrtc::SdpType type) {
+  TRACE_EVENT0("webrtc", "JsepTransport::SetLocalJsepTransportDescription");
   webrtc::RTCError error;
 
   RTC_DCHECK_RUN_ON(network_thread_);
@@ -345,6 +351,7 @@ absl::optional<rtc::SSLRole> JsepTransport::GetDtlsRole() const {
 }
 
 bool JsepTransport::GetStats(TransportStats* stats) {
+  TRACE_EVENT0("webrtc", "JsepTransport::GetStats");
   RTC_DCHECK_RUN_ON(network_thread_);
   stats->transport_name = mid();
   stats->channel_stats.clear();
@@ -363,6 +370,7 @@ bool JsepTransport::GetStats(TransportStats* stats) {
 webrtc::RTCError JsepTransport::VerifyCertificateFingerprint(
     const rtc::RTCCertificate* certificate,
     const rtc::SSLFingerprint* fingerprint) const {
+  TRACE_EVENT0("webrtc", "JsepTransport::VerifyCertificateFingerprint");
   RTC_DCHECK_RUN_ON(network_thread_);
   if (!fingerprint) {
     return webrtc::RTCError(webrtc::RTCErrorType::INVALID_PARAMETER,
@@ -401,6 +409,7 @@ void JsepTransport::SetActiveResetSrtpParams(bool active_reset_srtp_params) {
 void JsepTransport::SetRemoteIceParameters(
     const IceParameters& ice_parameters,
     IceTransportInternal* ice_transport) {
+  TRACE_EVENT0("webrtc", "JsepTransport::SetRemoteIceParameters");
   RTC_DCHECK_RUN_ON(network_thread_);
   RTC_DCHECK(ice_transport);
   RTC_DCHECK(remote_description_);
@@ -481,7 +490,7 @@ void JsepTransport::ActivateRtcpMux() {
   }
   rtcp_dtls_transport_ = nullptr;  // Destroy this reference.
   // Notify the JsepTransportController to update the aggregate states.
-  SignalRtcpMuxActive();
+  rtcp_mux_active_callback_();
 }
 
 bool JsepTransport::SetSdes(const std::vector<CryptoParams>& cryptos,
@@ -519,9 +528,9 @@ bool JsepTransport::SetSdes(const std::vector<CryptoParams>& cryptos,
     } else {
       RTC_LOG(LS_INFO) << "No crypto keys are provided for SDES.";
       if (type == SdpType::kAnswer) {
-        // Explicitly reset the |sdes_transport_| if no crypto param is
-        // provided in the answer. No need to call |ResetParams()| for
-        // |sdes_negotiator_| because it resets the params inside |SetAnswer|.
+        // Explicitly reset the `sdes_transport_` if no crypto param is
+        // provided in the answer. No need to call `ResetParams()` for
+        // `sdes_negotiator_` because it resets the params inside `SetAnswer`.
         sdes_transport_->ResetParams();
       }
     }

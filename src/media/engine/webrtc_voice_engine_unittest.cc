@@ -395,10 +395,10 @@ class WebRtcVoiceEngineTestFake : public ::testing::TestWithParam<bool> {
   }
 
   // Test that send bandwidth is set correctly.
-  // |codec| is the codec under test.
-  // |max_bitrate| is a parameter to set to SetMaxSendBandwidth().
-  // |expected_result| is the expected result from SetMaxSendBandwidth().
-  // |expected_bitrate| is the expected audio bitrate afterward.
+  // `codec` is the codec under test.
+  // `max_bitrate` is a parameter to set to SetMaxSendBandwidth().
+  // `expected_result` is the expected result from SetMaxSendBandwidth().
+  // `expected_bitrate` is the expected audio bitrate afterward.
   void TestMaxSendBandwidth(const cricket::AudioCodec& codec,
                             int max_bitrate,
                             bool expected_result,
@@ -1470,7 +1470,7 @@ TEST_P(WebRtcVoiceEngineTestFake, GetRtpReceiveParametersWithUnsignaledSsrc) {
   // Receive PCMU packet (SSRC=1).
   DeliverPacket(kPcmuFrame, sizeof(kPcmuFrame));
 
-  // The |ssrc| member should still be unset.
+  // The `ssrc` member should still be unset.
   rtp_parameters = channel_->GetDefaultRtpReceiveParameters();
   ASSERT_EQ(1u, rtp_parameters.encodings.size());
   EXPECT_FALSE(rtp_parameters.encodings[0].ssrc);
@@ -2505,7 +2505,7 @@ TEST_P(WebRtcVoiceEngineTestFake, AudioNetworkAdaptorNotGetOverridden) {
   const int initial_num = call_.GetNumCreatedSendStreams();
   cricket::AudioOptions options;
   options.audio_network_adaptor = absl::nullopt;
-  // Unvalued |options.audio_network_adaptor|.should not reset audio network
+  // Unvalued `options.audio_network_adaptor` should not reset audio network
   // adaptor.
   SetAudioSend(kSsrcX, true, nullptr, &options);
   // AudioSendStream not expected to be recreated.
@@ -2845,7 +2845,7 @@ TEST_P(WebRtcVoiceEngineTestFake, AddRecvStreamAfterUnsignaled_NoRecreate) {
   EXPECT_EQ(audio_receive_stream_id, streams.front()->id());
 }
 
-TEST_P(WebRtcVoiceEngineTestFake, AddRecvStreamAfterUnsignaled_Recreate) {
+TEST_P(WebRtcVoiceEngineTestFake, AddRecvStreamAfterUnsignaled_Updates) {
   EXPECT_TRUE(SetupChannel());
 
   // Spawn unsignaled stream with SSRC=1.
@@ -2854,17 +2854,26 @@ TEST_P(WebRtcVoiceEngineTestFake, AddRecvStreamAfterUnsignaled_Recreate) {
   EXPECT_TRUE(
       GetRecvStream(1).VerifyLastPacket(kPcmuFrame, sizeof(kPcmuFrame)));
 
-  // Verify that the underlying stream object in Call *is* recreated when a
+  // Verify that the underlying stream object in Call gets updated when a
   // stream with SSRC=1 is added, and which has changed stream parameters.
   const auto& streams = call_.GetAudioReceiveStreams();
   EXPECT_EQ(1u, streams.size());
+  // The sync_group id should be empty.
+  EXPECT_TRUE(streams.front()->GetConfig().sync_group.empty());
+
+  const std::string new_stream_id("stream_id");
   int audio_receive_stream_id = streams.front()->id();
   cricket::StreamParams stream_params;
   stream_params.ssrcs.push_back(1);
-  stream_params.set_stream_ids({"stream_id"});
+  stream_params.set_stream_ids({new_stream_id});
+
   EXPECT_TRUE(channel_->AddRecvStream(stream_params));
   EXPECT_EQ(1u, streams.size());
-  EXPECT_NE(audio_receive_stream_id, streams.front()->id());
+  // The audio receive stream should not have been recreated.
+  EXPECT_EQ(audio_receive_stream_id, streams.front()->id());
+
+  // The sync_group id should now match with the new stream params.
+  EXPECT_EQ(new_stream_id, streams.front()->GetConfig().sync_group);
 }
 
 // Test that AddRecvStream creates new stream.
@@ -3203,6 +3212,7 @@ TEST_P(WebRtcVoiceEngineTestFake, TestSetDscpOptions) {
   channel->SetInterface(&network_interface);
   // Default value when DSCP is disabled should be DSCP_DEFAULT.
   EXPECT_EQ(rtc::DSCP_DEFAULT, network_interface.dscp());
+  channel->SetInterface(nullptr);
 
   config.enable_dscp = true;
   channel.reset(static_cast<cricket::WebRtcVoiceMediaChannel*>(
@@ -3229,6 +3239,7 @@ TEST_P(WebRtcVoiceEngineTestFake, TestSetDscpOptions) {
   const uint8_t kData[10] = {0};
   EXPECT_TRUE(channel->SendRtcp(kData, sizeof(kData)));
   EXPECT_EQ(rtc::DSCP_CS1, network_interface.options().dscp);
+  channel->SetInterface(nullptr);
 
   // Verify that setting the option to false resets the
   // DiffServCodePoint.
@@ -3600,11 +3611,11 @@ TEST_P(WebRtcVoiceEngineTestFake, PreservePlayoutWhenRecreateRecvStream) {
 // Tests when GetSources is called with non-existing ssrc, it will return an
 // empty list of RtpSource without crashing.
 TEST_P(WebRtcVoiceEngineTestFake, GetSourcesWithNonExistingSsrc) {
-  // Setup an recv stream with |kSsrcX|.
+  // Setup an recv stream with `kSsrcX`.
   SetupRecvStream();
   cricket::WebRtcVoiceMediaChannel* media_channel =
       static_cast<cricket::WebRtcVoiceMediaChannel*>(channel_);
-  // Call GetSources with |kSsrcY| which doesn't exist.
+  // Call GetSources with `kSsrcY` which doesn't exist.
   std::vector<webrtc::RtpSource> sources = media_channel->GetSources(kSsrcY);
   EXPECT_EQ(0u, sources.size());
 }

@@ -591,7 +591,7 @@ void VideoProcessor::FrameDecoded(const VideoFrame& decoded_frame,
 
   // Erase all buffered input frames that we have moved past for all
   // simulcast/spatial layers. Never buffer more than
-  // |kMaxBufferedInputFrames| frames, to protect against long runs of
+  // `kMaxBufferedInputFrames` frames, to protect against long runs of
   // consecutive frame drops for a particular layer.
   const auto min_last_decoded_frame_num = std::min_element(
       last_decoded_frame_num_.cbegin(), last_decoded_frame_num_.cend());
@@ -650,6 +650,8 @@ const webrtc::EncodedImage* VideoProcessor::BuildAndStoreSuperframe(
 
   EncodedImage copied_image = encoded_image;
   copied_image.SetEncodedData(buffer);
+  if (base_image.size())
+    copied_image._frameType = base_image._frameType;
 
   // Replace previous EncodedImage for this spatial layer.
   merged_encoded_frames_.at(spatial_idx) = std::move(copied_image);

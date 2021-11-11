@@ -398,20 +398,20 @@ void NetworkManagerBase::MergeNetworkList(const NetworkList& new_networks,
     }
     networks_map_[key]->set_mdns_responder_provider(this);
   }
-  // It may still happen that the merged list is a subset of |networks_|.
+  // It may still happen that the merged list is a subset of `networks_`.
   // To detect this change, we compare their sizes.
   if (merged_list.size() != networks_.size()) {
     *changed = true;
   }
 
-  // If the network list changes, we re-assign |networks_| to the merged list
+  // If the network list changes, we re-assign `networks_` to the merged list
   // and re-sort it.
   if (*changed) {
     networks_ = merged_list;
     // Reset the active states of all networks.
     for (const auto& kv : networks_map_) {
       Network* network = kv.second;
-      // If |network| is in the newly generated |networks_|, it is active.
+      // If `network` is in the newly generated `networks_`, it is active.
       bool found = absl::c_linear_search(networks_, network);
       network->set_active(found);
     }
@@ -487,7 +487,7 @@ BasicNetworkManager::BasicNetworkManager(
       allow_mac_based_ipv6_(
           webrtc::field_trial::IsEnabled("WebRTC-AllowMACBasedIPv6")),
       bind_using_ifname_(
-          webrtc::field_trial::IsEnabled("WebRTC-BindUsingInterfaceName")) {}
+          !webrtc::field_trial::IsDisabled("WebRTC-BindUsingInterfaceName")) {}
 
 BasicNetworkManager::~BasicNetworkManager() {}
 
@@ -863,8 +863,8 @@ void BasicNetworkManager::StartNetworkMonitor() {
     if (!network_monitor_) {
       return;
     }
-    network_monitor_->SignalNetworksChanged.connect(
-        this, &BasicNetworkManager::OnNetworksChanged);
+    network_monitor_->SetNetworksChangedCallback(
+        [this]() { OnNetworksChanged(); });
   }
 
   if (network_monitor_->SupportsBindSocketToNetwork()) {

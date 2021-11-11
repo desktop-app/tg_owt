@@ -28,7 +28,6 @@
 #include "modules/video_coding/svc/scalable_video_controller_no_layering.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "sdk/android/src/jni/jni_helpers.h"
-#include "sdk/android/src/jni/video_frame.h"
 
 namespace webrtc {
 namespace jni {
@@ -78,10 +77,9 @@ class VideoEncoderWrapper : public VideoEncoder {
   ScopedJavaLocalRef<jobject> ToJavaBitrateAllocation(
       JNIEnv* jni,
       const VideoBitrateAllocation& allocation);
-  std::string GetImplementationName(JNIEnv* jni) const;
 
+  void UpdateEncoderInfo(JNIEnv* jni);
   ScalingSettings GetScalingSettingsInternal(JNIEnv* jni) const;
-
   std::vector<ResolutionBitrateLimits> GetResolutionBitrateLimits(
       JNIEnv* jni) const;
 

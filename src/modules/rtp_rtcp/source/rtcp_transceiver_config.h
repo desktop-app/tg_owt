@@ -17,6 +17,7 @@
 #include "api/task_queue/task_queue_base.h"
 #include "api/video/video_bitrate_allocation.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/ntp_time.h"
 
 namespace webrtc {
@@ -61,6 +62,9 @@ struct RtcpTransceiverConfig {
   // Maximum packet size outgoing transport accepts.
   size_t max_packet_size = 1200;
 
+  // The clock to use when querying for the NTP time. Should be set.
+  Clock* clock = nullptr;
+
   // Transport to send rtcp packets to. Should be set.
   Transport* outgoing_transport = nullptr;
 
@@ -82,7 +86,7 @@ struct RtcpTransceiverConfig {
   //
   // Tuning parameters.
   //
-  // Initial state if |outgoing_transport| ready to accept packets.
+  // Initial state if `outgoing_transport` ready to accept packets.
   bool initial_ready_to_send = true;
   // Delay before 1st periodic compound packet.
   int initial_report_delay_ms = 500;

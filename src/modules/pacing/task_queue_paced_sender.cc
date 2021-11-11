@@ -22,17 +22,17 @@
 namespace webrtc {
 namespace {
 // If no calls to MaybeProcessPackets() happen, make sure we update stats
-// at least every |kMaxTimeBetweenStatsUpdates| as long as the pacer isn't
+// at least every `kMaxTimeBetweenStatsUpdates` as long as the pacer isn't
 // completely drained.
 constexpr TimeDelta kMaxTimeBetweenStatsUpdates = TimeDelta::Millis(33);
-// Don't call UpdateStats() more than |kMinTimeBetweenStatsUpdates| apart,
+// Don't call UpdateStats() more than `kMinTimeBetweenStatsUpdates` apart,
 // for performance reasons.
 constexpr TimeDelta kMinTimeBetweenStatsUpdates = TimeDelta::Millis(1);
 }  // namespace
 
 TaskQueuePacedSender::TaskQueuePacedSender(
     Clock* clock,
-    PacketRouter* packet_router,
+    PacingController::PacketSender* packet_sender,
     RtcEventLog* event_log,
     const WebRtcKeyValueConfig* field_trials,
     TaskQueueFactory* task_queue_factory,
@@ -40,7 +40,7 @@ TaskQueuePacedSender::TaskQueuePacedSender(
     : clock_(clock),
       hold_back_window_(hold_back_window),
       pacing_controller_(clock,
-                         packet_router,
+                         packet_sender,
                          event_log,
                          field_trials,
                          PacingController::ProcessMode::kDynamic),
@@ -243,7 +243,7 @@ void TaskQueuePacedSender::MaybeProcessPackets(
   } else if (next_process_time_.IsMinusInfinity() ||
              next_process_time <= next_process_time_ - hold_back_window_) {
     // Schedule a new task since there is none currently scheduled
-    // (|next_process_time_| is infinite), or the new process time is at least
+    // (`next_process_time_` is infinite), or the new process time is at least
     // one holdback window earlier than whatever is currently scheduled.
     time_to_next_process = std::max(next_process_time - now, hold_back_window_);
   }

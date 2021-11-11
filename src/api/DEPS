@@ -42,6 +42,11 @@ include_rules = [
 
 specific_include_rules = {
   # Some internal headers are allowed even in API headers:
+
+  "call_factory_interface\.h": [
+    "+call/rtp_transport_controller_send_factory_interface.h",
+  ],
+
   ".*\.h": [
     "+rtc_base/checks.h",
     "+rtc_base/system/rtc_export.h",
@@ -126,15 +131,21 @@ specific_include_rules = {
   ],
 
   "peer_connection_interface\.h": [
+    "+call/rtp_transport_controller_send_factory_interface.h",
     "+media/base/media_config.h",
     "+media/base/media_engine.h",
+    "+p2p/base/port.h",
     "+p2p/base/port_allocator.h",
+    "+rtc_base/network.h",
+    "+rtc_base/network_constants.h",
     "+rtc_base/network_monitor_factory.h",
+    "+rtc_base/ref_count.h",
     "+rtc_base/rtc_certificate.h",
     "+rtc_base/rtc_certificate_generator.h",
     "+rtc_base/socket_address.h",
     "+rtc_base/ssl_certificate.h",
     "+rtc_base/ssl_stream_adapter.h",
+    "+rtc_base/thread.h",
   ],
 
   "proxy\.h": [
@@ -183,7 +194,6 @@ specific_include_rules = {
   "stats_types\.h": [
     "+rtc_base/constructor_magic.h",
     "+rtc_base/ref_count.h",
-    "+rtc_base/string_encode.h",
     "+rtc_base/thread_checker.h",
   ],
 
@@ -259,6 +269,14 @@ specific_include_rules = {
 
   "mock.*\.h": [
     "+test/gmock.h",
+  ],
+
+  "mock_peerconnectioninterface\.h": [
+    "+rtc_base/ref_counted_object.h",
+  ],
+
+  "mock_video_track\.h": [
+    "+rtc_base/ref_counted_object.h",
   ],
 
   "simulated_network\.h": [

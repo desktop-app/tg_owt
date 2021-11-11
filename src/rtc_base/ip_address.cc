@@ -14,6 +14,9 @@
 #ifdef OPENBSD
 #include <netinet/in_systm.h>
 #endif
+#ifndef __native_client__
+#include <netinet/ip.h>
+#endif
 #include <netdb.h>
 #endif
 
@@ -146,10 +149,6 @@ std::string IPAddress::ToString() const {
 }
 
 std::string IPAddress::ToSensitiveString() const {
-#if !defined(NDEBUG)
-  // Return non-stripped in debug.
-  return ToString();
-#else
   switch (family_) {
     case AF_INET: {
       std::string address = ToString();
@@ -173,7 +172,6 @@ std::string IPAddress::ToSensitiveString() const {
     }
   }
   return std::string();
-#endif
 }
 
 IPAddress IPAddress::Normalized() const {

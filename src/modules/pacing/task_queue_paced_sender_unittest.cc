@@ -424,7 +424,7 @@ namespace test {
 
     // At this point, the pace queue is drained so there is no more intersting
     // update to be made - but there is still as schduled task that should run
-    // |kMaxTimeBetweenStatsUpdates| after the first update.
+    // `kMaxTimeBetweenStatsUpdates` after the first update.
     time_controller.AdvanceTime(start_time + kMaxTimeBetweenStatsUpdates -
                                 clock->CurrentTime());
     EXPECT_EQ(pacer.num_stats_updates_, ++num_expected_stats_updates);
@@ -562,8 +562,7 @@ namespace test {
               kProbingRate * TimeDelta::Millis(1) + DataSize::Bytes(1));
   }
 
-  // TODO(crbug.com/1152887): Enable once pacer no longer auto-starts.
-  TEST(TaskQueuePacedSenderTest, DISABLED_NoStatsUpdatesBeforeStart) {
+  TEST(TaskQueuePacedSenderTest, NoStatsUpdatesBeforeStart) {
     const TimeDelta kCoalescingWindow = TimeDelta::Millis(5);
     GlobalSimulatedTimeController time_controller(Timestamp::Millis(1234));
     MockPacketRouter packet_router;

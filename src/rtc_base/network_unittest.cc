@@ -100,6 +100,10 @@ class FakeNetworkMonitor : public NetworkMonitorInterface {
 
   void set_adapters(std::vector<std::string> adapters) { adapters_ = adapters; }
 
+  void InovkeNetworksChangedCallbackForTesting() {
+    InvokeNetworksChangedCallback();
+  }
+
  private:
   bool started_ = false;
   std::vector<std::string> adapters_;
@@ -1128,7 +1132,7 @@ TEST_F(NetworkTest, TestNetworkMonitoring) {
   ClearNetworks(manager);
   // Network manager is started, so the callback is called when the network
   // monitor fires the network-change event.
-  network_monitor->SignalNetworksChanged();
+  network_monitor->InovkeNetworksChangedCallbackForTesting();
   EXPECT_TRUE_WAIT(callback_called_, 1000);
 
   // Network manager is stopped.
@@ -1307,9 +1311,6 @@ TEST_F(NetworkTest, WebRTC_AllowMACBasedIPv6Address) {
 
 #if defined(WEBRTC_POSIX)
 TEST_F(NetworkTest, WebRTC_BindUsingInterfaceName) {
-  webrtc::test::ScopedFieldTrials field_trials(
-      "WebRTC-BindUsingInterfaceName/Enabled/");
-
   char if_name1[20] = "wlan0";
   char if_name2[20] = "v4-wlan0";
   ifaddrs* list = nullptr;

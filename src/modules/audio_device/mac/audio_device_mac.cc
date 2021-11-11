@@ -166,8 +166,8 @@ AudioDeviceMac::~AudioDeviceMac() {
     Terminate();
   }
 
-  RTC_DCHECK(!capture_worker_thread_.get());
-  RTC_DCHECK(!render_worker_thread_.get());
+  RTC_DCHECK(capture_worker_thread_.empty());
+  RTC_DCHECK(render_worker_thread_.empty());
 
   if (_paRenderBuffer) {
     delete _paRenderBuffer;
@@ -854,7 +854,7 @@ int32_t AudioDeviceMac::PlayoutDeviceName(uint16_t index,
     memset(guid, 0, kAdmMaxGuidSize);
   }
 
-  return GetDeviceName(kAudioDevicePropertyScopeOutput, index, name, guid);
+  return GetDeviceName(kAudioDevicePropertyScopeOutput, index, name);
 }
 
 int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
@@ -872,7 +872,7 @@ int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
     memset(guid, 0, kAdmMaxGuidSize);
   }
 
-  return GetDeviceName(kAudioDevicePropertyScopeInput, index, name, guid);
+  return GetDeviceName(kAudioDevicePropertyScopeInput, index, name);
 }
 
 int16_t AudioDeviceMac::RecordingDevices() {
@@ -1308,11 +1308,14 @@ int32_t AudioDeviceMac::StartRecording() {
     return -1;
   }
 
-  RTC_DCHECK(!capture_worker_thread_.get());
-  capture_worker_thread_.reset(new rtc::PlatformThread(
-      RunCapture, this, "CaptureWorkerThread", rtc::kRealtimePriority));
-  RTC_DCHECK(capture_worker_thread_.get());
-  capture_worker_thread_->Start();
+  RTC_DCHECK(capture_worker_thread_.empty());
+  capture_worker_thread_ = rtc::PlatformThread::SpawnJoinable(
+      [this] {
+        while (CaptureWorkerThread()) {
+        }
+      },
+      "CaptureWorkerThread",
+      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
 
   OSStatus err = noErr;
   if (_twoDevices) {
@@ -1362,7 +1365,7 @@ int32_t AudioDeviceMac::StopRecording() {
   } else {
     // We signal a stop for a shared device even when rendering has
     // not yet ended. This is to ensure the IOProc will return early as
-    // intended (by checking |_recording|) before accessing
+    // intended (by checking `_recording`) before accessing
     // resources we free below (e.g. the capture converter).
     //
     // In the case of a shared devcie, the IOProc will verify
@@ -1394,10 +1397,9 @@ int32_t AudioDeviceMac::StopRecording() {
   // Setting this signal will allow the worker thread to be stopped.
   AtomicSet32(&_captureDeviceIsAlive, 0);
 
-  if (capture_worker_thread_.get()) {
+  if (!capture_worker_thread_.empty()) {
     mutex_.Unlock();
-    capture_worker_thread_->Stop();
-    capture_worker_thread_.reset();
+    capture_worker_thread_.Finalize();
     mutex_.Lock();
   }
 
@@ -1443,10 +1445,14 @@ int32_t AudioDeviceMac::StartPlayout() {
     return 0;
   }
 
-  RTC_DCHECK(!render_worker_thread_.get());
-  render_worker_thread_.reset(new rtc::PlatformThread(
-      RunRender, this, "RenderWorkerThread", rtc::kRealtimePriority));
-  render_worker_thread_->Start();
+  RTC_DCHECK(render_worker_thread_.empty());
+  render_worker_thread_ = rtc::PlatformThread::SpawnJoinable(
+      [this] {
+        while (RenderWorkerThread()) {
+        }
+      },
+      "RenderWorkerThread",
+      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
 
   if (_twoDevices || !_recording) {
     OSStatus err = noErr;
@@ -1470,7 +1476,7 @@ int32_t AudioDeviceMac::StopPlayout() {
   if (_playing && renderDeviceIsAlive == 1) {
     // We signal a stop for a shared device even when capturing has not
     // yet ended. This is to ensure the IOProc will return early as
-    // intended (by checking |_playing|) before accessing resources we
+    // intended (by checking `_playing`) before accessing resources we
     // free below (e.g. the render converter).
     //
     // In the case of a shared device, the IOProc will verify capturing
@@ -1504,10 +1510,9 @@ int32_t AudioDeviceMac::StopPlayout() {
 
   // Setting this signal will allow the worker thread to be stopped.
   AtomicSet32(&_renderDeviceIsAlive, 0);
-  if (render_worker_thread_.get()) {
+  if (!render_worker_thread_.empty()) {
     mutex_.Unlock();
-    render_worker_thread_->Stop();
-    render_worker_thread_.reset();
+    render_worker_thread_.Finalize();
     mutex_.Lock();
   }
 
@@ -1660,8 +1665,7 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
 
 int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
                                       const uint16_t index,
-                                      char* name,
-                                      char* guid) {
+                                      char* name) {
   OSStatus err = noErr;
   UInt32 len = kAdmMaxDeviceNameSize;
   AudioDeviceID deviceIds[MaxNumberDevices];
@@ -1719,23 +1723,6 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
 
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(usedID, &propertyAddress,
                                                        0, NULL, &len, name));
-  }
-
-  // Get UID
-  {
-    AudioObjectPropertyAddress propertyAddress = {kAudioDevicePropertyDeviceUID,
-                                                kAudioObjectPropertyScopeGlobal, 0};
-    CFStringRef uid = NULL;
-    UInt32 size = sizeof(uid);
-    WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(usedID, &propertyAddress,
-                                                       0, NULL, &size, &uid));
-
-    const CFIndex kCStringSize = kAdmMaxGuidSize;
-    CFStringGetCString(uid, guid, kCStringSize, kCFStringEncodingUTF8);
-
-    if (uid) {
-      CFRelease(uid);
-    }
   }
 
   return 0;
@@ -2387,12 +2374,6 @@ OSStatus AudioDeviceMac::implInConverterProc(UInt32* numberDataPackets,
   return 0;
 }
 
-void AudioDeviceMac::RunRender(void* ptrThis) {
-  AudioDeviceMac* device = static_cast<AudioDeviceMac*>(ptrThis);
-  while (device->RenderWorkerThread()) {
-  }
-}
-
 bool AudioDeviceMac::RenderWorkerThread() {
   PaRingBufferSize numSamples =
       ENGINE_PLAY_BUF_SIZE_IN_SAMPLES * _outDesiredFormat.mChannelsPerFrame;
@@ -2434,34 +2415,28 @@ bool AudioDeviceMac::RenderWorkerThread() {
   uint32_t nOutSamples = nSamples * _outDesiredFormat.mChannelsPerFrame;
 
   SInt16* pPlayBuffer = (SInt16*)&playBuffer;
-  // if (_macBookProPanRight && (_playChannels == 2)) {
-  //   // Mix entirely into the right channel and zero the left channel.
-  //   SInt32 sampleInt32 = 0;
-  //   for (uint32_t sampleIdx = 0; sampleIdx < nOutSamples; sampleIdx += 2) {
-  //     sampleInt32 = pPlayBuffer[sampleIdx];
-  //     sampleInt32 += pPlayBuffer[sampleIdx + 1];
-  //     sampleInt32 /= 2;
+  if (_macBookProPanRight && (_playChannels == 2)) {
+    // Mix entirely into the right channel and zero the left channel.
+    SInt32 sampleInt32 = 0;
+    for (uint32_t sampleIdx = 0; sampleIdx < nOutSamples; sampleIdx += 2) {
+      sampleInt32 = pPlayBuffer[sampleIdx];
+      sampleInt32 += pPlayBuffer[sampleIdx + 1];
+      sampleInt32 /= 2;
 
-  //     if (sampleInt32 > 32767) {
-  //       sampleInt32 = 32767;
-  //     } else if (sampleInt32 < -32768) {
-  //       sampleInt32 = -32768;
-  //     }
+      if (sampleInt32 > 32767) {
+        sampleInt32 = 32767;
+      } else if (sampleInt32 < -32768) {
+        sampleInt32 = -32768;
+      }
 
-  //     pPlayBuffer[sampleIdx] = 0;
-  //     pPlayBuffer[sampleIdx + 1] = static_cast<SInt16>(sampleInt32);
-  //   }
-  // }
+      pPlayBuffer[sampleIdx] = 0;
+      pPlayBuffer[sampleIdx + 1] = static_cast<SInt16>(sampleInt32);
+    }
+  }
 
   PaUtil_WriteRingBuffer(_paRenderBuffer, pPlayBuffer, nOutSamples);
 
   return true;
-}
-
-void AudioDeviceMac::RunCapture(void* ptrThis) {
-  AudioDeviceMac* device = static_cast<AudioDeviceMac*>(ptrThis);
-  while (device->CaptureWorkerThread()) {
-  }
 }
 
 bool AudioDeviceMac::CaptureWorkerThread() {

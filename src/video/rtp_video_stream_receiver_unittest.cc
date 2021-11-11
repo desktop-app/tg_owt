@@ -15,6 +15,7 @@
 
 #include "api/video/video_codec_type.h"
 #include "api/video/video_frame_type.h"
+#include "call/test/mock_rtp_packet_sink_interface.h"
 #include "common_video/h264/h264_common.h"
 #include "media/base/media_constants.h"
 #include "modules/rtp_rtcp/source/rtp_descriptor_authentication.h"
@@ -37,6 +38,7 @@
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/mock_frame_transformer.h"
+#include "test/mock_transport.h"
 
 using ::testing::_;
 using ::testing::ElementsAre;
@@ -70,15 +72,6 @@ RTPVideoHeader GetGenericVideoHeader(VideoFrameType frame_type) {
   return video_header;
 }
 
-class MockTransport : public Transport {
- public:
-  MOCK_METHOD(bool,
-              SendRtp,
-              (const uint8_t*, size_t length, const PacketOptions& options),
-              (override));
-  MOCK_METHOD(bool, SendRtcp, (const uint8_t*, size_t length), (override));
-};
-
 class MockNackSender : public NackSender {
  public:
   MOCK_METHOD(void,
@@ -93,7 +86,8 @@ class MockKeyFrameRequestSender : public KeyFrameRequestSender {
   MOCK_METHOD(void, RequestKeyFrame, (), (override));
 };
 
-class MockOnCompleteFrameCallback : public OnCompleteFrameCallback {
+class MockOnCompleteFrameCallback
+    : public RtpVideoStreamReceiver::OnCompleteFrameCallback {
  public:
   MOCK_METHOD(void, DoOnCompleteFrame, (EncodedFrame*), ());
   MOCK_METHOD(void, DoOnCompleteFrameFailNullptr, (EncodedFrame*), ());
@@ -124,11 +118,6 @@ class MockOnCompleteFrameCallback : public OnCompleteFrameCallback {
     buffer_.WriteBytes(reinterpret_cast<const char*>(data), size_in_bytes);
   }
   rtc::ByteBufferWriter buffer_;
-};
-
-class MockRtpPacketSink : public RtpPacketSinkInterface {
- public:
-  MOCK_METHOD(void, OnRtpPacket, (const RtpPacketReceived&), (override));
 };
 
 constexpr uint32_t kSsrc = 111;
@@ -796,8 +785,8 @@ TEST_F(RtpVideoStreamReceiverTest,
 
 TEST_F(RtpVideoStreamReceiverTest,
        SecondariesOfNonStartedStreamGetNoNotifications) {
-  // Explicitly showing that the stream is not in the |started| state,
-  // regardless of whether streams start out |started| or |stopped|.
+  // Explicitly showing that the stream is not in the `started` state,
+  // regardless of whether streams start out `started` or `stopped`.
   rtp_video_stream_receiver_->StopReceive();
 
   MockRtpPacketSink secondary_sink;
@@ -835,7 +824,7 @@ TEST_F(RtpVideoStreamReceiverTest, ParseGenericDescriptorOnePacket) {
 
   uint8_t* payload = rtp_packet.SetPayloadSize(data.size());
   memcpy(payload, data.data(), data.size());
-  // The first byte is the header, so we ignore the first byte of |data|.
+  // The first byte is the header, so we ignore the first byte of `data`.
   mock_on_complete_frame_callback_.AppendExpectedBitstream(data.data() + 1,
                                                            data.size() - 1);
 
@@ -876,7 +865,7 @@ TEST_F(RtpVideoStreamReceiverTest, ParseGenericDescriptorTwoPackets) {
 
   uint8_t* first_packet_payload = first_packet.SetPayloadSize(data.size());
   memcpy(first_packet_payload, data.data(), data.size());
-  // The first byte is the header, so we ignore the first byte of |data|.
+  // The first byte is the header, so we ignore the first byte of `data`.
   mock_on_complete_frame_callback_.AppendExpectedBitstream(data.data() + 1,
                                                            data.size() - 1);
 
@@ -897,7 +886,7 @@ TEST_F(RtpVideoStreamReceiverTest, ParseGenericDescriptorTwoPackets) {
 
   uint8_t* second_packet_payload = second_packet.SetPayloadSize(data.size());
   memcpy(second_packet_payload, data.data(), data.size());
-  // The first byte is the header, so we ignore the first byte of |data|.
+  // The first byte is the header, so we ignore the first byte of `data`.
   mock_on_complete_frame_callback_.AppendExpectedBitstream(data.data() + 1,
                                                            data.size() - 1);
 
@@ -1165,8 +1154,8 @@ TEST_F(RtpVideoStreamReceiverDeathTest, RepeatedSecondarySinkDisallowed) {
 #endif
 
 TEST_F(RtpVideoStreamReceiverTest, TransformFrame) {
-  rtc::scoped_refptr<MockFrameTransformer> mock_frame_transformer =
-      new rtc::RefCountedObject<testing::NiceMock<MockFrameTransformer>>();
+  auto mock_frame_transformer =
+      rtc::make_ref_counted<testing::NiceMock<MockFrameTransformer>>();
   EXPECT_CALL(*mock_frame_transformer,
               RegisterTransformedFrameSinkCallback(_, config_.rtp.remote_ssrc));
   auto receiver = std::make_unique<RtpVideoStreamReceiver>(

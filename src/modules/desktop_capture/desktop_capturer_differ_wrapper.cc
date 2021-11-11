@@ -25,8 +25,8 @@ namespace webrtc {
 
 namespace {
 
-// Returns true if (0, 0) - (|width|, |height|) vector in |old_buffer| and
-// |new_buffer| are equal. |width| should be less than 32
+// Returns true if (0, 0) - (`width`, `height`) vector in `old_buffer` and
+// `new_buffer` are equal. `width` should be less than 32
 // (defined by kBlockSize), otherwise BlockDifference() should be used.
 bool PartialBlockDifference(const uint8_t* old_buffer,
                             const uint8_t* new_buffer,
@@ -45,9 +45,9 @@ bool PartialBlockDifference(const uint8_t* old_buffer,
   return false;
 }
 
-// Compares columns in the range of [|left|, |right|), in a row in the
-// range of [|top|, |top| + |height|), starts from |old_buffer| and
-// |new_buffer|, and outputs updated regions into |output|. |stride| is the
+// Compares columns in the range of [`left`, `right`), in a row in the
+// range of [`top`, `top` + `height`), starts from `old_buffer` and
+// `new_buffer`, and outputs updated regions into `output`. `stride` is the
 // DesktopFrame::stride().
 void CompareRow(const uint8_t* old_buffer,
                 const uint8_t* new_buffer,
@@ -68,7 +68,7 @@ void CompareRow(const uint8_t* old_buffer,
   // The first block-column in a continuous dirty area in current block-row.
   int first_dirty_x_block = -1;
 
-  // We always need to add dirty area into |output| in the last block, so handle
+  // We always need to add dirty area into `output` in the last block, so handle
   // it separatedly.
   for (int x = 0; x < block_count; x++) {
     if (BlockDifference(old_buffer, new_buffer, height, stride)) {
@@ -109,8 +109,8 @@ void CompareRow(const uint8_t* old_buffer,
   }
 }
 
-// Compares |rect| area in |old_frame| and |new_frame|, and outputs dirty
-// regions into |output|.
+// Compares `rect` area in `old_frame` and `new_frame`, and outputs dirty
+// regions into `output`.
 void CompareFrames(const DesktopFrame& old_frame,
                    const DesktopFrame& new_frame,
                    DesktopRect rect,
@@ -118,9 +118,6 @@ void CompareFrames(const DesktopFrame& old_frame,
   RTC_DCHECK(old_frame.size().equals(new_frame.size()));
   RTC_DCHECK_EQ(old_frame.stride(), new_frame.stride());
   rect.IntersectWith(DesktopRect::MakeSize(old_frame.size()));
-  if (rect.is_empty()) {
-    return;
-  }
 
   const int y_block_count = (rect.height() - 1) / kBlockSize;
   const int last_y_block_height = rect.height() - y_block_count * kBlockSize;
