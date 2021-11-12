@@ -49,6 +49,10 @@ function(init_target target_name) # init_target(my_target folder_name)
             /wd4244 # 'initializing' conversion from .. to .., possible loss of data.
             /wd4838 # conversion from .. to .. requires a narrowing conversion.
             /wd4305 # 'return': truncation from 'int' to 'bool'.
+
+            # C++20: enum-s used as constants in WebRTC code.
+            /wd5055 # operator 'X': deprecated between enumerations and floating-point types
+
             /MP     # Enable multi process build.
             /EHsc   # Catch C++ exceptions only, extern C functions never throw a C++ exception.
             /Zc:wchar_t- # don't tread wchar_t as builtin type
