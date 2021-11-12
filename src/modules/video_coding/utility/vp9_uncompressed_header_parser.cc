@@ -300,10 +300,10 @@ bool Vp9ReadQp(BitstreamReader* br, FrameInfo* frame_info) {
 }
 
 bool Vp9ReadSegmentationParams(BitstreamReader* br) {
-  constexpr int kVp9MaxSegments = 8;
-  constexpr int kVp9SegLvlMax = 4;
-  constexpr int kSegmentationFeatureBits[kVp9SegLvlMax] = {8, 6, 2, 0};
-  constexpr bool kSegmentationFeatureSigned[kVp9SegLvlMax] = {1, 1, 0, 0};
+  static constexpr int kVp9MaxSegments = 8;
+  static constexpr int kVp9SegLvlMax = 4;
+  static constexpr int kSegmentationFeatureBits[kVp9SegLvlMax] = {8, 6, 2, 0};
+  static constexpr bool kSegmentationFeatureSigned[kVp9SegLvlMax] = {1, 1, 0, 0};
 
   RETURN_IF_FALSE(br->IfNextBoolean([&] {  // segmentation_enabled
     return br->IfNextBoolean([&] {  // update_map
