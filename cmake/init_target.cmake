@@ -11,13 +11,8 @@ function(init_target_folder target_name folder_name)
 endfunction()
 
 function(init_target target_name) # init_target(my_target folder_name)
-    if (APPLE)
-        target_compile_features(${target_name} PUBLIC cxx_std_14)
-    else()
-        # C++20 is not supported by bundled abseil-cpp yet:
-        # https://github.com/abseil/abseil-cpp/issues/722
-        target_compile_features(${target_name} PUBLIC cxx_std_17)
-    endif()
+    target_compile_features(${target_name} PUBLIC cxx_std_20)
+
     if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         set_target_properties(${target_name} PROPERTIES
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -64,6 +59,13 @@ function(init_target target_name) # init_target(my_target folder_name)
             target_compile_options(${target_name}
             PRIVATE
                 -Wno-deprecated-declarations
+
+                # C++20: volatile arithmetics in RaceChecker.
+                -Wno-deprecated-volatile
+
+                # C++20: enum-s used as constants in WebRTC code.
+                -Wno-deprecated-anon-enum-enum-conversion
+
                 -fobjc-arc
                 -fvisibility=hidden
                 -fvisibility-inlines-hidden
