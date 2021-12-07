@@ -107,13 +107,32 @@ function(link_libjpeg target_name)
 endfunction()
 
 # libabsl
-# HINT: System abseil should be built with -DCMAKE_CXX_STANDARD=17
+# HINT: System abseil should be built with
+# * -DCMAKE_CXX_STANDARD=17 on Linux
+# * -DCMAKE_CXX_STANDARD=14 on macOS
 function(link_libabsl target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(absl)
         set(absl_FOUND ${absl_FOUND} PARENT_SCOPE)
         if (absl_FOUND)
-            target_link_libraries(${target_name} INTERFACE absl::strings)
+            target_link_libraries(${target_name}
+            INTERFACE
+                absl::algorithm_container
+                absl::bind_front
+                absl::config
+                absl::core_headers
+                absl::flat_hash_map
+                absl::inlined_vector
+                absl::flags
+                absl::flags_parse
+                absl::flags_usage
+                absl::memory
+                absl::optional
+                absl::strings
+                absl::synchronization
+                absl::type_traits
+                absl::variant
+            )
         endif()
     endif()
     if (NOT absl_FOUND)
