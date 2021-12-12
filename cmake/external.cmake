@@ -39,7 +39,6 @@ endfunction()
 
 # FFmpeg
 set(TG_OWT_FFMPEG_INCLUDE_PATH "" CACHE STRING "Include path for ffmpeg.")
-option(TG_OWT_PACKAGED_BUILD_FFMPEG_STATIC "Link ffmpeg statically in packaged mode." OFF)
 function(link_ffmpeg target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(PkgConfig REQUIRED)
@@ -55,25 +54,13 @@ function(link_ffmpeg target_name)
             ${SWSCALE_INCLUDE_DIRS}
             ${SWRESAMPLE_INCLUDE_DIRS}
         )
-        if (TG_OWT_PACKAGED_BUILD_FFMPEG_STATIC)
-            target_link_libraries(${target_name}
-            PRIVATE
-                ${AVCODEC_STATIC_LINK_LIBRARIES}
-                ${AVFORMAT_STATIC_LINK_LIBRARIES}
-                ${AVUTIL_STATIC_LINK_LIBRARIES}
-                ${SWSCALE_STATIC_LINK_LIBRARIES}
-                ${SWRESAMPLE_STATIC_LINK_LIBRARIES}
-            )
-        else()
-            target_link_libraries(${target_name}
-            PRIVATE
-                ${AVCODEC_LINK_LIBRARIES}
-                ${AVFORMAT_LINK_LIBRARIES}
-                ${AVUTIL_LINK_LIBRARIES}
-                ${SWSCALE_LINK_LIBRARIES}
-                ${SWRESAMPLE_LINK_LIBRARIES}
-            )
-        endif()
+        target_link_libraries(${target_name} PRIVATE
+            ${AVCODEC_LINK_LIBRARIES}
+            ${AVFORMAT_LINK_LIBRARIES}
+            ${AVUTIL_LINK_LIBRARIES}
+            ${SWSCALE_LINK_LIBRARIES}
+            ${SWRESAMPLE_LINK_LIBRARIES}
+        )
     else()
         if (TG_OWT_FFMPEG_INCLUDE_PATH STREQUAL "")
             message(FATAL_ERROR "You should specify 'TG_OWT_FFMPEG_INCLUDE_PATH'.")
