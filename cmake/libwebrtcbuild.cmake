@@ -81,6 +81,11 @@ else()
         INTERFACE
             WEBRTC_FREEBSD
         )
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
+        target_compile_definitions(libwebrtcbuild
+        INTERFACE
+            WEBRTC_OPENBSD
+        )
     endif()
 endif()
 
