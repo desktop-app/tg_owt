@@ -92,7 +92,7 @@
 
 #elif defined(WEBRTC_LINUX)
 #include <endian.h>
-#elif defined(WEBRTC_FREEBSD)
+#elif defined(WEBRTC_FREEBSD) || defined(WEBRTC_OPENBSD)
 #include <sys/endian.h>
 #else
 #error "Missing byte order functions for this arch."
