@@ -39,7 +39,13 @@ typedef DWORD PlatformThreadRef;
 typedef zx_handle_t PlatformThreadId;
 typedef zx_handle_t PlatformThreadRef;
 #elif defined(WEBRTC_POSIX)
+#if defined(WEBRTC_MAC) || defined(WEBRTC_IOS)
+typedef mach_port_t PlatformThreadId;
+#elif defined(WEBRTC_LINUX)
 typedef pid_t PlatformThreadId;
+#else
+typedef intptr_t PlatformThreadId;
+#endif
 typedef pthread_t PlatformThreadRef;
 #endif
 
