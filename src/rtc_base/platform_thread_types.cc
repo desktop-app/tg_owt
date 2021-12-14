@@ -27,6 +27,8 @@ typedef HRESULT(WINAPI* RTC_SetThreadDescription)(HANDLE hThread,
 
 #if defined(WEBRTC_FREEBSD)
 #include <pthread_np.h>
+#elif defined(WEBRTC_OPENBSD)
+#include <pthread_np.h>
 #endif
 
 namespace rtc {
@@ -115,6 +117,8 @@ void SetCurrentThreadName(const char* name) {
   prctl(PR_SET_NAME, reinterpret_cast<unsigned long>(name));  // NOLINT
 #elif defined(WEBRTC_FREEBSD)
   pthread_setname_np(pthread_self(), name);
+#elif defined(WEBRTC_OPENBSD)
+  pthread_set_name_np(pthread_self(), name);
 #elif defined(WEBRTC_MAC) || defined(WEBRTC_IOS)
   pthread_setname_np(name);
 #endif
