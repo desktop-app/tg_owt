@@ -25,6 +25,11 @@ elseif (APPLE)
         HAVE_SA_LEN
         HAVE_SCONN_LEN
     )
+elseif (CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
+    target_compile_definitions(libusrsctp
+    PRIVATE
+        __Userspace_os_OpenBSD
+    )
 else()
     target_compile_definitions(libusrsctp
     PRIVATE
