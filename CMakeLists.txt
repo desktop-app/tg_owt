@@ -23,7 +23,7 @@ option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." OFF)
 option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
 option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture on non-Apple Unix." ON)
 option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire 0.3 for desktop capture on non-Apple Unix." ${not_packaged_build})
-option(TG_OWT_BUILD_AUDIO_BACKENDS "Build webrtc audio backends." ON)
+option(TG_OWT_BUILD_AUDIO_BACKENDS "Build webrtc audio backends." OFF)
 
 if (NOT UNIX OR APPLE)
     set(TG_OWT_USE_PIPEWIRE OFF)
@@ -35,6 +35,15 @@ if (BUILD_SHARED_LIBS)
         "tg_owt is a fork of Google's webrtc library and is developed by them as a static library without stable ABI in mind."
         "The feature of building tg_owt as a shared library is community maintained, it may and will break at any time without guarantee to work again."
         "Please reconsider your decision. Good luck."
+    )
+endif()
+
+if (TG_OWT_BUILD_AUDIO_BACKENDS)
+    message(WARNING
+        "According to upstream WebRTC developers, audio backends for desktop platforms are only for demo purposes."
+        "It's not recommended to use them. You've been warned."
+        "https://bugs.chromium.org/p/webrtc/issues/detail?id=10537#c2"
+        "https://bugs.chromium.org/p/webrtc/issues/detail?id=10622#c3"
     )
 endif()
 
