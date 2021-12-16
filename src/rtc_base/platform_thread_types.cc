@@ -33,7 +33,6 @@ typedef HRESULT(WINAPI* RTC_SetThreadDescription)(HANDLE hThread,
 #endif
 
 #if defined(WEBRTC_FREEBSD)
-#include <sys/thr.h>
 #include <pthread_np.h>
 #endif
 
@@ -52,9 +51,7 @@ PlatformThreadId CurrentThreadId() {
 #elif defined(WEBRTC_LINUX)
   return syscall(__NR_gettid);
 #elif defined(WEBRTC_FREEBSD)
-  long tid;
-  thr_self(&tid);
-  return tid;
+  return pthread_getthreadid_np();
 #elif defined(__EMSCRIPTEN__)
   return static_cast<PlatformThreadId>(pthread_self());
 #else
