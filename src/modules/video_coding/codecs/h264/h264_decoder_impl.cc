@@ -35,7 +35,7 @@ extern "C" {
 #include "rtc_base/logging.h"
 #include "system_wrappers/include/field_trial.h"
 #include "system_wrappers/include/metrics.h"
-#include "third_party/libyuv/include/libyuv/convert.h"
+#include "libyuv/convert.h"
 
 namespace webrtc {
 

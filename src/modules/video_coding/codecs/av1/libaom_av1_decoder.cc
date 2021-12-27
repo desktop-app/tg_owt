@@ -23,7 +23,7 @@
 #include "rtc_base/logging.h"
 #include "third_party/libaom/source/libaom/aom/aom_decoder.h"
 #include "third_party/libaom/source/libaom/aom/aomdx.h"
-#include "third_party/libyuv/include/libyuv/convert.h"
+#include "libyuv/convert.h"
 
 namespace webrtc {
 namespace {

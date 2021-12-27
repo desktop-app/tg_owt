@@ -28,8 +28,8 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/time_utils.h"
 #include "system_wrappers/include/metrics.h"
-#include "third_party/libyuv/include/libyuv/convert.h"
-#include "third_party/libyuv/include/libyuv/scale.h"
+#include "libyuv/convert.h"
+#include "libyuv/scale.h"
 #include <wels/codec_api.h>
 #include <wels/codec_app_def.h>
 #include <wels/codec_def.h>
