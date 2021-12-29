@@ -80,7 +80,14 @@ include(cmake/external.cmake)
 include(cmake/libpffft.cmake)
 include(cmake/librnnoise.cmake)
 include(cmake/libsrtp.cmake)
-include(cmake/libyuv.cmake)
+if (NOT TG_OWT_PACKAGED_BUILD)
+    include(cmake/libabsl.cmake)
+    include(cmake/libopenh264.cmake)
+    include(cmake/libusrsctp.cmake)
+    include(cmake/libvpx.cmake)
+    include(cmake/libyuv.cmake)
+endif()
+
 if (APPLE)
     include(cmake/libsdkmacos.cmake)
 endif()
@@ -125,7 +132,6 @@ PRIVATE
     tg_owt::libpffft
     tg_owt::librnnoise
     tg_owt::libsrtp
-    tg_owt::libyuv
 )
 
 if (is_x86 OR is_x64)
@@ -160,6 +166,7 @@ link_libabsl(tg_owt)
 link_libopenh264(tg_owt)
 link_libusrsctp(tg_owt)
 link_libvpx(tg_owt)
+link_libyuv(tg_owt)
 
 if (TG_OWT_BUILD_AUDIO_BACKENDS AND (UNIX AND NOT APPLE))
     link_libalsa(tg_owt)
@@ -2407,7 +2414,6 @@ set(export_targets
     librnnoise
     libsrtp
     libwebrtcbuild
-    libyuv
     ${platform_export}
 )
 if (TG_OWT_USE_PROTOBUF)
@@ -2425,6 +2431,9 @@ if (NOT LIBUSRSCTP_FOUND)
 endif()
 if (NOT LIBVPX_FOUND)
     list(APPEND export_targets libvpx ${vpx_export})
+endif()
+if (NOT LIBYUV_FOUND)
+    list(APPEND export_targets libyuv)
 endif()
 
 export(

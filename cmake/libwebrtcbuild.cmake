@@ -1,10 +1,9 @@
 add_library(libwebrtcbuild INTERFACE)
 add_library(tg_owt::libwebrtcbuild ALIAS libwebrtcbuild)
 
-target_link_libraries(libwebrtcbuild
-INTERFACE
-    tg_owt::libyuv
-)
+if (NOT LIBYUV_FOUND)
+    target_link_libraries(libwebrtcbuild INTERFACE tg_owt::libyuv)
+endif()
 if (NOT absl_FOUND)
     target_link_libraries(libwebrtcbuild INTERFACE tg_owt::libabsl)
 endif()
