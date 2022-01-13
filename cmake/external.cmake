@@ -155,9 +155,14 @@ function(link_libusrsctp target_name)
 endfunction()
 
 # libvpx
+set(TG_OWT_LIBVPX_INSTALL_PATH "" CACHE STRING "Install path for libvpx.")
 function(link_libvpx target_name)
-    if (TG_OWT_PACKAGED_BUILD)
+    if (TG_OWT_PACKAGED_BUILD
+        OR NOT TG_OWT_LIBVPX_INSTALL_PATH STREQUAL "")
         find_package(PkgConfig REQUIRED)
+        if (NOT TG_OWT_LIBVPX_INSTALL_PATH STREQUAL "")
+            set(CMAKE_PREFIX_PATH "${TG_OWT_LIBVPX_INSTALL_PATH}/lib/pkgconfig")
+        endif()
         pkg_check_modules(LIBVPX vpx>=1.10.0)
         set(LIBVPX_FOUND ${LIBVPX_FOUND} PARENT_SCOPE)
         if (LIBVPX_FOUND)
