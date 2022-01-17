@@ -39,10 +39,11 @@ PRIVATE
     components/video_codec/RTCCodecSpecificInfoH264+Private.h
     components/video_codec/RTCCodecSpecificInfoH264.h
     components/video_codec/RTCCodecSpecificInfoH264.mm
-    components/video_codec/RTCH264ProfileLevelId.h
-    components/video_codec/RTCH264ProfileLevelId.mm
+    components/video_codec/RTCCodecSpecificInfoH265+Private.h
     components/video_codec/RTCCodecSpecificInfoH265.h
     components/video_codec/RTCCodecSpecificInfoH265.mm
+    components/video_codec/RTCH264ProfileLevelId.h
+    components/video_codec/RTCH264ProfileLevelId.mm
     components/video_codec/RTCH265ProfileLevelId.h
     components/video_codec/RTCH265ProfileLevelId.mm
     components/video_codec/RTCDefaultVideoDecoderFactory.h
@@ -57,14 +58,6 @@ PRIVATE
     components/video_codec/RTCVideoEncoderFactoryH264.m
     components/video_codec/RTCVideoEncoderH264.h
     components/video_codec/RTCVideoEncoderH264.mm
-    components/video_codec/RTCVideoDecoderFactoryH265.h
-    components/video_codec/RTCVideoDecoderFactoryH265.m
-    components/video_codec/RTCVideoDecoderH265.h
-    components/video_codec/RTCVideoDecoderH265.mm
-    components/video_codec/RTCVideoEncoderFactoryH265.h
-    components/video_codec/RTCVideoEncoderFactoryH265.m
-    components/video_codec/RTCVideoEncoderH265.h
-    components/video_codec/RTCVideoEncoderH265.mm
     components/video_codec/helpers.cc
     components/video_codec/helpers.h
     components/video_codec/nalu_rewriter.cc

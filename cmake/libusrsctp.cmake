@@ -25,12 +25,6 @@ elseif (APPLE)
         HAVE_SA_LEN
         HAVE_SCONN_LEN
     )
-    target_compile_options(libusrsctp
-    PRIVATE
-        -U__APPLE__
-        -UINET
-        -UINET6
-    )
 else()
     target_compile_definitions(libusrsctp
     PRIVATE
