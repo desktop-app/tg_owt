@@ -161,6 +161,7 @@ function(link_libusrsctp target_name)
 endfunction()
 
 # libvpx
+set(TG_OWT_LIBVPX_INCLUDE_PATH "" CACHE STRING "Include path for libvpx.")
 function(link_libvpx target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(PkgConfig REQUIRED)
@@ -172,18 +173,14 @@ function(link_libvpx target_name)
         endif()
     endif()
     if (NOT LIBVPX_FOUND)
-        target_link_libraries(${target_name} PRIVATE tg_owt::libvpx)
-        if (is_x86 OR is_x64)
-            target_link_libraries(${target_name}
-            PRIVATE
-                tg_owt::libvpx_mmx
-                tg_owt::libvpx_sse2
-                tg_owt::libvpx_ssse3
-                tg_owt::libvpx_sse4
-                tg_owt::libvpx_avx
-                tg_owt::libvpx_avx2
-            )
+        if (TG_OWT_LIBVPX_INCLUDE_PATH STREQUAL "")
+            message(FATAL_ERROR "You should specify 'TG_OWT_LIBVPX_INCLUDE_PATH'.")
         endif()
+
+        target_include_directories(${target_name}
+        PRIVATE
+            ${TG_OWT_LIBVPX_INCLUDE_PATH}
+        )
     endif()
 endfunction()
 
