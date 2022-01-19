@@ -1,6 +1,3 @@
-[submodule "src/third_party/libvpx/source/libvpx"]
-	path = src/third_party/libvpx/source/libvpx
-	url = https://gitlab.com/chromiumsrc/libvpx.git
 [submodule "src/third_party/libyuv"]
 	path = src/third_party/libyuv
 	url = https://gitlab.com/chromiumsrc/libyuv.git
