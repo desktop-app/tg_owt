@@ -2383,18 +2383,6 @@ if (APPLE)
     )
 endif()
 
-set(vpx_export)
-if (is_x86 OR is_x64)
-    set(vpx_export
-        libvpx_mmx
-        libvpx_sse2
-        libvpx_ssse3
-        libvpx_sse4
-        libvpx_avx
-        libvpx_avx2
-    )
-endif()
-
 set(tg_owt_export tg_owt)
 if (is_x86 OR is_x64)
     set(tg_owt_export
@@ -2425,9 +2413,6 @@ if (NOT LIBOPENH264_FOUND)
 endif()
 if (NOT LIBUSRSCTP_FOUND)
     list(APPEND export_targets libusrsctp)
-endif()
-if (NOT LIBVPX_FOUND)
-    list(APPEND export_targets libvpx ${vpx_export})
 endif()
 
 export(
