@@ -2217,6 +2217,13 @@ if (NOT TG_OWT_USE_PROTOBUF)
     )
 endif()
 
+if (NOT TG_OWT_USE_PIPEWIRE)
+    remove_target_sources(tg_owt ${webrtc_loc}
+        modules/desktop_capture/linux/base_capturer_pipewire.cc
+        modules/desktop_capture/linux/base_capturer_pipewire.h
+    )
+endif()
+
 if (NOT TG_OWT_BUILD_AUDIO_BACKENDS)
     remove_target_sources(tg_owt ${webrtc_loc}
         rtc_base/win/windows_version.cc
