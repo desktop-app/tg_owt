@@ -17,10 +17,6 @@
 // #ifdef unless needed and tested.
 #ifdef WEBRTC_USE_H264
 
-#if defined(WEBRTC_WIN) && !defined(__clang__)
-#error "See: bugs.webrtc.org/9213#c13."
-#endif
-
 // CAVEAT: According to ffmpeg docs for avcodec_send_packet, ffmpeg requires a
 // few extra padding bytes after the end of input. And in addition, docs for
 // AV_INPUT_BUFFER_PADDING_SIZE says "If the first 23 bits of the additional
