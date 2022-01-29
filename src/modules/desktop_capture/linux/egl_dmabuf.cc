@@ -112,6 +112,17 @@ glGetTexImage_func GlGetTexImage = nullptr;
 glTexParameteri_func GlTexParameteri = nullptr;
 glXGetProcAddressARB_func GlXGetProcAddressARB = nullptr;
 
+// GBM
+typedef struct gbm_device *(*gbm_create_device_func)(int fd);
+typedef void (*gbm_device_destroy_func)(struct gbm_device *gbm);
+typedef struct gbm_bo *(*gbm_bo_import_func)(struct gbm_device *gbm, uint32_t type, void *buffer, uint32_t flags);
+typedef void (*gbm_bo_destroy_func)(struct gbm_bo *bo);
+
+gbm_create_device_func Gbm_create_device = nullptr;
+gbm_device_destroy_func Gbm_device_destroy = nullptr;
+gbm_bo_import_func Gbm_bo_import = nullptr;
+gbm_bo_destroy_func Gbm_bo_destroy = nullptr;
+
 static const std::string FormatGLError(GLenum err) {
   switch (err) {
     case GL_NO_ERROR:
@@ -239,6 +250,31 @@ static bool LoadGL() {
   return false;
 }
 
+static void* g_lib_gbm = nullptr;
+
+RTC_NO_SANITIZE("cfi-icall")
+static bool OpenGBM() {
+  g_lib_gbm = dlopen("libgbm.so.1", RTLD_NOW | RTLD_GLOBAL);
+  if (g_lib_gbm) {
+    return true;
+  }
+
+  return false;
+}
+
+RTC_NO_SANITIZE("cfi-icall")
+static bool LoadGBM() {
+  if (OpenGBM()) {
+    Gbm_create_device = (gbm_create_device_func)dlsym(g_lib_gbm, "gbm_create_device");
+    Gbm_device_destroy = (gbm_device_destroy_func)dlsym(g_lib_gbm, "gbm_device_destroy");
+    Gbm_bo_import = (gbm_bo_import_func)dlsym(g_lib_gbm, "gbm_bo_import");
+    Gbm_bo_destroy = (gbm_bo_destroy_func)dlsym(g_lib_gbm, "gbm_bo_destroy");
+    return Gbm_create_device && Gbm_device_destroy && Gbm_bo_import && Gbm_bo_destroy;
+  }
+
+  return false;
+}
+
 RTC_NO_SANITIZE("cfi-icall")
 EglDmaBuf::EglDmaBuf() {
   absl::optional<std::string> render_node = GetRenderNode();
@@ -253,7 +289,12 @@ EglDmaBuf::EglDmaBuf() {
     return;
   }
 
-  gbm_device_ = gbm_create_device(drm_fd_);
+  if (!LoadGBM()) {
+    RTC_LOG(LS_ERROR) << "Unable to load GBM library.";
+    return;
+  }
+
+  gbm_device_ = Gbm_create_device(drm_fd_);
 
   if (!gbm_device_) {
     RTC_LOG(LS_ERROR) << "Cannot create GBM device: " << strerror(errno);
@@ -376,7 +417,7 @@ EglDmaBuf::EglDmaBuf() {
 
 EglDmaBuf::~EglDmaBuf() {
   if (gbm_device_) {
-    gbm_device_destroy(gbm_device_);
+    Gbm_device_destroy(gbm_device_);
   }
 
   CloseLibrary(g_lib_egl);
@@ -407,7 +448,7 @@ std::unique_ptr<uint8_t[]> EglDmaBuf::ImageFromDmaBuf(
         static_cast<uint32_t>(size.height()), plane_datas[0].stride,
         GBM_BO_FORMAT_ARGB8888};
 
-    imported = gbm_bo_import(gbm_device_, GBM_BO_IMPORT_FD, &import_info, 0);
+    imported = Gbm_bo_import(gbm_device_, GBM_BO_IMPORT_FD, &import_info, 0);
   } else {
     gbm_import_fd_modifier_data import_info = {};
     import_info.format = GBM_BO_FORMAT_ARGB8888;
@@ -422,7 +463,7 @@ std::unique_ptr<uint8_t[]> EglDmaBuf::ImageFromDmaBuf(
     }
 
     imported =
-        gbm_bo_import(gbm_device_, GBM_BO_IMPORT_FD_MODIFIER, &import_info, 0);
+        Gbm_bo_import(gbm_device_, GBM_BO_IMPORT_FD_MODIFIER, &import_info, 0);
   }
 
   if (!imported) {
@@ -442,7 +483,7 @@ std::unique_ptr<uint8_t[]> EglDmaBuf::ImageFromDmaBuf(
   if (image == EGL_NO_IMAGE_KHR) {
     RTC_LOG(LS_ERROR) << "Failed to record frame: Error creating EGLImageKHR - "
                       << FormatGLError(GlGetError());
-    gbm_bo_destroy(imported);
+    Gbm_bo_destroy(imported);
     return src;
   }
 
@@ -483,14 +524,14 @@ std::unique_ptr<uint8_t[]> EglDmaBuf::ImageFromDmaBuf(
 
   if (GlGetError()) {
     RTC_LOG(LS_ERROR) << "Failed to get image from DMA buffer.";
-    gbm_bo_destroy(imported);
+    Gbm_bo_destroy(imported);
     return src;
   }
 
   GlDeleteTextures(1, &texture);
   EglDestroyImageKHR(egl_.display, image);
 
-  gbm_bo_destroy(imported);
+  Gbm_bo_destroy(imported);
 
   return src;
 }

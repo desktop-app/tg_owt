@@ -112,6 +112,7 @@ if (TG_OWT_USE_PIPEWIRE)
         )
 
         find_package(PkgConfig REQUIRED)
+        pkg_check_modules(GBM REQUIRED gbm)
         pkg_check_modules(DRM REQUIRED libdrm)
 
         target_include_directories(tg_owt
@@ -119,6 +120,7 @@ if (TG_OWT_USE_PIPEWIRE)
             ${webrtc_loc}/third_party/pipewire/spa/include
             ${webrtc_loc}/third_party/pipewire/src
             ${webrtc_loc}/third_party/pipewire/build/src
+            ${GBM_INCLUDE_DIRS}
             ${DRM_INCLUDE_DIRS}
         )
     else()
