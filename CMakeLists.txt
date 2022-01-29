@@ -2246,8 +2246,6 @@ endif()
 
 if (NOT TG_OWT_BUILD_AUDIO_BACKENDS)
     remove_target_sources(tg_owt ${webrtc_loc}
-        rtc_base/win/windows_version.cc
-        rtc_base/win/windows_version.h
         modules/audio_device/include/audio_device_factory.cc
         modules/audio_device/include/audio_device_factory.h
         modules/audio_device/linux/alsasymboltable_linux.cc
