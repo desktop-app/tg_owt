@@ -168,40 +168,10 @@ class MediaBufferImpl final : public IMediaBuffer {
 //                              Static Methods
 // ============================================================================
 
-HRESULT __stdcall AudioDeviceWindowsCore::OnDefaultDeviceChanged(
-   EDataFlow flow,
-   ERole role,
-   LPCWSTR pwstrDefaultDeviceId) {
-  if (flow != eRender || role != eCommunications)
-    SetEvent(_hDeviceRestartEvent);
-  return S_OK;
-}
-
-ULONG AudioDeviceWindowsCore::AddRef() {
-  ULONG new_ref = InterlockedIncrement(&ref_count_);
-  return new_ref;
-}
-
-ULONG AudioDeviceWindowsCore::Release() {
-  ULONG new_ref = InterlockedDecrement(&ref_count_);
-  return new_ref;
-}
-
-HRESULT AudioDeviceWindowsCore::QueryInterface(REFIID iid, void** object) {
-  if (object == nullptr) {
-    return E_POINTER;
-  }
-  if (iid == IID_IUnknown || iid == __uuidof(IMMNotificationClient)) {
-    *object = static_cast<IMMNotificationClient*>(this);
-    return S_OK;
-  };
-  *object = nullptr;
-  return E_NOINTERFACE;
-}
-
 // ----------------------------------------------------------------------------
 //  CoreAudioIsSupported
 // ----------------------------------------------------------------------------
+
 bool AudioDeviceWindowsCore::CoreAudioIsSupported() {
   RTC_DLOG(LS_VERBOSE) << __FUNCTION__;
 
@@ -399,7 +369,6 @@ AudioDeviceWindowsCore::AudioDeviceWindowsCore()
       _hRecThread(NULL),
       _hCaptureStartedEvent(NULL),
       _hShutdownCaptureEvent(NULL),
-      _hDeviceRestartEvent(NULL),
       _hMmTask(NULL),
       _playAudioFrameSize(0),
       _playSampleRate(0),
@@ -475,7 +444,6 @@ AudioDeviceWindowsCore::AudioDeviceWindowsCore()
   _hShutdownCaptureEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
   _hRenderStartedEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
   _hCaptureStartedEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-  _hDeviceRestartEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
   _perfCounterFreq.QuadPart = 1;
   _perfCounterFactor = 0.0;
@@ -502,7 +470,6 @@ AudioDeviceWindowsCore::AudioDeviceWindowsCore()
                    reinterpret_cast<void**>(&_ptrEnumerator));
   RTC_DCHECK(_ptrEnumerator);
 
-  _ptrEnumerator->RegisterEndpointNotificationCallback(this);
   // DMO initialization for built-in WASAPI AEC.
   {
     IMediaObject* ptrDMO = NULL;
@@ -530,9 +497,6 @@ AudioDeviceWindowsCore::~AudioDeviceWindowsCore() {
 
   // The IMMDeviceEnumerator is created during construction. Must release
   // it here and not in Terminate() since we don't recreate it in Init().
-  if (_ptrEnumerator) {
-    _ptrEnumerator->UnregisterEndpointNotificationCallback(this);
-  }
   SAFE_RELEASE(_ptrEnumerator);
 
   _ptrAudioBuffer = NULL;
@@ -565,11 +529,6 @@ AudioDeviceWindowsCore::~AudioDeviceWindowsCore() {
   if (NULL != _hShutdownCaptureEvent) {
     CloseHandle(_hShutdownCaptureEvent);
     _hShutdownCaptureEvent = NULL;
-  }
-
-  if (NULL != _hDeviceRestartEvent) {
-    CloseHandle(_hDeviceRestartEvent);
-    _hDeviceRestartEvent = NULL;
   }
 
   if (_avrtLibrary) {
@@ -1928,18 +1887,18 @@ int32_t AudioDeviceWindowsCore::InitPlayout() {
         break;
       } else {
         if (pWfxClosestMatch) {
-          RTC_LOG(INFO) << "nChannels=" << Wfx.nChannels
-                        << ", nSamplesPerSec=" << Wfx.nSamplesPerSec
-                        << " is not supported. Closest match: "
-                           "nChannels="
-                        << pWfxClosestMatch->nChannels << ", nSamplesPerSec="
-                        << pWfxClosestMatch->nSamplesPerSec;
+          RTC_LOG(LS_INFO) << "nChannels=" << Wfx.nChannels
+                           << ", nSamplesPerSec=" << Wfx.nSamplesPerSec
+                           << " is not supported. Closest match: "
+                              "nChannels="
+                           << pWfxClosestMatch->nChannels << ", nSamplesPerSec="
+                           << pWfxClosestMatch->nSamplesPerSec;
           CoTaskMemFree(pWfxClosestMatch);
           pWfxClosestMatch = NULL;
         } else {
-          RTC_LOG(INFO) << "nChannels=" << Wfx.nChannels
-                        << ", nSamplesPerSec=" << Wfx.nSamplesPerSec
-                        << " is not supported. No closest match.";
+          RTC_LOG(LS_INFO) << "nChannels=" << Wfx.nChannels
+                           << ", nSamplesPerSec=" << Wfx.nSamplesPerSec
+                           << " is not supported. No closest match.";
         }
       }
     }
@@ -2249,18 +2208,18 @@ int32_t AudioDeviceWindowsCore::InitRecording() {
         break;
       } else {
         if (pWfxClosestMatch) {
-          RTC_LOG(INFO) << "nChannels=" << Wfx.Format.nChannels
-                        << ", nSamplesPerSec=" << Wfx.Format.nSamplesPerSec
-                        << " is not supported. Closest match: "
-                           "nChannels="
-                        << pWfxClosestMatch->nChannels << ", nSamplesPerSec="
-                        << pWfxClosestMatch->nSamplesPerSec;
+          RTC_LOG(LS_INFO) << "nChannels=" << Wfx.Format.nChannels
+                           << ", nSamplesPerSec=" << Wfx.Format.nSamplesPerSec
+                           << " is not supported. Closest match: "
+                              "nChannels="
+                           << pWfxClosestMatch->nChannels << ", nSamplesPerSec="
+                           << pWfxClosestMatch->nSamplesPerSec;
           CoTaskMemFree(pWfxClosestMatch);
           pWfxClosestMatch = NULL;
         } else {
-          RTC_LOG(INFO) << "nChannels=" << Wfx.Format.nChannels
-                        << ", nSamplesPerSec=" << Wfx.Format.nSamplesPerSec
-                        << " is not supported. No closest match.";
+          RTC_LOG(LS_INFO) << "nChannels=" << Wfx.Format.nChannels
+                           << ", nSamplesPerSec=" << Wfx.Format.nSamplesPerSec
+                           << " is not supported. No closest match.";
         }
       }
     }
@@ -2396,7 +2355,7 @@ int32_t AudioDeviceWindowsCore::StartRecording() {
       }
     }
 
-    RTC_DCHECK(_hRecThread);
+    RTC_DCHECK(_hRecThread == NULL);
     _hRecThread = CreateThread(NULL, 0, lpStartAddress, this, 0, NULL);
     if (_hRecThread == NULL) {
       RTC_LOG(LS_ERROR) << "failed to create the recording thread";
@@ -2533,7 +2492,7 @@ int32_t AudioDeviceWindowsCore::StartPlayout() {
     MutexLock lockScoped(&mutex_);
 
     // Create thread which will drive the rendering.
-    RTC_DCHECK(_hPlayThread);
+    RTC_DCHECK(_hPlayThread == NULL);
     _hPlayThread = CreateThread(NULL, 0, WSAPIRenderThread, this, 0, NULL);
     if (_hPlayThread == NULL) {
       RTC_LOG(LS_ERROR) << "failed to create the playout thread";
@@ -2686,7 +2645,7 @@ DWORD WINAPI AudioDeviceWindowsCore::WSAPICaptureThreadPollDMO(LPVOID context) {
 
 DWORD AudioDeviceWindowsCore::DoRenderThread() {
   bool keepPlaying = true;
-  HANDLE waitArray[3] = {_hShutdownRenderEvent, _hRenderSamplesReadyEvent, _hDeviceRestartEvent};
+  HANDLE waitArray[2] = {_hShutdownRenderEvent, _hRenderSamplesReadyEvent};
   HRESULT hr = S_OK;
   HANDLE hMmTask = NULL;
 
@@ -2803,16 +2762,12 @@ DWORD AudioDeviceWindowsCore::DoRenderThread() {
 
   while (keepPlaying) {
     // Wait for a render notification event or a shutdown event
-    DWORD waitResult = WaitForMultipleObjects(3, waitArray, FALSE, 500);
+    DWORD waitResult = WaitForMultipleObjects(2, waitArray, FALSE, 500);
     switch (waitResult) {
       case WAIT_OBJECT_0 + 0:  // _hShutdownRenderEvent
         keepPlaying = false;
         break;
       case WAIT_OBJECT_0 + 1:  // _hRenderSamplesReadyEvent
-        break;
-      case WAIT_OBJECT_0 + 2:  // _hDeviceRestartEvent
-        // TODO: if we're going to switch back to this platform specific impl,
-        // We should restart the playout session here.
         break;
       case WAIT_TIMEOUT:  // timeout notification
         RTC_LOG(LS_WARNING) << "render event timed out after 0.5 seconds";
@@ -3054,7 +3009,7 @@ DWORD AudioDeviceWindowsCore::DoCaptureThreadPollDMO() {
       if (FAILED(hr)) {
         _TraceCOMError(hr);
         keepRecording = false;
-        RTC_NOTREACHED();
+        RTC_DCHECK_NOTREACHED();
         break;
       }
 
@@ -3066,7 +3021,7 @@ DWORD AudioDeviceWindowsCore::DoCaptureThreadPollDMO() {
       if (FAILED(hr)) {
         _TraceCOMError(hr);
         keepRecording = false;
-        RTC_NOTREACHED();
+        RTC_DCHECK_NOTREACHED();
         break;
       }
 
@@ -3091,7 +3046,7 @@ DWORD AudioDeviceWindowsCore::DoCaptureThreadPollDMO() {
       if (FAILED(hr)) {
         _TraceCOMError(hr);
         keepRecording = false;
-        RTC_NOTREACHED();
+        RTC_DCHECK_NOTREACHED();
         break;
       }
 

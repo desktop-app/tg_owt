@@ -234,7 +234,7 @@ const VideoAdaptationCounters& VideoStreamAdapter::adaptation_counters() const {
 void VideoStreamAdapter::ClearRestrictions() {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
   // Invalidate any previously returned Adaptation.
-  RTC_LOG(INFO) << "Resetting restrictions";
+  RTC_LOG(LS_INFO) << "Resetting restrictions";
   ++adaptation_validation_id_;
   current_restrictions_ = {VideoSourceRestrictions(),
                            VideoAdaptationCounters()};
@@ -333,8 +333,8 @@ Adaptation VideoStreamAdapter::GetAdaptationUp(
       if (!constraint->IsAdaptationUpAllowed(input_state,
                                              current_restrictions_.restrictions,
                                              restrictions.restrictions)) {
-        RTC_LOG(INFO) << "Not adapting up because constraint \""
-                      << constraint->Name() << "\" disallowed it";
+        RTC_LOG(LS_INFO) << "Not adapting up because constraint \""
+                         << constraint->Name() << "\" disallowed it";
         step = Adaptation::Status::kRejectedByConstraint;
       }
     }
@@ -509,7 +509,7 @@ VideoStreamAdapter::RestrictionsOrState VideoStreamAdapter::DecreaseFramerate(
     max_frame_rate = balanced_settings_.MinFps(input_state.video_codec_type(),
                                                frame_size_pixels);
   } else {
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
     max_frame_rate = GetLowerFrameRateThan(input_state.frames_per_second());
   }
   if (!CanDecreaseFrameRateTo(max_frame_rate,
@@ -584,7 +584,7 @@ VideoStreamAdapter::RestrictionsOrState VideoStreamAdapter::IncreaseFramerate(
       return Adaptation::Status::kLimitReached;
     }
   } else {
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
     max_frame_rate = GetHigherFrameRateThan(input_state.frames_per_second());
   }
   if (current_restrictions.counters.fps_adaptations == 1) {

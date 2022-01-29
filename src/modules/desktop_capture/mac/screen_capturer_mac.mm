@@ -107,10 +107,10 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
   CFArrayRef window_array = CGWindowListCreateDescriptionFromArray(window_id_array);
 
   if (CFArrayGetCount(window_array) > 0) {
-    CFDictionaryRef window =
+    CFDictionaryRef win =
         reinterpret_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(window_array, 0));
     CFDictionaryRef bounds_ref =
-        reinterpret_cast<CFDictionaryRef>(CFDictionaryGetValue(window, kCGWindowBounds));
+        reinterpret_cast<CFDictionaryRef>(CFDictionaryGetValue(win, kCGWindowBounds));
     CGRectMakeWithDictionaryRepresentation(bounds_ref, &rect);
   }
 
@@ -198,7 +198,9 @@ void ScreenCapturerMac::CaptureFrame() {
   int64_t capture_start_time_nanos = rtc::TimeNanos();
 
   queue_.MoveToNextFrame();
-  RTC_DCHECK(!queue_.current_frame() || !queue_.current_frame()->IsShared());
+  if (queue_.current_frame() && queue_.current_frame()->IsShared()) {
+    RTC_DLOG(LS_WARNING) << "Overwriting frame that is still shared.";
+  }
 
   MacDesktopConfiguration new_config = desktop_config_monitor_->desktop_configuration();
   if (!desktop_config_.Equals(new_config)) {
@@ -372,13 +374,13 @@ bool ScreenCapturerMac::CgBlit(const DesktopFrame& frame, const DesktopRegion& r
 
     // Copy the dirty region from the display buffer into our desktop buffer.
     uint8_t* out_ptr = frame.GetFrameDataAtPos(display_bounds.top_left());
-    for (DesktopRegion::Iterator i(copy_region); !i.IsAtEnd(); i.Advance()) {
+    for (DesktopRegion::Iterator it(copy_region); !it.IsAtEnd(); it.Advance()) {
       CopyRect(display_base_address,
                src_bytes_per_row,
                out_ptr,
                frame.stride(),
                DesktopFrame::kBytesPerPixel,
-               i.rect());
+               it.rect());
     }
 
     if (excluded_image) {

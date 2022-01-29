@@ -336,6 +336,8 @@ if (is_ios || is_mac) {
           "../rtc_base:rtc_base_approved",
           "../rtc_base/synchronization:mutex",
         ]
+
+        absl_deps = [ "//third_party/abseil-cpp/absl/base:core_headers" ]
       }
 
       rtc_source_set("network_monitor_observer") {
@@ -624,10 +626,6 @@ if (is_ios || is_mac) {
         "objc/components/video_codec/RTCCodecSpecificInfoH264.mm",
         "objc/components/video_codec/RTCH264ProfileLevelId.h",
         "objc/components/video_codec/RTCH264ProfileLevelId.mm",
-        "objc/components/video_codec/RTCCodecSpecificInfoH265.h",
-        "objc/components/video_codec/RTCCodecSpecificInfoH265.mm",
-        "objc/components/video_codec/RTCH265ProfileLevelId.h",
-        "objc/components/video_codec/RTCH265ProfileLevelId.mm",
       ]
       if (is_ios) {
         sources += [
@@ -642,7 +640,6 @@ if (is_ios || is_mac) {
         ":helpers_objc",
         "../api/video_codecs:video_codecs_api",
         "../common_video",
-        "../media:rtc_h264_profile_id",
         "../media:rtc_media_base",
         "../modules/video_coding:video_codec_interface",
         "../rtc_base:checks",
@@ -863,10 +860,7 @@ if (is_ios || is_mac) {
         "audio_codecs",  # TODO(bugs.webrtc.org/8396): Remove.
         "default_task_queue",
       ]
-      configs += [
-        "..:no_exit_time_destructors",
-        "..:no_global_constructors",
-      ]
+      configs += [ "..:no_global_constructors" ]
       sources = [
         "objc/api/peerconnection/RTCAudioSource+Private.h",
         "objc/api/peerconnection/RTCAudioSource.h",
@@ -1086,6 +1080,7 @@ if (is_ios || is_mac) {
             "../media:rtc_media_tests_utils",
             "../rtc_base",
             "../rtc_base:gunit_helpers",
+            "../rtc_base/system:unused",
             "../system_wrappers",
             "//third_party/libyuv",
           ]
@@ -1201,6 +1196,7 @@ if (is_ios || is_mac) {
           "../modules/audio_processing:api",
           "../modules/video_coding:video_codec_interface",
           "../rtc_base:gunit_helpers",
+          "../rtc_base:rtc_event",
           "../rtc_base/system:unused",
           "../test:test_support",
           "//third_party/ocmock",
@@ -1254,11 +1250,6 @@ if (is_ios || is_mac) {
           "objc/components/video_codec/RTCVideoDecoderH264.h",
           "objc/components/video_codec/RTCVideoEncoderFactoryH264.h",
           "objc/components/video_codec/RTCVideoEncoderH264.h",
-          "objc/components/video_codec/RTCH265ProfileLevelId.h",
-          "objc/components/video_codec/RTCVideoDecoderFactoryH265.h",
-          "objc/components/video_codec/RTCVideoDecoderH265.h",
-          "objc/components/video_codec/RTCVideoEncoderFactoryH265.h",
-          "objc/components/video_codec/RTCVideoEncoderH265.h",
           "objc/components/video_frame_buffer/RTCCVPixelBuffer.h",
           "objc/helpers/RTCCameraPreviewView.h",
           "objc/helpers/RTCDispatcher.h",
@@ -1335,7 +1326,6 @@ if (is_ios || is_mac) {
           ":videocapture_objc",
           ":videocodec_objc",
           ":videotoolbox_objc",
-          "../api:create_peerconnection_factory",
           "../rtc_base:rtc_base_approved",
         ]
         if (rtc_ios_macos_use_opengl_rendering) {
@@ -1450,11 +1440,6 @@ if (is_ios || is_mac) {
           "objc/components/video_codec/RTCVideoDecoderH264.h",
           "objc/components/video_codec/RTCVideoEncoderFactoryH264.h",
           "objc/components/video_codec/RTCVideoEncoderH264.h",
-          "objc/components/video_codec/RTCH265ProfileLevelId.h",
-          "objc/components/video_codec/RTCVideoDecoderFactoryH265.h",
-          "objc/components/video_codec/RTCVideoDecoderH265.h",
-          "objc/components/video_codec/RTCVideoEncoderFactoryH265.h",
-          "objc/components/video_codec/RTCVideoEncoderH265.h",
           "objc/components/video_frame_buffer/RTCCVPixelBuffer.h",
           "objc/helpers/RTCDispatcher.h",
         ]
@@ -1659,14 +1644,6 @@ if (is_ios || is_mac) {
         "objc/components/video_codec/RTCVideoEncoderFactoryH264.m",
         "objc/components/video_codec/RTCVideoEncoderH264.h",
         "objc/components/video_codec/RTCVideoEncoderH264.mm",
-        "objc/components/video_codec/RTCVideoDecoderFactoryH265.h",
-        "objc/components/video_codec/RTCVideoDecoderFactoryH265.m",
-        "objc/components/video_codec/RTCVideoDecoderH265.h",
-        "objc/components/video_codec/RTCVideoDecoderH265.mm",
-        "objc/components/video_codec/RTCVideoEncoderFactoryH265.h",
-        "objc/components/video_codec/RTCVideoEncoderFactoryH265.m",
-        "objc/components/video_codec/RTCVideoEncoderH265.h",
-        "objc/components/video_codec/RTCVideoEncoderH265.mm",
       ]
 
       configs += [

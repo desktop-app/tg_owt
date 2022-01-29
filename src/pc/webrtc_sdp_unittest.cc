@@ -966,7 +966,7 @@ static void ReplaceDirection(RtpTransceiverDirection direction,
       break;
     case RtpTransceiverDirection::kStopped:
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       new_direction = "a=sendrecv";
       break;
   }
@@ -1602,7 +1602,7 @@ class WebRtcSdpTest : public ::testing::Test {
     } else if (mline_index == 1) {
       content_name = kVideoContentName;
     } else {
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
     }
     TransportInfo transport_info(content_name,
                                  TransportDescription(ufrag, pwd));
@@ -3675,7 +3675,7 @@ TEST_F(WebRtcSdpTest, SerializeDtlsSetupAttribute) {
   EXPECT_EQ(sdp_with_dtlssetup, message);
 }
 
-TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttribute) {
+TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttributeActpass) {
   JsepSessionDescription jdesc_with_dtlssetup(kDummyType);
   std::string sdp_with_dtlssetup = kSdpFullString;
   InjectAfter(kSessionTime, "a=setup:actpass\r\n", &sdp_with_dtlssetup);
@@ -3688,6 +3688,37 @@ TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttribute) {
   const cricket::TransportInfo* vtinfo =
       desc->GetTransportInfoByName("video_content_name");
   EXPECT_EQ(cricket::CONNECTIONROLE_ACTPASS,
+            vtinfo->description.connection_role);
+}
+
+TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttributeActive) {
+  JsepSessionDescription jdesc_with_dtlssetup(kDummyType);
+  std::string sdp_with_dtlssetup = kSdpFullString;
+  InjectAfter(kSessionTime, "a=setup:active\r\n", &sdp_with_dtlssetup);
+  EXPECT_TRUE(SdpDeserialize(sdp_with_dtlssetup, &jdesc_with_dtlssetup));
+  cricket::SessionDescription* desc = jdesc_with_dtlssetup.description();
+  const cricket::TransportInfo* atinfo =
+      desc->GetTransportInfoByName("audio_content_name");
+  EXPECT_EQ(cricket::CONNECTIONROLE_ACTIVE,
+            atinfo->description.connection_role);
+  const cricket::TransportInfo* vtinfo =
+      desc->GetTransportInfoByName("video_content_name");
+  EXPECT_EQ(cricket::CONNECTIONROLE_ACTIVE,
+            vtinfo->description.connection_role);
+}
+TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttributePassive) {
+  JsepSessionDescription jdesc_with_dtlssetup(kDummyType);
+  std::string sdp_with_dtlssetup = kSdpFullString;
+  InjectAfter(kSessionTime, "a=setup:passive\r\n", &sdp_with_dtlssetup);
+  EXPECT_TRUE(SdpDeserialize(sdp_with_dtlssetup, &jdesc_with_dtlssetup));
+  cricket::SessionDescription* desc = jdesc_with_dtlssetup.description();
+  const cricket::TransportInfo* atinfo =
+      desc->GetTransportInfoByName("audio_content_name");
+  EXPECT_EQ(cricket::CONNECTIONROLE_PASSIVE,
+            atinfo->description.connection_role);
+  const cricket::TransportInfo* vtinfo =
+      desc->GetTransportInfoByName("video_content_name");
+  EXPECT_EQ(cricket::CONNECTIONROLE_PASSIVE,
             vtinfo->description.connection_role);
 }
 
@@ -4662,4 +4693,16 @@ TEST_F(WebRtcSdpTest, IllegalMidCharacterValue) {
   // [ is an illegal token value.
   Replace("a=mid:", "a=mid:[]", &sdp);
   ExpectParseFailure(std::string(sdp), "a=mid:[]");
+}
+
+TEST_F(WebRtcSdpTest, MaxChannels) {
+  std::string sdp =
+      "v=0\r\n"
+      "o=- 11 22 IN IP4 127.0.0.1\r\n"
+      "s=-\r\n"
+      "t=0 0\r\n"
+      "m=audio 49232 RTP/AVP 108\r\n"
+      "a=rtpmap:108 ISAC/16000/512\r\n";
+
+  ExpectParseFailure(sdp, "a=rtpmap:108 ISAC/16000/512");
 }

@@ -29,7 +29,6 @@
 #include "api/audio/echo_control.h"
 #include "api/scoped_refptr.h"
 #include "modules/audio_processing/include/audio_processing_statistics.h"
-#include "modules/audio_processing/include/config.h"
 #include "rtc_base/arraysize.h"
 #include "rtc_base/constructor_magic.h"
 #include "rtc_base/ref_count.h"
@@ -64,35 +63,6 @@ static constexpr int kAgcStartupMinVolume = 85;
 static constexpr int kAgcStartupMinVolume = 0;
 #endif  // defined(WEBRTC_CHROMIUM_BUILD)
 static constexpr int kClippedLevelMin = 70;
-
-// To be deprecated: Please instead use the flag in the
-// AudioProcessing::Config::AnalogGainController.
-// TODO(webrtc:5298): Remove.
-struct ExperimentalAgc {
-  ExperimentalAgc() = default;
-  explicit ExperimentalAgc(bool enabled) : enabled(enabled) {}
-  ExperimentalAgc(bool enabled, int startup_min_volume)
-      : enabled(enabled), startup_min_volume(startup_min_volume) {}
-  static const ConfigOptionID identifier = ConfigOptionID::kExperimentalAgc;
-  bool enabled = true;
-  int startup_min_volume = kAgcStartupMinVolume;
-  // Lowest microphone level that will be applied in response to clipping.
-  int clipped_level_min = kClippedLevelMin;
-  bool digital_adaptive_disabled = false;
-};
-
-// To be deprecated: Please instead use the flag in the
-// AudioProcessing::Config::TransientSuppression.
-//
-// Use to enable experimental noise suppression. It can be set in the
-// constructor.
-// TODO(webrtc:5298): Remove.
-struct ExperimentalNs {
-  ExperimentalNs() : enabled(false) {}
-  explicit ExperimentalNs(bool enabled) : enabled(enabled) {}
-  static const ConfigOptionID identifier = ConfigOptionID::kExperimentalNs;
-  bool enabled;
-};
 
 // The Audio Processing Module (APM) provides a collection of voice processing
 // components designed for real-time communications software.
@@ -321,10 +291,6 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
       // target level. Otherwise, the signal will be compressed but not limited
       // above the target level.
       bool enable_limiter = true;
-      // Sets the minimum and maximum analog levels of the audio capture device.
-      // Must be set if an analog mode is used. Limited to [0, 65535].
-      int analog_level_minimum = 0;
-      int analog_level_maximum = 255;
 
       // Enables the analog gain controller functionality.
       struct AnalogGainController {
@@ -386,9 +352,6 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
         return !(*this == rhs);
       }
 
-      // TODO(crbug.com/webrtc/7494): Remove `LevelEstimator`.
-      enum LevelEstimator { kRms, kPeak };
-      enum NoiseEstimator { kStationaryNoise, kNoiseFloor };
       bool enabled = false;
       struct FixedDigital {
         float gain_db = 0.0f;
@@ -400,35 +363,24 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
         }
 
         bool enabled = false;
-        // Run the adaptive digital controller but the signal is not modified.
+        // When true, the adaptive digital controller runs but the signal is not
+        // modified.
         bool dry_run = false;
-        NoiseEstimator noise_estimator = kNoiseFloor;
+        float headroom_db = 6.0f;
+        // TODO(bugs.webrtc.org/7494): Consider removing and inferring from
+        // `max_output_noise_level_dbfs`.
+        float max_gain_db = 30.0f;
+        float initial_gain_db = 8.0f;
         int vad_reset_period_ms = 1500;
         int adjacent_speech_frames_threshold = 12;
         float max_gain_change_db_per_second = 3.0f;
         float max_output_noise_level_dbfs = -50.0f;
-        bool sse2_allowed = true;
-        bool avx2_allowed = true;
-        bool neon_allowed = true;
-        // TODO(crbug.com/webrtc/7494): Remove deprecated settings below.
-        float vad_probability_attack = 1.0f;
-        LevelEstimator level_estimator = kRms;
-        int level_estimator_adjacent_speech_frames_threshold = 12;
-        bool use_saturation_protector = true;
-        float initial_saturation_margin_db = 25.0f;
-        float extra_saturation_margin_db = 5.0f;
-        int gain_applier_adjacent_speech_frames_threshold = 12;
       } adaptive_digital;
     } gain_controller2;
 
     struct ResidualEchoDetector {
       bool enabled = true;
     } residual_echo_detector;
-
-    // Enables reporting of `output_rms_dbfs` in webrtc::AudioProcessingStats.
-    struct LevelEstimation {
-      bool enabled = false;
-    } level_estimation;
 
     std::string ToString() const;
   };
@@ -665,7 +617,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
 
   // This must be called prior to ProcessStream() if and only if adaptive analog
   // gain control is enabled, to pass the current analog level from the audio
-  // HAL. Must be within the range provided in Config::GainController1.
+  // HAL. Must be within the range [0, 255].
   virtual void set_stream_analog_level(int level) = 0;
 
   // When an analog mode is set, this should be called after ProcessStream()
@@ -782,49 +734,64 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
 class RTC_EXPORT AudioProcessingBuilder {
  public:
   AudioProcessingBuilder();
+  AudioProcessingBuilder(const AudioProcessingBuilder&) = delete;
+  AudioProcessingBuilder& operator=(const AudioProcessingBuilder&) = delete;
   ~AudioProcessingBuilder();
-  // The AudioProcessingBuilder takes ownership of the echo_control_factory.
+
+  // Sets the APM configuration.
+  AudioProcessingBuilder& SetConfig(const AudioProcessing::Config& config) {
+    config_ = config;
+    return *this;
+  }
+
+  // Sets the echo controller factory to inject when APM is created.
   AudioProcessingBuilder& SetEchoControlFactory(
       std::unique_ptr<EchoControlFactory> echo_control_factory) {
     echo_control_factory_ = std::move(echo_control_factory);
     return *this;
   }
-  // The AudioProcessingBuilder takes ownership of the capture_post_processing.
+
+  // Sets the capture post-processing sub-module to inject when APM is created.
   AudioProcessingBuilder& SetCapturePostProcessing(
       std::unique_ptr<CustomProcessing> capture_post_processing) {
     capture_post_processing_ = std::move(capture_post_processing);
     return *this;
   }
-  // The AudioProcessingBuilder takes ownership of the render_pre_processing.
+
+  // Sets the render pre-processing sub-module to inject when APM is created.
   AudioProcessingBuilder& SetRenderPreProcessing(
       std::unique_ptr<CustomProcessing> render_pre_processing) {
     render_pre_processing_ = std::move(render_pre_processing);
     return *this;
   }
-  // The AudioProcessingBuilder takes ownership of the echo_detector.
+
+  // Sets the echo detector to inject when APM is created.
   AudioProcessingBuilder& SetEchoDetector(
       rtc::scoped_refptr<EchoDetector> echo_detector) {
     echo_detector_ = std::move(echo_detector);
     return *this;
   }
-  // The AudioProcessingBuilder takes ownership of the capture_analyzer.
+
+  // Sets the capture analyzer sub-module to inject when APM is created.
   AudioProcessingBuilder& SetCaptureAnalyzer(
       std::unique_ptr<CustomAudioAnalyzer> capture_analyzer) {
     capture_analyzer_ = std::move(capture_analyzer);
     return *this;
   }
-  // This creates an APM instance using the previously set components. Calling
-  // the Create function resets the AudioProcessingBuilder to its initial state.
+
+  // Creates an APM instance with the specified config or the default one if
+  // unspecified. Injects the specified components transferring the ownership
+  // to the newly created APM instance - i.e., except for the config, the
+  // builder is reset to its initial state.
   rtc::scoped_refptr<AudioProcessing> Create();
-  rtc::scoped_refptr<AudioProcessing> Create(const webrtc::Config& config);
 
  private:
+  AudioProcessing::Config config_;
   std::unique_ptr<EchoControlFactory> echo_control_factory_;
   std::unique_ptr<CustomProcessing> capture_post_processing_;
   std::unique_ptr<CustomProcessing> render_pre_processing_;
   rtc::scoped_refptr<EchoDetector> echo_detector_;
   std::unique_ptr<CustomAudioAnalyzer> capture_analyzer_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(AudioProcessingBuilder);
 };
 
 class StreamConfig {

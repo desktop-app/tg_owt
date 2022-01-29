@@ -23,16 +23,12 @@
 #include "api/rtp_packet_info.h"
 #include "api/video/video_frame_type.h"
 #include "common_video/h264/h264_common.h"
-#ifndef DISABLE_H265
 #include "common_video/h265/h265_common.h"
-#endif
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "modules/video_coding/codecs/h264/include/h264_globals.h"
-#ifndef DISABLE_H265
 #include "modules/video_coding/codecs/h265/include/h265_globals.h"
-#endif
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/mod_ops.h"
@@ -246,16 +242,14 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
       bool has_h264_pps = false;
       bool has_h264_idr = false;
       bool is_h264_keyframe = false;
-	  
-	  bool is_h265 = false;
-#ifndef DISABLE_H265
+        
+      bool is_h265 = false;
       is_h265 = buffer_[start_index]->codec() == kVideoCodecH265;
       bool has_h265_sps = false;
       bool has_h265_pps = false;
       bool has_h265_idr = false;
       bool is_h265_keyframe = false;
-#endif
-
+        
       int idr_width = -1;
       int idr_height = -1;
       while (true) {
@@ -294,7 +288,6 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
             }
           }
         }
-#ifndef DISABLE_H265
         if (is_h265 && !is_h265_keyframe) {
           const auto* h265_header = absl::get_if<RTPVideoHeaderH265>(
               &buffer_[start_index]->video_header.video_type_header);
@@ -306,8 +299,8 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
             } else if (h265_header->nalus[j].type == H265::NaluType::kPps) {
               has_h265_pps = true;
             } else if (h265_header->nalus[j].type == H265::NaluType::kIdrWRadl
-                       || h265_header->nalus[j].type == H265::NaluType::kIdrNLp
-                       || h265_header->nalus[j].type == H265::NaluType::kCra) {
+                || h265_header->nalus[j].type == H265::NaluType::kIdrNLp
+                || h265_header->nalus[j].type == H265::NaluType::kCra) {
               has_h265_idr = true;
             }
           }
@@ -320,7 +313,6 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
             }
           }
         }
-#endif
 
         if (tested_packets == buffer_.size())
           break;
@@ -334,7 +326,7 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
         // the PacketBuffer to hand out incomplete frames.
         // See: https://bugs.chromium.org/p/webrtc/issues/detail?id=7106
         if ((is_h264 || is_h265) && (buffer_[start_index] == nullptr ||
-                        buffer_[start_index]->timestamp != frame_timestamp)) {
+            buffer_[start_index]->timestamp != frame_timestamp)) {
           break;
         }
 
@@ -378,8 +370,7 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
           return found_frames;
         }
       }
-
-#ifndef DISABLE_H265
+        
       if (is_h265) {
         // Warn if this is an unsafe frame.
         if (has_h265_idr && (!has_h265_sps || !has_h265_pps)) {
@@ -389,15 +380,15 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
               << "Treating as delta frame since "
               << "WebRTC-SpsPpsIdrIsH265Keyframe is always enabled.";
         }
-
+            
         // Now that we have decided whether to treat this frame as a key frame
         // or delta frame in the frame buffer, we update the field that
         // determines if the RtpFrameObject is a key frame or delta frame.
         const size_t first_packet_index = start_seq_num % buffer_.size();
         if (is_h265_keyframe) {
           buffer_[first_packet_index]->video_header.frame_type =
-		      VideoFrameType::kVideoFrameKey;
-		  if (idr_width > 0 && idr_height > 0) {
+              VideoFrameType::kVideoFrameKey;
+          if (idr_width > 0 && idr_height > 0) {
             // IDR frame was finalized and we have the correct resolution for
             // IDR; update first packet to have same resolution as IDR.
             buffer_[first_packet_index]->video_header.width = idr_width;
@@ -405,17 +396,17 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
           }
         } else {
           buffer_[first_packet_index]->video_header.frame_type =
-		      VideoFrameType::kVideoFrameDelta;
+              VideoFrameType::kVideoFrameDelta;
         }
-
+        
         // If this is not a key frame, make sure there are no gaps in the
         // packet sequence numbers up until this point.
         if (!is_h265_keyframe && missing_packets_.upper_bound(start_seq_num) !=
-                missing_packets_.begin()) {
+            missing_packets_.begin()) {
           return found_frames;
         }
       }
-#endif
+
       const uint16_t end_seq_num = seq_num + 1;
       // Use uint16_t type to handle sequence number wrap around case.
       uint16_t num_packets = end_seq_num - start_seq_num;

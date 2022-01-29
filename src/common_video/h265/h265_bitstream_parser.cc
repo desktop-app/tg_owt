@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "common_video/h265/h265_common.h"
-#include "rtc_base/bit_buffer.h"
+#include "common_video/h265/legacy_bit_buffer.h"
 #include "rtc_base/logging.h"
 
 namespace {

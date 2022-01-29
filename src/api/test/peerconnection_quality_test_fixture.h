@@ -30,6 +30,7 @@
 #include "api/task_queue/task_queue_factory.h"
 #include "api/test/audio_quality_analyzer_interface.h"
 #include "api/test/frame_generator_interface.h"
+#include "api/test/peer_network_dependencies.h"
 #include "api/test/simulated_network.h"
 #include "api/test/stats_observer_interface.h"
 #include "api/test/track_id_stream_info_map.h"
@@ -233,9 +234,31 @@ class PeerConnectionE2EQualityTestFixture {
     // written to the dump file. The value must be greater than 0.
     int input_dump_sampling_modulo = 1;
     // If specified this file will be used as output on the receiver side for
-    // this stream. If multiple streams will be produced by input stream,
-    // output files will be appended with indexes. The produced files contains
-    // what was rendered for this video stream on receiver side.
+    // this stream.
+    //
+    // If multiple output streams will be produced by this stream (e.g. when the
+    // stream represented by this `VideoConfig` is received by more than one
+    // peer), output files will be appended with receiver names. If the second
+    // and other receivers will be added in the middle of the call after the
+    // first frame for this stream has been already written to the output file,
+    // then only dumps for newly added peers will be appended with receiver
+    // name, the dump for the first receiver will have name equal to the
+    // specified one. For example:
+    //   * If we have peers A and B and A has `VideoConfig` V_a with
+    //     V_a.output_dump_file_name = "/foo/a_output.yuv", then the stream
+    //     related to V_a will be written into "/foo/a_output.yuv".
+    //   * If we have peers A, B and C and A has `VideoConfig` V_a with
+    //     V_a.output_dump_file_name = "/foo/a_output.yuv", then the stream
+    //     related to V_a will be written for peer B into "/foo/a_output.yuv.B"
+    //     and for peer C into "/foo/a_output.yuv.C"
+    //   * If we have peers A and B and A has `VideoConfig` V_a with
+    //     V_a.output_dump_file_name = "/foo/a_output.yuv", then if after B
+    //     received the first frame related to V_a peer C joined the call, then
+    //     the stream related to V_a will be written for peer B into
+    //     "/foo/a_output.yuv" and for peer C into "/foo/a_output.yuv.C"
+    //
+    // The produced files contains what was rendered for this video stream on
+    // receiver side.
     absl::optional<std::string> output_dump_file_name;
     // Used only if `output_dump_file_name` is set. Specifies the module for the
     // video frames to be dumped. Modulo equals X means every Xth frame will be
@@ -443,6 +466,13 @@ class PeerConnectionE2EQualityTestFixture {
     virtual void StopAndReportResults() = 0;
   };
 
+  // Represents single participant in call and can be used to perform different
+  // in-call actions. Might be extended in future.
+  class PeerHandle {
+   public:
+    virtual ~PeerHandle() = default;
+  };
+
   virtual ~PeerConnectionE2EQualityTestFixture() = default;
 
   // Add activity that will be executed on the best effort at least after
@@ -465,13 +495,13 @@ class PeerConnectionE2EQualityTestFixture {
 
   // Add a new peer to the call and return an object through which caller
   // can configure peer's behavior.
-  // `network_thread` will be used as network thread for peer's peer connection
-  // `network_manager` will be used to provide network interfaces for peer's
-  // peer connection.
+  // `network_dependencies` are used to provide networking for peer's peer
+  // connection. Members must be non-null.
   // `configurer` function will be used to configure peer in the call.
-  virtual void AddPeer(rtc::Thread* network_thread,
-                       rtc::NetworkManager* network_manager,
-                       rtc::FunctionView<void(PeerConfigurer*)> configurer) = 0;
+  virtual PeerHandle* AddPeer(
+      const PeerNetworkDependencies& network_dependencies,
+      rtc::FunctionView<void(PeerConfigurer*)> configurer) = 0;
+
   // Runs the media quality test, which includes setting up the call with
   // configured participants, running it according to provided `run_params` and
   // terminating it properly at the end. During call duration media quality

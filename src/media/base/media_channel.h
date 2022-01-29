@@ -28,6 +28,7 @@
 #include "api/rtp_parameters.h"
 #include "api/transport/data_channel_transport_interface.h"
 #include "api/transport/rtp/rtp_source.h"
+#include "api/units/time_delta.h"
 #include "api/video/video_content_type.h"
 #include "api/video/video_sink_interface.h"
 #include "api/video/video_source_interface.h"
@@ -374,6 +375,8 @@ struct MediaSenderInfo {
   uint64_t retransmitted_packets_sent = 0;
   // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-nackcount
   uint32_t nacks_rcvd = 0;
+  // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-targetbitrate
+  double target_bitrate = 0.0;
   int packets_lost = 0;
   float fraction_lost = 0.0f;
   int64_t rtt_ms = 0;
@@ -531,6 +534,9 @@ struct VoiceReceiverInfo : public MediaReceiverInfo {
   uint32_t sender_reports_packets_sent = 0;
   uint64_t sender_reports_bytes_sent = 0;
   uint64_t sender_reports_reports_count = 0;
+  absl::optional<webrtc::TimeDelta> round_trip_time;
+  webrtc::TimeDelta total_round_trip_time = webrtc::TimeDelta::Zero();
+  int round_trip_time_measurements = 0;
 };
 
 struct VideoSenderInfo : public MediaSenderInfo {
@@ -543,7 +549,7 @@ struct VideoSenderInfo : public MediaSenderInfo {
   int send_frame_width = 0;
   int send_frame_height = 0;
   int frames = 0;
-  int framerate_input = 0;
+  double framerate_input = 0;
   int framerate_sent = 0;
   int aggregated_framerate_sent = 0;
   int nominal_bitrate = 0;

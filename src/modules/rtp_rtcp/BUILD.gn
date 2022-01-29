@@ -118,6 +118,7 @@ rtc_library("rtp_rtcp_format") {
     "../../api/video:video_layers_allocation",
     "../../api/video:video_rtp_headers",
     "../../common_video",
+    "../../rtc_base:bitstream_reader",
     "../../rtc_base:checks",
     "../../rtc_base:divide_round",
     "../../rtc_base:rtc_base_approved",
@@ -246,19 +247,6 @@ rtc_library("rtp_rtcp") {
     defines = [ "BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=0" ]
   }
 
-  if (rtc_use_h265) {
-    sources += [
-      "source/rtp_format_h265.cc",
-      "source/rtp_format_h265.h",
-      "source/video_rtp_depacketizer_h265.cc",
-      "source/video_rtp_depacketizer_h265.h",
-    ]
-  }
-
-  if (!rtc_use_h265) {
-    defines += ["DISABLE_H265"]
-  }
-
   deps = [
     ":rtp_rtcp_format",
     ":rtp_video_header",
@@ -300,6 +288,7 @@ rtc_library("rtp_rtcp") {
     "../../logging:rtc_event_audio",
     "../../logging:rtc_event_rtp_rtcp",
     "../../modules/audio_coding:audio_coding_module_typedefs",
+    "../../rtc_base:bitstream_reader",
     "../../rtc_base:checks",
     "../../rtc_base:divide_round",
     "../../rtc_base:gtest_prod",
@@ -383,10 +372,13 @@ rtc_library("rtcp_transceiver") {
     "../../api:rtp_headers",
     "../../api:transport_api",
     "../../api/task_queue",
+    "../../api/units:data_rate",
+    "../../api/units:time_delta",
     "../../api/units:timestamp",
     "../../api/video:video_bitrate_allocation",
     "../../rtc_base:checks",
     "../../rtc_base:rtc_base_approved",
+    "../../rtc_base/containers:flat_map",
     "../../rtc_base/task_utils:repeating_task",
     "../../rtc_base/task_utils:to_queued_task",
     "../../system_wrappers",
@@ -406,6 +398,7 @@ rtc_library("rtp_video_header") {
     "source/rtp_video_header.h",
   ]
   deps = [
+    "../../api:rtp_headers",
     "../../api/transport/rtp:dependency_descriptor",
     "../../api/video:video_frame",
     "../../api/video:video_frame_type",
@@ -596,6 +589,7 @@ if (rtc_include_tests) {
       "../../api/rtc_event_log",
       "../../api/transport:field_trial_based_config",
       "../../api/transport/rtp:dependency_descriptor",
+      "../../api/units:data_rate",
       "../../api/units:data_size",
       "../../api/units:time_delta",
       "../../api/units:timestamp",

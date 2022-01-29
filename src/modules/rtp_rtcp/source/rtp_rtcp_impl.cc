@@ -53,8 +53,7 @@ ModuleRtpRtcpImpl::RtpSenderContext::RtpSenderContext(
       packet_generator(
           config,
           &packet_history,
-          config.paced_sender ? config.paced_sender : &non_paced_sender,
-          /*packet_sequencer=*/nullptr) {}
+          config.paced_sender ? config.paced_sender : &non_paced_sender) {}
 
 std::unique_ptr<RtpRtcp> RtpRtcp::DEPRECATED_Create(
     const Configuration& configuration) {
@@ -490,6 +489,8 @@ size_t ModuleRtpRtcpImpl::ExpectedPerPacketOverhead() const {
   return rtp_sender_->packet_generator.ExpectedPerPacketOverhead();
 }
 
+void ModuleRtpRtcpImpl::OnPacketSendingThreadSwitched() {}
+
 size_t ModuleRtpRtcpImpl::MaxRtpPacketSize() const {
   RTC_DCHECK(rtp_sender_);
   return rtp_sender_->packet_generator.MaxRtpPacketSize();
@@ -602,6 +603,12 @@ ModuleRtpRtcpImpl::GetSenderReportStats() const {
   return absl::nullopt;
 }
 
+absl::optional<RtpRtcpInterface::NonSenderRttStats>
+ModuleRtpRtcpImpl::GetNonSenderRttStats() const {
+  // This is not implemented for this legacy class.
+  return absl::nullopt;
+}
+
 // (REMB) Receiver Estimated Max Bitrate.
 void ModuleRtpRtcpImpl::SetRemb(int64_t bitrate_bps,
                                 std::vector<uint32_t> ssrcs) {
@@ -623,10 +630,6 @@ void ModuleRtpRtcpImpl::RegisterRtpHeaderExtension(absl::string_view uri,
   RTC_CHECK(registered);
 }
 
-int32_t ModuleRtpRtcpImpl::DeregisterSendRtpHeaderExtension(
-    const RTPExtensionType type) {
-  return rtp_sender_->packet_generator.DeregisterRtpHeaderExtension(type);
-}
 void ModuleRtpRtcpImpl::DeregisterSendRtpHeaderExtension(
     absl::string_view uri) {
   rtp_sender_->packet_generator.DeregisterRtpHeaderExtension(uri);

@@ -17,7 +17,6 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/video/video_bitrate_allocation.h"
 #include "api/video/video_codec_type.h"
 #include "api/video_codecs/spatial_layer.h"
@@ -85,7 +84,6 @@ struct VideoCodecH264 {
   uint8_t numberOfTemporalLayers;
 };
 
-#ifndef DISABLE_H265
 struct VideoCodecH265 {
   bool operator==(const VideoCodecH265& other) const;
   bool operator!=(const VideoCodecH265& other) const {
@@ -100,7 +98,6 @@ struct VideoCodecH265 {
   const uint8_t* ppsData;
   size_t ppsLen;
 };
-#endif
 
 // Translates from name of codec to codec type and vice versa.
 RTC_EXPORT const char* CodecTypeToPayloadString(VideoCodecType type);
@@ -110,9 +107,7 @@ union VideoCodecUnion {
   VideoCodecVP8 VP8;
   VideoCodecVP9 VP9;
   VideoCodecH264 H264;
-#ifndef DISABLE_H265
   VideoCodecH265 H265;
-#endif
 };
 
 enum class VideoCodecMode { kRealtimeVideo, kScreensharing };
@@ -155,12 +150,6 @@ class RTC_EXPORT VideoCodec {
   VideoCodecMode mode;
   bool expect_encode_from_texture;
 
-  // The size of pool which is used to store video frame buffers inside decoder.
-  // If value isn't present some codec-default value will be used.
-  // If value is present and decoder doesn't have buffer pool the
-  // value will be ignored.
-  absl::optional<int> buffer_pool_size;
-
   // Timing frames configuration. There is delay of delay_ms between two
   // consequent timing frames, excluding outliers. Frame is always made a
   // timing frame if it's at least outlier_ratio in percent of "ideal" average
@@ -190,10 +179,8 @@ class RTC_EXPORT VideoCodec {
   const VideoCodecVP9& VP9() const;
   VideoCodecH264* H264();
   const VideoCodecH264& H264() const;
-#ifndef DISABLE_H265
   VideoCodecH265* H265();
   const VideoCodecH265& H265() const;
-#endif
 
  private:
   // TODO(hta): Consider replacing the union with a pointer type.

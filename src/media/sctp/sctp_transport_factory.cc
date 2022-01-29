@@ -15,8 +15,8 @@
 #ifdef WEBRTC_HAVE_DCSCTP
 #include "media/sctp/dcsctp_transport.h"          // nogncheck
 #include "system_wrappers/include/clock.h"        // nogncheck
-#include "system_wrappers/include/field_trial.h"  // nogncheck
 #endif
+#include "system_wrappers/include/field_trial.h"  // nogncheck
 
 #ifdef WEBRTC_HAVE_USRSCTP
 #include "media/sctp/usrsctp_transport.h"  // nogncheck
@@ -25,12 +25,10 @@
 namespace cricket {
 
 SctpTransportFactory::SctpTransportFactory(rtc::Thread* network_thread)
-    : network_thread_(network_thread)/*, use_dcsctp_("Enabled", false)*/ {
+    : network_thread_(network_thread), use_dcsctp_("Enabled", false) {
   RTC_UNUSED(network_thread_);
-#ifdef WEBRTC_HAVE_DCSCTP
   webrtc::ParseFieldTrial({&use_dcsctp_}, webrtc::field_trial::FindFullName(
                                               "WebRTC-DataChannel-Dcsctp"));
-#endif
 }
 
 std::unique_ptr<SctpTransportInternal>

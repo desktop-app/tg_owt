@@ -76,7 +76,6 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
 
   // Register RTP header extension.
   void RegisterRtpHeaderExtension(absl::string_view uri, int id) override;
-  int32_t DeregisterSendRtpHeaderExtension(RTPExtensionType type) override;
   void DeregisterSendRtpHeaderExtension(absl::string_view uri) override;
 
   bool SupportsPadding() const override;
@@ -157,6 +156,8 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
 
   size_t ExpectedPerPacketOverhead() const override;
 
+  void OnPacketSendingThreadSwitched() override;
+
   // RTCP part.
 
   // Get RTCP status.
@@ -198,6 +199,9 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
   // which is the SSRC of the corresponding outbound RTP stream, is unique.
   std::vector<ReportBlockData> GetLatestReportBlockData() const override;
   absl::optional<SenderReportStats> GetSenderReportStats() const override;
+  // Round trip time statistics computed from the XR block contained in the last
+  // report.
+  absl::optional<NonSenderRttStats> GetNonSenderRttStats() const override;
 
   // (REMB) Receiver Estimated Max Bitrate.
   void SetRemb(int64_t bitrate_bps, std::vector<uint32_t> ssrcs) override;

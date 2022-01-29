@@ -181,24 +181,26 @@ bool RtpTransport::UnregisterRtpDemuxerSink(RtpPacketSinkInterface* sink) {
 
 void RtpTransport::DemuxPacket(rtc::CopyOnWriteBuffer packet,
                                int64_t packet_time_us) {
+  rtc::CopyOnWriteBuffer packetData = packet;
+    
   webrtc::RtpPacketReceived parsed_packet(
       &header_extension_map_, packet_time_us == -1
                                   ? Timestamp::MinusInfinity()
                                   : Timestamp::Micros(packet_time_us));
-  if (!parsed_packet.Parse(packet)) {
+  if (!parsed_packet.Parse(std::move(packet))) {
     RTC_LOG(LS_ERROR)
         << "Failed to parse the incoming RTP packet before demuxing. Drop it.";
     return;
   }
 
-  bool demuxed = true;
+  bool isUnresolved = false;
   if (!rtp_demuxer_.OnRtpPacket(parsed_packet)) {
-    demuxed = false;
+    isUnresolved = true;
     RTC_LOG(LS_WARNING) << "Failed to demux RTP packet: "
                         << RtpDemuxer::DescribePacket(parsed_packet);
   }
-
-  SignalRtpPacketReceived(&packet, packet_time_us, !demuxed);
+    
+  SignalRtpPacketReceived(&packetData, packet_time_us, isUnresolved);
 }
 
 bool RtpTransport::IsTransportWritable() {

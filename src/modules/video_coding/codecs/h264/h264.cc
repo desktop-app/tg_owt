@@ -44,6 +44,8 @@ bool IsH264CodecSupported() {
 #endif
 }
 
+constexpr absl::string_view kSupportedScalabilityModes[] = {"L1T2", "L1T3"};
+
 }  // namespace
 
 SdpVideoFormat CreateH264Format(H264Profile profile,
@@ -85,6 +87,10 @@ std::vector<SdpVideoFormat> SupportedH264Codecs() {
           CreateH264Format(H264Profile::kProfileConstrainedBaseline,
                            H264Level::kLevel3_1, "1"),
           CreateH264Format(H264Profile::kProfileConstrainedBaseline,
+                           H264Level::kLevel3_1, "0"),
+          CreateH264Format(H264Profile::kProfileMain,
+                           H264Level::kLevel3_1, "1"),
+          CreateH264Format(H264Profile::kProfileMain,
                            H264Level::kLevel3_1, "0")};
 }
 
@@ -96,13 +102,22 @@ std::unique_ptr<H264Encoder> H264Encoder::Create(
   RTC_LOG(LS_INFO) << "Creating H264EncoderImpl.";
   return std::make_unique<H264EncoderImpl>(codec);
 #else
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return nullptr;
 #endif
 }
 
 bool H264Encoder::IsSupported() {
   return IsH264CodecSupported();
+}
+
+bool H264Encoder::SupportsScalabilityMode(absl::string_view scalability_mode) {
+  for (const auto& entry : kSupportedScalabilityModes) {
+    if (entry == scalability_mode) {
+      return true;
+    }
+  }
+  return false;
 }
 
 std::unique_ptr<H264Decoder> H264Decoder::Create() {
@@ -112,7 +127,7 @@ std::unique_ptr<H264Decoder> H264Decoder::Create() {
   RTC_LOG(LS_INFO) << "Creating H264DecoderImpl.";
   return std::make_unique<H264DecoderImpl>();
 #else
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return nullptr;
 #endif
 }

@@ -30,10 +30,10 @@
 #include "system_wrappers/include/metrics.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/scale.h"
-#include <wels/codec_api.h>
-#include <wels/codec_app_def.h>
-#include <wels/codec_def.h>
-#include <wels/codec_ver.h>
+#include "third_party/openh264/src/codec/api/svc/codec_api.h"
+#include "third_party/openh264/src/codec/api/svc/codec_app_def.h"
+#include "third_party/openh264/src/codec/api/svc/codec_def.h"
+#include "third_party/openh264/src/codec/api/svc/codec_ver.h"
 
 namespace webrtc {
 
@@ -81,7 +81,7 @@ VideoFrameType ConvertToVideoFrameType(EVideoFrameType type) {
     case videoFrameTypeInvalid:
       break;
   }
-  RTC_NOTREACHED() << "Unexpected/invalid frame type: " << type;
+  RTC_DCHECK_NOTREACHED() << "Unexpected/invalid frame type: " << type;
   return VideoFrameType::kEmptyFrame;
 }
 
@@ -537,17 +537,8 @@ SEncParamExt H264EncoderImpl::CreateEncoderParams(size_t i) const {
   } else if (codec_.mode == VideoCodecMode::kScreensharing) {
     encoder_params.iUsageType = SCREEN_CONTENT_REAL_TIME;
   } else {
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
   }
-  
-  // Reuse SPS id if possible. This helps to avoid reset of chromium HW decoder
-  // on each key-frame.
-  // Note that WebRTC resets encoder on resolution change which makes all
-  // EParameterSetStrategy modes except INCREASING_ID (default) essentially
-  // equivalent to CONSTANT_ID.
-  //https://bugs.chromium.org/p/chromium/issues/detail?id=1111273
-  encoder_params.eSpsPpsIdStrategy = SPS_LISTING;  
-  
   encoder_params.iPicWidth = configurations_[i].width;
   encoder_params.iPicHeight = configurations_[i].height;
   encoder_params.iTargetBitrate = configurations_[i].target_bps;
@@ -595,8 +586,8 @@ SEncParamExt H264EncoderImpl::CreateEncoderParams(size_t i) const {
     // theoretically use all available reference buffers.
     encoder_params.iNumRefFrame = encoder_params.iTemporalLayerNum - 1;
   }
-  RTC_LOG(INFO) << "OpenH264 version is " << OPENH264_MAJOR << "."
-                << OPENH264_MINOR;
+  RTC_LOG(LS_INFO) << "OpenH264 version is " << OPENH264_MAJOR << "."
+                   << OPENH264_MINOR;
   switch (packetization_mode_) {
     case H264PacketizationMode::SingleNalUnit:
       // Limit the size of the packets produced.
@@ -605,8 +596,8 @@ SEncParamExt H264EncoderImpl::CreateEncoderParams(size_t i) const {
           SM_SIZELIMITED_SLICE;
       encoder_params.sSpatialLayers[0].sSliceArgument.uiSliceSizeConstraint =
           static_cast<unsigned int>(max_payload_size_);
-      RTC_LOG(INFO) << "Encoder is configured with NALU constraint: "
-                    << max_payload_size_ << " bytes";
+      RTC_LOG(LS_INFO) << "Encoder is configured with NALU constraint: "
+                       << max_payload_size_ << " bytes";
       break;
     case H264PacketizationMode::NonInterleaved:
       // When uiSliceMode = SM_FIXEDSLCNUM_SLICE, uiSliceNum = 0 means auto
@@ -644,7 +635,6 @@ VideoEncoder::EncoderInfo H264EncoderImpl::GetEncoderInfo() const {
   info.scaling_settings =
       VideoEncoder::ScalingSettings(kLowH264QpThreshold, kHighH264QpThreshold);
   info.is_hardware_accelerated = false;
-  info.has_internal_source = false;
   info.supports_simulcast = true;
   info.preferred_pixel_formats = {VideoFrameBuffer::Type::kI420};
   return info;

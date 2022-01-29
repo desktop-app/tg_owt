@@ -37,8 +37,9 @@ class ObjCVideoDecoder : public VideoDecoder {
   ObjCVideoDecoder(id<RTC_OBJC_TYPE(RTCVideoDecoder)> decoder)
       : decoder_(decoder), implementation_name_([decoder implementationName].stdString) {}
 
-  int32_t InitDecode(const VideoCodec *codec_settings, int32_t number_of_cores) override {
-    return [decoder_ startDecodeWithNumberOfCores:number_of_cores];
+  bool Configure(const Settings &settings) override {
+    return
+        [decoder_ startDecodeWithNumberOfCores:settings.number_of_cores()] == WEBRTC_VIDEO_CODEC_OK;
   }
 
   int32_t Decode(const EncodedImage &input_image,
@@ -55,7 +56,6 @@ class ObjCVideoDecoder : public VideoDecoder {
 
   int32_t RegisterDecodeCompleteCallback(DecodedImageCallback *callback) override {
     [decoder_ setCallback:^(RTC_OBJC_TYPE(RTCVideoFrame) * frame) {
-      @autoreleasepool {
       const rtc::scoped_refptr<VideoFrameBuffer> buffer =
           new rtc::RefCountedObject<ObjCFrameBuffer>(frame.buffer);
       VideoFrame videoFrame =
@@ -68,7 +68,6 @@ class ObjCVideoDecoder : public VideoDecoder {
       videoFrame.set_timestamp(frame.timeStamp);
 
       callback->Decoded(videoFrame);
-      }
     }];
 
     return WEBRTC_VIDEO_CODEC_OK;
@@ -101,11 +100,8 @@ std::unique_ptr<VideoDecoder> ObjCVideoDecoderFactory::CreateVideoDecoder(
     if ([codecName isEqualToString:codecInfo.name]) {
       id<RTC_OBJC_TYPE(RTCVideoDecoder)> decoder = [decoder_factory_ createDecoder:codecInfo];
 
-      // Because of symbol conflict, isKindOfClass doesn't work as expected.
-      // See https://bugs.webkit.org/show_bug.cgi?id=198782.
-      // if ([decoder isKindOfClass:[RTCWrappedNativeVideoDecoder class]]) {
-      if ([codecName isEqual:@"VP8"] || [codecName isEqual:@"VP9"]) {
-        return [(RTCWrappedNativeVideoDecoder *)decoder releaseWrappedDecoder];
+      if ([decoder isKindOfClass:[RTC_OBJC_TYPE(RTCWrappedNativeVideoDecoder) class]]) {
+        return [(RTC_OBJC_TYPE(RTCWrappedNativeVideoDecoder) *)decoder releaseWrappedDecoder];
       } else {
         return std::unique_ptr<ObjCVideoDecoder>(new ObjCVideoDecoder(decoder));
       }

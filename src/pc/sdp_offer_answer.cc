@@ -123,6 +123,10 @@ const char kSimulcastDisabled[] = "WebRTC.PeerConnection.Simulcast.Disabled";
 // The length of RTCP CNAMEs.
 static const int kRtcpCnameLength = 16;
 
+// The maximum length of the MID attribute.
+// TODO(bugs.webrtc.org/12517) - reduce to 16 again.
+static constexpr size_t kMidMaxSize = 32;
+
 const char kDefaultStreamId[] = "default";
 // NOTE: Duplicated in peer_connection.cc:
 static const char kDefaultAudioSenderId[] = "defaulta0";
@@ -443,16 +447,25 @@ bool VerifyIceUfragPwdPresent(
 
 RTCError ValidateMids(const cricket::SessionDescription& description) {
   std::set<std::string> mids;
+  size_t max_length = 0;
   for (const cricket::ContentInfo& content : description.contents()) {
     if (content.name.empty()) {
       LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
                            "A media section is missing a MID attribute.");
+    }
+    max_length = std::max(max_length, content.name.size());
+    if (content.name.size() > kMidMaxSize) {
+      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
+                           "The MID attribute exceeds the maximum supported "
+                           "length of 32 characters.");
     }
     if (!mids.insert(content.name).second) {
       LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
                            "Duplicate a=mid value '" + content.name + "'.");
     }
   }
+  RTC_HISTOGRAM_COUNTS_LINEAR("WebRTC.PeerConnection.Mid.Size", max_length, 0,
+                              31, 32);
   return RTCError::OK();
 }
 
@@ -466,28 +479,6 @@ bool ValidateOfferAnswerOptions(
     const PeerConnectionInterface::RTCOfferAnswerOptions& rtc_options) {
   return IsValidOfferToReceiveMedia(rtc_options.offer_to_receive_audio) &&
          IsValidOfferToReceiveMedia(rtc_options.offer_to_receive_video);
-}
-
-// Map internal signaling state name to spec name:
-//  https://w3c.github.io/webrtc-pc/#rtcsignalingstate-enum
-std::string GetSignalingStateString(
-    PeerConnectionInterface::SignalingState state) {
-  switch (state) {
-    case PeerConnectionInterface::kStable:
-      return "stable";
-    case PeerConnectionInterface::kHaveLocalOffer:
-      return "have-local-offer";
-    case PeerConnectionInterface::kHaveLocalPrAnswer:
-      return "have-local-pranswer";
-    case PeerConnectionInterface::kHaveRemoteOffer:
-      return "have-remote-offer";
-    case PeerConnectionInterface::kHaveRemotePrAnswer:
-      return "have-remote-pranswer";
-    case PeerConnectionInterface::kClosed:
-      return "closed";
-  }
-  RTC_NOTREACHED();
-  return "";
 }
 
 // This method will extract any send encodings that were sent by the remote
@@ -592,7 +583,7 @@ absl::string_view GetDefaultMidForPlanB(cricket::MediaType media_type) {
     case cricket::MEDIA_TYPE_UNSUPPORTED:
       return "not supported";
   }
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return "";
 }
 
@@ -709,7 +700,7 @@ std::string GenerateRtcpCname() {
   std::string cname;
   if (!rtc::CreateRandomString(kRtcpCnameLength, &cname)) {
     RTC_LOG(LS_ERROR) << "Failed to generate CNAME.";
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
   }
   return cname;
 }
@@ -1126,11 +1117,9 @@ void SdpOfferAnswerHandler::CreateOffer(
           return;
         }
         // The operation completes asynchronously when the wrapper is invoked.
-        rtc::scoped_refptr<CreateSessionDescriptionObserverOperationWrapper>
-            observer_wrapper(new rtc::RefCountedObject<
-                             CreateSessionDescriptionObserverOperationWrapper>(
-                std::move(observer_refptr),
-                std::move(operations_chain_callback)));
+        auto observer_wrapper = rtc::make_ref_counted<
+            CreateSessionDescriptionObserverOperationWrapper>(
+            std::move(observer_refptr), std::move(operations_chain_callback));
         this_weak_ptr->DoCreateOffer(options, observer_wrapper);
       });
 }
@@ -1160,9 +1149,8 @@ void SdpOfferAnswerHandler::SetLocalDescription(
         // `observer_refptr` is invoked in a posted message.
         this_weak_ptr->DoSetLocalDescription(
             std::move(desc),
-            rtc::scoped_refptr<SetLocalDescriptionObserverInterface>(
-                new rtc::RefCountedObject<SetSessionDescriptionObserverAdapter>(
-                    this_weak_ptr, observer_refptr)));
+            rtc::make_ref_counted<SetSessionDescriptionObserverAdapter>(
+                this_weak_ptr, observer_refptr));
         // For backwards-compatability reasons, we declare the operation as
         // completed here (rather than in a post), so that the operation chain
         // is not blocked by this operation when the observer is invoked. This
@@ -1203,7 +1191,7 @@ void SdpOfferAnswerHandler::SetLocalDescription(
     SetSessionDescriptionObserver* observer) {
   RTC_DCHECK_RUN_ON(signaling_thread());
   SetLocalDescription(
-      new rtc::RefCountedObject<SetSessionDescriptionObserverAdapter>(
+      rtc::make_ref_counted<SetSessionDescriptionObserverAdapter>(
           weak_ptr_factory_.GetWeakPtr(), observer));
 }
 
@@ -1212,10 +1200,9 @@ void SdpOfferAnswerHandler::SetLocalDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   // The `create_sdp_observer` handles performing DoSetLocalDescription() with
   // the resulting description as well as completing the operation.
-  rtc::scoped_refptr<ImplicitCreateSessionDescriptionObserver>
-      create_sdp_observer(
-          new rtc::RefCountedObject<ImplicitCreateSessionDescriptionObserver>(
-              weak_ptr_factory_.GetWeakPtr(), observer));
+  auto create_sdp_observer =
+      rtc::make_ref_counted<ImplicitCreateSessionDescriptionObserver>(
+          weak_ptr_factory_.GetWeakPtr(), observer);
   // Chain this operation. If asynchronous operations are pending on the chain,
   // this operation will be queued to be invoked, otherwise the contents of the
   // lambda will execute immediately.
@@ -1513,9 +1500,8 @@ void SdpOfferAnswerHandler::SetRemoteDescription(
         // `observer_refptr` is invoked in a posted message.
         this_weak_ptr->DoSetRemoteDescription(
             std::move(desc),
-            rtc::scoped_refptr<SetRemoteDescriptionObserverInterface>(
-                new rtc::RefCountedObject<SetSessionDescriptionObserverAdapter>(
-                    this_weak_ptr, observer_refptr)));
+            rtc::make_ref_counted<SetSessionDescriptionObserverAdapter>(
+                this_weak_ptr, observer_refptr));
         // For backwards-compatability reasons, we declare the operation as
         // completed here (rather than in a post), so that the operation chain
         // is not blocked by this operation when the observer is invoked. This
@@ -1730,7 +1716,9 @@ RTCError SdpOfferAnswerHandler::ApplyRemoteDescription(
           RTC_LOG(LS_INFO)
               << "Processing the addition of a remote track for MID="
               << content->name << ".";
-          now_receiving_transceivers.push_back(transceiver);
+          // Since the transceiver is passed to the user in an
+          // OnTrack event, we must use the proxied transceiver.
+          now_receiving_transceivers.push_back(transceiver_ext);
         }
       }
       // 2.2.8.1.9: If direction is "sendonly" or "inactive", and transceiver's
@@ -2062,11 +2050,9 @@ void SdpOfferAnswerHandler::CreateAnswer(
           return;
         }
         // The operation completes asynchronously when the wrapper is invoked.
-        rtc::scoped_refptr<CreateSessionDescriptionObserverOperationWrapper>
-            observer_wrapper(new rtc::RefCountedObject<
-                             CreateSessionDescriptionObserverOperationWrapper>(
-                std::move(observer_refptr),
-                std::move(operations_chain_callback)));
+        auto observer_wrapper = rtc::make_ref_counted<
+            CreateSessionDescriptionObserverOperationWrapper>(
+            std::move(observer_refptr), std::move(operations_chain_callback));
         this_weak_ptr->DoCreateAnswer(options, observer_wrapper);
       });
 }
@@ -2482,9 +2468,9 @@ void SdpOfferAnswerHandler::ChangeSignalingState(
     return;
   }
   RTC_LOG(LS_INFO) << "Session: " << pc_->session_id() << " Old state: "
-                   << GetSignalingStateString(signaling_state_)
+                   << PeerConnectionInterface::AsString(signaling_state_)
                    << " New state: "
-                   << GetSignalingStateString(signaling_state);
+                   << PeerConnectionInterface::AsString(signaling_state);
   signaling_state_ = signaling_state;
   pc_->Observer()->OnSignalingChange(signaling_state_);
 }
@@ -2699,8 +2685,9 @@ RTCError SdpOfferAnswerHandler::Rollback(SdpType desc_type) {
   if (state != PeerConnectionInterface::kHaveLocalOffer &&
       state != PeerConnectionInterface::kHaveRemoteOffer) {
     return RTCError(RTCErrorType::INVALID_STATE,
-                    "Called in wrong signalingState: " +
-                        GetSignalingStateString(signaling_state()));
+                    (rtc::StringBuilder("Called in wrong signalingState: ")
+                     << (PeerConnectionInterface::AsString(signaling_state())))
+                        .Release());
   }
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(IsUnifiedPlan());
@@ -3055,7 +3042,9 @@ RTCError SdpOfferAnswerHandler::ValidateSessionDescription(
       (source == cricket::CS_REMOTE && !ExpectSetRemoteDescription(type))) {
     LOG_AND_RETURN_ERROR(
         RTCErrorType::INVALID_STATE,
-        "Called in wrong state: " + GetSignalingStateString(signaling_state()));
+        (rtc::StringBuilder("Called in wrong state: ")
+         << PeerConnectionInterface::AsString(signaling_state()))
+            .Release());
   }
 
   RTCError error = ValidateMids(*sdesc->description());
@@ -3931,7 +3920,7 @@ const char* SdpOfferAnswerHandler::SessionErrorToString(
     case SessionError::kTransport:
       return "ERROR_TRANSPORT";
   }
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return "";
 }
 
@@ -4425,7 +4414,7 @@ void SdpOfferAnswerHandler::ReportNegotiatedSdpSemantics(
       semantics_negotiated = kSdpSemanticNegotiatedMixed;
       break;
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
   }
   RTC_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.SdpSemanticNegotiated",
                             semantics_negotiated, kSdpSemanticNegotiatedMax);
@@ -4737,11 +4726,12 @@ void SdpOfferAnswerHandler::DestroyChannelInterface(
           static_cast<cricket::VideoChannel*>(channel));
       break;
     case cricket::MEDIA_TYPE_DATA:
-      RTC_NOTREACHED()
+      RTC_DCHECK_NOTREACHED()
           << "Trying to destroy datachannel through DestroyChannelInterface";
       break;
     default:
-      RTC_NOTREACHED() << "Unknown media type: " << channel->media_type();
+      RTC_DCHECK_NOTREACHED()
+          << "Unknown media type: " << channel->media_type();
       break;
   }
 

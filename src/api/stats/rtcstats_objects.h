@@ -170,6 +170,8 @@ class RTC_EXPORT RTCIceCandidatePairStats final : public RTCStats {
   RTCStatsMember<bool> writable;
   // TODO(hbos): Collect and populate this value. https://bugs.webrtc.org/7062
   RTCStatsMember<bool> readable;
+  RTCStatsMember<uint64_t> packets_sent;
+  RTCStatsMember<uint64_t> packets_received;
   RTCStatsMember<uint64_t> bytes_sent;
   RTCStatsMember<uint64_t> bytes_received;
   RTCStatsMember<double> total_round_trip_time;
@@ -194,6 +196,8 @@ class RTC_EXPORT RTCIceCandidatePairStats final : public RTCStats {
   RTCStatsMember<uint64_t> consent_responses_received;
   // TODO(hbos): Collect and populate this value. https://bugs.webrtc.org/7062
   RTCStatsMember<uint64_t> consent_responses_sent;
+  RTCStatsMember<uint64_t> packets_discarded_on_send;
+  RTCStatsMember<uint64_t> bytes_discarded_on_send;
 };
 
 // https://w3c.github.io/webrtc-stats/#icecandidate-dict*
@@ -525,7 +529,7 @@ class RTC_EXPORT RTCOutboundRTPStreamStats final : public RTCRTPStreamStats {
   RTCStatsMember<uint64_t> bytes_sent;
   RTCStatsMember<uint64_t> header_bytes_sent;
   RTCStatsMember<uint64_t> retransmitted_bytes_sent;
-  // TODO(hbos): Collect and populate this value. https://bugs.webrtc.org/7066
+  // TODO(https://crbug.com/webrtc/13394): Also collect this metric for video.
   RTCStatsMember<double> target_bitrate;
   RTCStatsMember<uint32_t> frames_encoded;
   RTCStatsMember<uint32_t> key_frames_encoded;
@@ -593,6 +597,9 @@ class RTC_EXPORT RTCRemoteOutboundRtpStreamStats final
   RTCStatsMember<std::string> local_id;
   RTCStatsMember<double> remote_timestamp;
   RTCStatsMember<uint64_t> reports_sent;
+  RTCStatsMember<double> round_trip_time;
+  RTCStatsMember<uint64_t> round_trip_time_measurements;
+  RTCStatsMember<double> total_round_trip_time;
 };
 
 // https://w3c.github.io/webrtc-stats/#dom-rtcmediasourcestats
@@ -641,7 +648,7 @@ class RTC_EXPORT RTCVideoSourceStats final : public RTCMediaSourceStats {
   RTCStatsMember<uint32_t> width;
   RTCStatsMember<uint32_t> height;
   RTCStatsMember<uint32_t> frames;
-  RTCStatsMember<uint32_t> frames_per_second;
+  RTCStatsMember<double> frames_per_second;
 };
 
 // https://w3c.github.io/webrtc-stats/#transportstats-dict*

@@ -17,6 +17,7 @@
 
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
+#include "api/sequence_checker.h"
 #include "net/dcsctp/packet/chunk/abort_chunk.h"
 #include "net/dcsctp/packet/chunk/chunk.h"
 #include "net/dcsctp/packet/chunk/cookie_ack_chunk.h"
@@ -46,6 +47,7 @@
 #include "net/dcsctp/rx/data_tracker.h"
 #include "net/dcsctp/rx/reassembly_queue.h"
 #include "net/dcsctp/socket/callback_deferrer.h"
+#include "net/dcsctp/socket/packet_sender.h"
 #include "net/dcsctp/socket/state_cookie.h"
 #include "net/dcsctp/socket/transmission_control_block.h"
 #include "net/dcsctp/timer/timer.h"
@@ -84,6 +86,7 @@ class DcSctpSocket : public DcSctpSocketInterface {
   void ReceivePacket(rtc::ArrayView<const uint8_t> data) override;
   void HandleTimeout(TimeoutID timeout_id) override;
   void Connect() override;
+  void RestoreFromState(const DcSctpSocketHandoverState& state) override;
   void Shutdown() override;
   void Close() override;
   SendStatus Send(DcSctpMessage message,
@@ -97,7 +100,11 @@ class DcSctpSocket : public DcSctpSocketInterface {
   size_t buffered_amount_low_threshold(StreamID stream_id) const override;
   void SetBufferedAmountLowThreshold(StreamID stream_id, size_t bytes) override;
   Metrics GetMetrics() const override;
-
+  HandoverReadinessStatus GetHandoverReadiness() const override;
+  absl::optional<DcSctpSocketHandoverState> GetHandoverStateAndClose() override;
+  SctpImplementation peer_implementation() const override {
+    return peer_implementation_;
+  }
   // Returns this socket's verification tag, or zero if not yet connected.
   VerificationTag verification_tag() const {
     return tcb_ != nullptr ? tcb_->my_verification_tag() : VerificationTag(0);
@@ -141,8 +148,8 @@ class DcSctpSocket : public DcSctpSocketInterface {
   absl::optional<DurationMs> OnInitTimerExpiry();
   absl::optional<DurationMs> OnCookieTimerExpiry();
   absl::optional<DurationMs> OnShutdownTimerExpiry();
-  // Builds the packet from `builder` and sends it (through callbacks).
-  void SendPacket(SctpPacket::Builder& builder);
+  void OnSentPacket(rtc::ArrayView<const uint8_t> packet,
+                    SendPacketStatus status);
   // Sends SHUTDOWN or SHUTDOWN-ACK if the socket is shutting down and if all
   // outstanding data has been acknowledged.
   void MaybeSendShutdownOrAck();
@@ -247,6 +254,7 @@ class DcSctpSocket : public DcSctpSocketInterface {
 
   const std::string log_prefix_;
   const std::unique_ptr<PacketObserver> packet_observer_;
+  RTC_NO_UNIQUE_ADDRESS webrtc::SequenceChecker thread_checker_;
   Metrics metrics_;
   DcSctpOptions options_;
 
@@ -257,6 +265,9 @@ class DcSctpSocket : public DcSctpSocketInterface {
   const std::unique_ptr<Timer> t1_init_;
   const std::unique_ptr<Timer> t1_cookie_;
   const std::unique_ptr<Timer> t2_shutdown_;
+
+  // Packets that failed to be sent, but should be retried.
+  PacketSender packet_sender_;
 
   // The actual SendQueue implementation. As data can be sent on a socket before
   // the connection is established, this component is not in the TCB.
@@ -269,6 +280,8 @@ class DcSctpSocket : public DcSctpSocketInterface {
   State state_ = State::kClosed;
   // If the connection is established, contains a transmission control block.
   std::unique_ptr<TransmissionControlBlock> tcb_;
+
+  SctpImplementation peer_implementation_ = SctpImplementation::kUnknown;
 };
 }  // namespace dcsctp
 

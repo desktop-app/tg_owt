@@ -231,8 +231,6 @@ std::vector<RtpStreamSender> CreateRtpStreamSenders(
       crypto_options.sframe.require_frame_encryption;
   configuration.extmap_allow_mixed = rtp_config.extmap_allow_mixed;
   configuration.rtcp_report_interval_ms = rtcp_report_interval_ms;
-  configuration.use_deferred_sequencing = !absl::StartsWith(
-      trials.Lookup("WebRTC-Video-DeferredSequencing"), "Disabled");
   configuration.field_trials = &trials;
 
   std::vector<RtpStreamSender> rtp_streams;
@@ -349,7 +347,7 @@ bool IsFirstFrameOfACodedVideoSequence(
 
 RtpVideoSender::RtpVideoSender(
     Clock* clock,
-    std::map<uint32_t, RtpState> suspended_ssrcs,
+    const std::map<uint32_t, RtpState>& suspended_ssrcs,
     const std::map<uint32_t, RtpPayloadState>& states,
     const RtpConfig& rtp_config,
     int rtcp_report_interval_ms,
@@ -369,11 +367,10 @@ RtpVideoSender::RtpVideoSender(
           field_trials_.Lookup("WebRTC-Video-UseFrameRateForOverhead"),
           "Enabled")),
       has_packet_feedback_(TransportSeqNumExtensionConfigured(rtp_config)),
-      simulate_vp9_structure_(absl::StartsWith(
-          field_trials_.Lookup("WebRTC-Vp9DependencyDescriptor"),
+      simulate_generic_structure_(absl::StartsWith(
+          field_trials_.Lookup("WebRTC-GenericCodecDependencyDescriptor"),
           "Enabled")),
       active_(false),
-      suspended_ssrcs_(std::move(suspended_ssrcs)),
       fec_controller_(std::move(fec_controller)),
       fec_allowed_(true),
       rtp_streams_(CreateRtpStreamSenders(clock,
@@ -383,7 +380,7 @@ RtpVideoSender::RtpVideoSender(
                                           send_transport,
                                           transport->GetBandwidthObserver(),
                                           transport,
-                                          suspended_ssrcs_,
+                                          suspended_ssrcs,
                                           event_log,
                                           retransmission_limiter,
                                           frame_encryptor,
@@ -423,7 +420,7 @@ RtpVideoSender::RtpVideoSender(
     }
   }
 
-  ConfigureSsrcs();
+  ConfigureSsrcs(suspended_ssrcs);
   ConfigureRids();
 
   if (!rtp_config_.mid.empty()) {
@@ -451,6 +448,15 @@ RtpVideoSender::RtpVideoSender(
   // Signal congestion controller this object is ready for OnPacket* callbacks.
   transport_->GetStreamFeedbackProvider()->RegisterStreamFeedbackObserver(
       rtp_config_.ssrcs, this);
+
+  // Construction happens on the worker thread (see Call::CreateVideoSendStream)
+  // but subseqeuent calls to the RTP state will happen on one of two threads:
+  // * The pacer thread for actually sending packets.
+  // * The transport thread when tearing down and quering GetRtpState().
+  // Detach thread checkers.
+  for (const RtpStreamSender& stream : rtp_streams_) {
+    stream.rtp_rtcp->OnPacketSendingThreadSwitched();
+  }
 }
 
 RtpVideoSender::~RtpVideoSender() {
@@ -566,11 +572,25 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
     RTPSenderVideo& sender_video = *rtp_streams_[stream_index].sender_video;
     if (codec_specific_info && codec_specific_info->template_structure) {
       sender_video.SetVideoStructure(&*codec_specific_info->template_structure);
-    } else if (simulate_vp9_structure_ && codec_specific_info &&
+    } else if (codec_specific_info &&
                codec_specific_info->codecType == kVideoCodecVP9) {
+      const CodecSpecificInfoVP9& vp9 = codec_specific_info->codecSpecific.VP9;
+
       FrameDependencyStructure structure =
-          RtpPayloadParams::MinimalisticVp9Structure(
-              codec_specific_info->codecSpecific.VP9);
+          RtpPayloadParams::MinimalisticStructure(vp9.num_spatial_layers,
+                                                  kMaxTemporalStreams);
+      if (vp9.ss_data_available && vp9.spatial_layer_resolution_present) {
+        for (size_t i = 0; i < vp9.num_spatial_layers; ++i) {
+          structure.resolutions.emplace_back(vp9.width[i], vp9.height[i]);
+        }
+      }
+      sender_video.SetVideoStructure(&structure);
+    } else if (simulate_generic_structure_ && codec_specific_info &&
+               codec_specific_info->codecType == kVideoCodecGeneric) {
+      FrameDependencyStructure structure =
+          RtpPayloadParams::MinimalisticStructure(
+              /*num_spatial_layers=*/1,
+              /*num_temporal_layers=*/1);
       sender_video.SetVideoStructure(&structure);
     } else {
       sender_video.SetVideoStructure(nullptr);
@@ -662,7 +682,8 @@ void RtpVideoSender::DeliverRtcp(const uint8_t* packet, size_t length) {
     stream.rtp_rtcp->IncomingRtcpPacket(packet, length);
 }
 
-void RtpVideoSender::ConfigureSsrcs() {
+void RtpVideoSender::ConfigureSsrcs(
+    const std::map<uint32_t, RtpState>& suspended_ssrcs) {
   // Configure regular SSRCs.
   RTC_CHECK(ssrc_to_rtp_module_.empty());
   for (size_t i = 0; i < rtp_config_.ssrcs.size(); ++i) {
@@ -670,8 +691,8 @@ void RtpVideoSender::ConfigureSsrcs() {
     RtpRtcpInterface* const rtp_rtcp = rtp_streams_[i].rtp_rtcp.get();
 
     // Restore RTP state if previous existed.
-    auto it = suspended_ssrcs_.find(ssrc);
-    if (it != suspended_ssrcs_.end())
+    auto it = suspended_ssrcs.find(ssrc);
+    if (it != suspended_ssrcs.end())
       rtp_rtcp->SetRtpState(it->second);
 
     ssrc_to_rtp_module_[ssrc] = rtp_rtcp;
@@ -685,8 +706,8 @@ void RtpVideoSender::ConfigureSsrcs() {
   for (size_t i = 0; i < rtp_config_.rtx.ssrcs.size(); ++i) {
     uint32_t ssrc = rtp_config_.rtx.ssrcs[i];
     RtpRtcpInterface* const rtp_rtcp = rtp_streams_[i].rtp_rtcp.get();
-    auto it = suspended_ssrcs_.find(ssrc);
-    if (it != suspended_ssrcs_.end())
+    auto it = suspended_ssrcs.find(ssrc);
+    if (it != suspended_ssrcs.end())
       rtp_rtcp->SetRtxState(it->second);
   }
 

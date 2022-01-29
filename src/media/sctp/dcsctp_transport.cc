@@ -26,6 +26,7 @@
 #include "p2p/base/packet_transport_internal.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/socket.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/trace_event.h"
@@ -34,6 +35,14 @@
 namespace webrtc {
 
 namespace {
+using ::dcsctp::SendPacketStatus;
+
+// When there is packet loss for a long time, the SCTP retry timers will use
+// exponential backoff, which can grow to very long durations and when the
+// connection recovers, it may take a long time to reach the new backoff
+// duration. By limiting it to a reasonable limit, the time to recover reduces.
+constexpr dcsctp::DurationMs kMaxTimerBackoffDuration =
+    dcsctp::DurationMs(3000);
 
 enum class WebrtcPPID : dcsctp::PPID::UnderlyingType {
   // https://www.rfc-editor.org/rfc/rfc8832.html#section-8.1
@@ -154,6 +163,10 @@ bool DcSctpTransport::Start(int local_sctp_port,
     options.local_port = local_sctp_port;
     options.remote_port = remote_sctp_port;
     options.max_message_size = max_message_size;
+    options.max_timer_backoff_duration = kMaxTimerBackoffDuration;
+    // Don't close the connection automatically on too many retransmissions.
+    options.max_retransmissions = absl::nullopt;
+    options.max_init_retransmits = absl::nullopt;
 
     std::unique_ptr<dcsctp::PacketObserver> packet_observer;
     if (RTC_LOG_CHECK_LEVEL(LS_VERBOSE)) {
@@ -308,7 +321,8 @@ void DcSctpTransport::set_debug_name_for_testing(const char* debug_name) {
   debug_name_ = debug_name;
 }
 
-void DcSctpTransport::SendPacket(rtc::ArrayView<const uint8_t> data) {
+SendPacketStatus DcSctpTransport::SendPacketWithStatus(
+    rtc::ArrayView<const uint8_t> data) {
   RTC_DCHECK_RUN_ON(network_thread_);
   RTC_DCHECK(socket_);
 
@@ -318,15 +332,15 @@ void DcSctpTransport::SendPacket(rtc::ArrayView<const uint8_t> data) {
                          "SCTP seems to have made a packet that is bigger "
                          "than its official MTU: "
                       << data.size() << " vs max of " << socket_->options().mtu;
-    return;
+    return SendPacketStatus::kError;
   }
   TRACE_EVENT0("webrtc", "DcSctpTransport::SendPacket");
 
   if (!transport_ || !transport_->writable())
-    return;
+    return SendPacketStatus::kError;
 
-  RTC_LOG(LS_VERBOSE) << debug_name_ << "->SendPacket(length=" << data.size()
-                      << ")";
+  RTC_DLOG(LS_VERBOSE) << debug_name_ << "->SendPacket(length=" << data.size()
+                       << ")";
 
   auto result =
       transport_->SendPacket(reinterpret_cast<const char*>(data.data()),
@@ -336,7 +350,13 @@ void DcSctpTransport::SendPacket(rtc::ArrayView<const uint8_t> data) {
     RTC_LOG(LS_WARNING) << debug_name_ << "->SendPacket(length=" << data.size()
                         << ") failed with error: " << transport_->GetError()
                         << ".";
+
+    if (rtc::IsBlockingError(transport_->GetError())) {
+      return SendPacketStatus::kTemporaryFailure;
+    }
+    return SendPacketStatus::kError;
   }
+  return SendPacketStatus::kSuccess;
 }
 
 std::unique_ptr<dcsctp::Timeout> DcSctpTransport::CreateTimeout() {
@@ -386,9 +406,18 @@ void DcSctpTransport::OnMessageReceived(dcsctp::DcSctpMessage message) {
 
 void DcSctpTransport::OnError(dcsctp::ErrorKind error,
                               absl::string_view message) {
-  RTC_LOG(LS_ERROR) << debug_name_
-                    << "->OnError(error=" << dcsctp::ToString(error)
-                    << ", message=" << message << ").";
+  if (error == dcsctp::ErrorKind::kResourceExhaustion) {
+    // Indicates that a message failed to be enqueued, because the send buffer
+    // is full, which is a very common (and wanted) state for high throughput
+    // sending/benchmarks.
+    RTC_LOG(LS_VERBOSE) << debug_name_
+                        << "->OnError(error=" << dcsctp::ToString(error)
+                        << ", message=" << message << ").";
+  } else {
+    RTC_LOG(LS_ERROR) << debug_name_
+                      << "->OnError(error=" << dcsctp::ToString(error)
+                      << ", message=" << message << ").";
+  }
 }
 
 void DcSctpTransport::OnAborted(dcsctp::ErrorKind error,
@@ -501,8 +530,8 @@ void DcSctpTransport::OnTransportReadPacket(
     return;
   }
 
-  RTC_LOG(LS_VERBOSE) << debug_name_
-                      << "->OnTransportReadPacket(), length=" << length;
+  RTC_DLOG(LS_VERBOSE) << debug_name_
+                       << "->OnTransportReadPacket(), length=" << length;
   if (socket_) {
     socket_->ReceivePacket(rtc::ArrayView<const uint8_t>(
         reinterpret_cast<const uint8_t*>(data), length));

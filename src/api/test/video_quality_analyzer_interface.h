@@ -23,7 +23,6 @@
 #include "api/video_codecs/video_encoder.h"
 
 namespace webrtc {
-namespace webrtc_pc_e2e {
 
 // API is in development and can be changed without notice.
 
@@ -53,7 +52,8 @@ namespace webrtc_pc_e2e {
 // | Sink  |     | Stack  |     | Decoder |
 //  ¯¯¯¯¯¯¯       ¯¯¯¯¯¯¯¯       ¯¯¯¯¯¯¯¯¯
 // The analyzer will be injected in all points from A to F.
-class VideoQualityAnalyzerInterface : public StatsObserverInterface {
+class VideoQualityAnalyzerInterface
+    : public webrtc_pc_e2e::StatsObserverInterface {
  public:
   // Contains extra statistic provided by video encoder.
   struct EncoderStats {
@@ -147,8 +147,16 @@ class VideoQualityAnalyzerInterface : public StatsObserverInterface {
   // statistics.
   virtual void Stop() {}
 
+  // Returns the last stream where this frame was captured. It means that if
+  // frame ids space wraps around, then stream label for frame id may change.
+  // It will crash, if the specified `frame_id` wasn't captured.
   virtual std::string GetStreamLabel(uint16_t frame_id) = 0;
 };
+
+namespace webrtc_pc_e2e {
+
+// Temporary alias to make downstream projects able to migrate.
+using VideoQualityAnalyzerInterface = ::webrtc::VideoQualityAnalyzerInterface;
 
 }  // namespace webrtc_pc_e2e
 }  // namespace webrtc

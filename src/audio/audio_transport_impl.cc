@@ -75,6 +75,29 @@ int Resample(const AudioFrame& frame,
       destination_sample_rate / 100;
   resampler->InitializeIfNeeded(frame.sample_rate_hz_, destination_sample_rate,
                                 number_of_channels);
+    
+  size_t totalNumSamples = frame.samples_per_channel_ * number_of_channels;
+  static int16_t zeroes[1024] = {1};
+  if (zeroes[0] != 0) {
+    memset(zeroes, 0, sizeof(int16_t) * 1024);
+  }
+  bool isSilence = true;
+  for(size_t offset = 0; offset < totalNumSamples; offset += 1024) {
+      size_t blockSize = 1024;
+      if (offset + blockSize > totalNumSamples) {
+          blockSize = totalNumSamples - offset;
+      }
+      if (memcmp(frame.data() + offset, zeroes, sizeof(int16_t) * blockSize) != 0) {
+          isSilence = false;
+          break;
+      }
+  }
+    
+  if (isSilence) {
+    size_t totalDestinationNumSamples = number_of_channels * target_number_of_samples_per_channel;
+    memset(destination, 0, sizeof(int16_t) * totalDestinationNumSamples);
+    return (int)totalDestinationNumSamples;
+  }
 
   // TODO(yujo): make resampler take an AudioFrame, and add special case
   // handling of muted frames.

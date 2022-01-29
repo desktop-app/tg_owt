@@ -796,6 +796,9 @@ void P2PTransportChannel::SetIceConfig(const IceConfig& config) {
       config_.regather_on_failed_networks_interval_or_default();
   regathering_controller_->SetConfig(regathering_config);
 
+  config_.vpn_preference = config.vpn_preference;
+  allocator_->SetVpnPreference(config_.vpn_preference);
+
   ice_controller_->SetIceConfig(config_);
 
   RTC_DCHECK(ValidateIceConfig(config_).ok());
@@ -1125,7 +1128,7 @@ void P2PTransportChannel::OnUnknownAddress(PortInterface* port,
                        << remote_candidate.ToSensitiveString();
       return;
     } else {
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       port->SendBindingErrorResponse(stun_msg, address, STUN_ERROR_SERVER_ERROR,
                                      STUN_ERROR_REASON_SERVER_ERROR);
       return;
@@ -1297,7 +1300,7 @@ void P2PTransportChannel::OnCandidateResolved(
       });
   if (p == resolvers_.end()) {
     RTC_LOG(LS_ERROR) << "Unexpected AsyncDnsResolver return";
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
     return;
   }
   Candidate candidate = p->candidate_;
@@ -1473,11 +1476,11 @@ bool P2PTransportChannel::CreateConnection(PortInterface* port,
   // It is not legal to try to change any of the parameters of an existing
   // connection; however, the other side can send a duplicate candidate.
   if (!remote_candidate.IsEquivalent(connection->remote_candidate())) {
-    RTC_LOG(INFO) << "Attempt to change a remote candidate."
-                     " Existing remote candidate: "
-                  << connection->remote_candidate().ToSensitiveString()
-                  << "New remote candidate: "
-                  << remote_candidate.ToSensitiveString();
+    RTC_LOG(LS_INFO) << "Attempt to change a remote candidate."
+                        " Existing remote candidate: "
+                     << connection->remote_candidate().ToSensitiveString()
+                     << "New remote candidate: "
+                     << remote_candidate.ToSensitiveString();
   }
   return false;
 }
@@ -1529,8 +1532,8 @@ void P2PTransportChannel::RememberRemoteCandidate(
   size_t i = 0;
   while (i < remote_candidates_.size()) {
     if (remote_candidates_[i].generation() < remote_candidate.generation()) {
-      RTC_LOG(INFO) << "Pruning candidate from old generation: "
-                    << remote_candidates_[i].address().ToSensitiveString();
+      RTC_LOG(LS_INFO) << "Pruning candidate from old generation: "
+                       << remote_candidates_[i].address().ToSensitiveString();
       remote_candidates_.erase(remote_candidates_.begin() + i);
     } else {
       i += 1;
@@ -1539,8 +1542,8 @@ void P2PTransportChannel::RememberRemoteCandidate(
 
   // Make sure this candidate is not a duplicate.
   if (IsDuplicateRemoteCandidate(remote_candidate)) {
-    RTC_LOG(INFO) << "Duplicate candidate: "
-                  << remote_candidate.ToSensitiveString();
+    RTC_LOG(LS_INFO) << "Duplicate candidate: "
+                     << remote_candidate.ToSensitiveString();
     return;
   }
 
@@ -1566,8 +1569,8 @@ int P2PTransportChannel::SetOption(rtc::Socket::Option opt, int value) {
     if (val < 0) {
       // Because this also occurs deferred, probably no point in reporting an
       // error
-      RTC_LOG(WARNING) << "SetOption(" << opt << ", " << value
-                       << ") failed: " << port->GetError();
+      RTC_LOG(LS_WARNING) << "SetOption(" << opt << ", " << value
+                          << ") failed: " << port->GetError();
     }
   }
   return 0;
@@ -1950,7 +1953,7 @@ void P2PTransportChannel::UpdateState() {
                    state == IceTransportState::STATE_COMPLETED);
         break;
       default:
-        RTC_NOTREACHED();
+        RTC_DCHECK_NOTREACHED();
         break;
     }
     state_ = state;
@@ -2144,8 +2147,8 @@ void P2PTransportChannel::OnPortDestroyed(PortInterface* port) {
   pruned_ports_.erase(
       std::remove(pruned_ports_.begin(), pruned_ports_.end(), port),
       pruned_ports_.end());
-  RTC_LOG(INFO) << "Removed port because it is destroyed: " << ports_.size()
-                << " remaining";
+  RTC_LOG(LS_INFO) << "Removed port because it is destroyed: " << ports_.size()
+                   << " remaining";
 }
 
 void P2PTransportChannel::OnPortsPruned(
@@ -2154,8 +2157,8 @@ void P2PTransportChannel::OnPortsPruned(
   RTC_DCHECK_RUN_ON(network_thread_);
   for (PortInterface* port : ports) {
     if (PrunePort(port)) {
-      RTC_LOG(INFO) << "Removed port: " << port->ToString() << " "
-                    << ports_.size() << " remaining";
+      RTC_LOG(LS_INFO) << "Removed port: " << port->ToString() << " "
+                       << ports_.size() << " remaining";
     }
   }
 }

@@ -503,12 +503,6 @@ void RtpVideoStreamReceiver2::OnReceivedPayloadData(
   video_header.video_timing.flags = VideoSendTiming::kInvalid;
   video_header.is_last_packet_in_frame |= rtp_packet.Marker();
 
-  if (const auto* vp9_header =
-          absl::get_if<RTPVideoHeaderVP9>(&video_header.video_type_header)) {
-    video_header.is_last_packet_in_frame |= vp9_header->end_of_frame;
-    video_header.is_first_packet_in_frame |= vp9_header->beginning_of_frame;
-  }
-
   rtp_packet.GetExtension<VideoOrientation>(&video_header.rotation);
   rtp_packet.GetExtension<VideoContentTypeExtension>(
       &video_header.content_type);
@@ -617,9 +611,7 @@ void RtpVideoStreamReceiver2::OnReceivedPayloadData(
         break;
     }
 
-  }
-#ifndef DISABLE_H265
-  else if (packet->codec() == kVideoCodecH265) {
+  } else if (packet->codec() == kVideoCodecH265) {
     // Only when we start to receive packets will we know what payload type
     // that will be used. When we know the payload type insert the correct
     // sps/pps into the tracker.
@@ -629,24 +621,22 @@ void RtpVideoStreamReceiver2::OnReceivedPayloadData(
     }
 
     video_coding::H265VpsSpsPpsTracker::FixedBitstream fixed =
-            h265_tracker_.CopyAndFixBitstream(
-                    rtc::MakeArrayView(codec_payload.cdata(), codec_payload.size()),
-                    &packet->video_header);
+        h265_tracker_.CopyAndFixBitstream(
+            rtc::MakeArrayView(codec_payload.cdata(), codec_payload.size()),
+            &packet->video_header);
 
     switch (fixed.action) {
       case video_coding::H265VpsSpsPpsTracker::kRequestKeyframe:
         rtcp_feedback_buffer_.RequestKeyFrame();
-            rtcp_feedback_buffer_.SendBufferedRtcpFeedback();
-            ABSL_FALLTHROUGH_INTENDED;
+        rtcp_feedback_buffer_.SendBufferedRtcpFeedback();
+        ABSL_FALLTHROUGH_INTENDED;
       case video_coding::H265VpsSpsPpsTracker::kDrop:
         return;
       case video_coding::H265VpsSpsPpsTracker::kInsert:
         packet->video_payload = std::move(fixed.bitstream);
-            break;
+        break;
     }
-  }
-#endif
-  else {
+  } else {
     packet->video_payload = std::move(codec_payload);
   }
 
@@ -766,8 +756,6 @@ void RtpVideoStreamReceiver2::OnInsertedPacket(
       max_nack_count = packet->times_nacked;
       min_recv_time = packet_info.receive_time().ms();
       max_recv_time = packet_info.receive_time().ms();
-      payloads.clear();
-      packet_infos.clear();
     } else {
       max_nack_count = std::max(max_nack_count, packet->times_nacked);
       min_recv_time = std::min(min_recv_time, packet_info.receive_time().ms());
@@ -807,6 +795,8 @@ void RtpVideoStreamReceiver2::OnInsertedPacket(
           last_packet.video_header.color_space,              //
           RtpPacketInfos(std::move(packet_infos)),           //
           std::move(bitstream)));
+      payloads.clear();
+      packet_infos.clear();
     }
   }
   RTC_DCHECK(frame_boundary);
@@ -890,8 +880,7 @@ void RtpVideoStreamReceiver2::OnAssembledFrame(
 void RtpVideoStreamReceiver2::OnCompleteFrames(
     RtpFrameReferenceFinder::ReturnVector frames) {
   for (auto& frame : frames) {
-    RtpFrameObject* rtp_frame = static_cast<RtpFrameObject*>(frame.get());
-    last_seq_num_for_pic_id_[rtp_frame->Id()] = rtp_frame->last_seq_num();
+    last_seq_num_for_pic_id_[frame->Id()] = frame->last_seq_num();
 
     last_completed_picture_id_ =
         std::max(last_completed_picture_id_, frame->Id());
@@ -934,6 +923,12 @@ void RtpVideoStreamReceiver2::SetDepacketizerToDecoderFrameTransformer(
           this, std::move(frame_transformer), rtc::Thread::Current(),
           config_.rtp.remote_ssrc);
   frame_transformer_delegate_->Init();
+}
+
+void RtpVideoStreamReceiver2::SetRtpExtensions(
+    const std::vector<RtpExtension>& extensions) {
+  RTC_DCHECK_RUN_ON(&packet_sequence_checker_);
+  rtp_header_extensions_.Reset(extensions);
 }
 
 void RtpVideoStreamReceiver2::UpdateRtt(int64_t max_rtt_ms) {

@@ -112,13 +112,13 @@ SdpSemantics JavaToNativeSdpSemantics(JNIEnv* jni,
   std::string enum_name = GetJavaEnumName(jni, j_sdp_semantics);
 
   if (enum_name == "PLAN_B")
-    return SdpSemantics::kPlanB;
+    return SdpSemantics::kPlanB_DEPRECATED;
 
   if (enum_name == "UNIFIED_PLAN")
     return SdpSemantics::kUnifiedPlan;
 
-  RTC_NOTREACHED();
-  return SdpSemantics::kPlanB;
+  RTC_DCHECK_NOTREACHED();
+  return SdpSemantics::kPlanB_DEPRECATED;
 }
 
 ScopedJavaLocalRef<jobject> NativeToJavaCandidatePairChange(
@@ -263,8 +263,6 @@ void JavaToNativeRTCConfiguration(
       jni, Java_RTCConfiguration_getScreencastMinBitrate(jni, j_rtc_config));
   rtc_config->combined_audio_video_bwe = JavaToNativeOptionalBool(
       jni, Java_RTCConfiguration_getCombinedAudioVideoBwe(jni, j_rtc_config));
-  rtc_config->enable_dtls_srtp = JavaToNativeOptionalBool(
-      jni, Java_RTCConfiguration_getEnableDtlsSrtp(jni, j_rtc_config));
   rtc_config->network_preference =
       JavaToNativeNetworkPreference(jni, j_network_preference);
   rtc_config->sdp_semantics = JavaToNativeSdpSemantics(jni, j_sdp_semantics);

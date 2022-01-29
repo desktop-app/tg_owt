@@ -212,7 +212,7 @@ TEST_P(RtpSenderEgressTest, TransportFeedbackObserverGetsCorrectByteCount) {
   const uint16_t kTransportSequenceNumber = 17;
 
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
 
   const size_t expected_bytes = GetParam().with_overhead
                                     ? kPayloadSize + kRtpOverheadBytesPerPacket
@@ -266,7 +266,7 @@ TEST_P(RtpSenderEgressTest,
   std::unique_ptr<RtpSenderEgress> sender = CreateRtpSenderEgress();
 
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
   std::unique_ptr<RtpPacketToSend> packet = BuildRtpPacket();
   sender->SendPacket(packet.get(), PacedPacketInfo());
   EXPECT_TRUE(transport_.last_packet()->options.included_in_feedback);
@@ -278,7 +278,7 @@ TEST_P(
   std::unique_ptr<RtpSenderEgress> sender = CreateRtpSenderEgress();
 
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
   std::unique_ptr<RtpPacketToSend> packet = BuildRtpPacket();
   sender->SendPacket(packet.get(), PacedPacketInfo());
   EXPECT_TRUE(transport_.last_packet()->options.included_in_allocation);
@@ -342,7 +342,7 @@ TEST_P(RtpSenderEgressTest, OnSendSideDelayUpdated) {
 TEST_P(RtpSenderEgressTest, WritesPacerExitToTimingExtension) {
   std::unique_ptr<RtpSenderEgress> sender = CreateRtpSenderEgress();
   header_extensions_.RegisterByUri(kVideoTimingExtensionId,
-                                   VideoTimingExtension::kUri);
+                                   VideoTimingExtension::Uri());
 
   std::unique_ptr<RtpPacketToSend> packet = BuildRtpPacket();
   packet->SetExtension<VideoTimingExtension>(VideoSendTiming{});
@@ -364,7 +364,7 @@ TEST_P(RtpSenderEgressTest, WritesNetwork2ToTimingExtension) {
   rtp_config.populate_network2_timestamp = true;
   auto sender = std::make_unique<RtpSenderEgress>(rtp_config, &packet_history_);
   header_extensions_.RegisterByUri(kVideoTimingExtensionId,
-                                   VideoTimingExtension::kUri);
+                                   VideoTimingExtension::Uri());
 
   const uint16_t kPacerExitMs = 1234u;
   std::unique_ptr<RtpPacketToSend> packet = BuildRtpPacket();
@@ -388,7 +388,7 @@ TEST_P(RtpSenderEgressTest, WritesNetwork2ToTimingExtension) {
 TEST_P(RtpSenderEgressTest, OnSendPacketUpdated) {
   std::unique_ptr<RtpSenderEgress> sender = CreateRtpSenderEgress();
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
 
   const uint16_t kTransportSequenceNumber = 1;
   EXPECT_CALL(send_packet_observer_,
@@ -402,7 +402,7 @@ TEST_P(RtpSenderEgressTest, OnSendPacketUpdated) {
 TEST_P(RtpSenderEgressTest, OnSendPacketNotUpdatedForRetransmits) {
   std::unique_ptr<RtpSenderEgress> sender = CreateRtpSenderEgress();
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
 
   const uint16_t kTransportSequenceNumber = 1;
   EXPECT_CALL(send_packet_observer_, OnSendPacket).Times(0);
@@ -587,6 +587,7 @@ TEST_P(RtpSenderEgressTest, StreamDataCountersCallbacks) {
   // Send a media packet.
   std::unique_ptr<RtpPacketToSend> media_packet = BuildRtpPacket();
   media_packet->SetPayloadSize(6);
+  media_packet->SetSequenceNumber(kStartSequenceNumber);
   expected_transmitted_counter.packets += 1;
   expected_transmitted_counter.payload_bytes += media_packet->payload_size();
   expected_transmitted_counter.header_bytes += media_packet->headers_size();
@@ -606,8 +607,9 @@ TEST_P(RtpSenderEgressTest, StreamDataCountersCallbacks) {
   // and retransmitted packet statistics.
   std::unique_ptr<RtpPacketToSend> retransmission_packet = BuildRtpPacket();
   retransmission_packet->set_packet_type(RtpPacketMediaType::kRetransmission);
+  retransmission_packet->SetSequenceNumber(kStartSequenceNumber);
   retransmission_packet->set_retransmitted_sequence_number(
-      retransmission_packet->SequenceNumber());
+      kStartSequenceNumber);
   media_packet->SetPayloadSize(7);
   expected_transmitted_counter.packets += 1;
   expected_transmitted_counter.payload_bytes +=
@@ -636,6 +638,7 @@ TEST_P(RtpSenderEgressTest, StreamDataCountersCallbacks) {
   std::unique_ptr<RtpPacketToSend> padding_packet = BuildRtpPacket();
   padding_packet->set_packet_type(RtpPacketMediaType::kPadding);
   padding_packet->SetPadding(224);
+  padding_packet->SetSequenceNumber(kStartSequenceNumber + 1);
   expected_transmitted_counter.packets += 1;
   expected_transmitted_counter.padding_bytes += padding_packet->padding_size();
   expected_transmitted_counter.header_bytes += padding_packet->headers_size();
@@ -745,11 +748,11 @@ TEST_P(RtpSenderEgressTest, UpdatesDataCounters) {
 
 TEST_P(RtpSenderEgressTest, SendPacketUpdatesExtensions) {
   header_extensions_.RegisterByUri(kVideoTimingExtensionId,
-                                   VideoTimingExtension::kUri);
+                                   VideoTimingExtension::Uri());
   header_extensions_.RegisterByUri(kAbsoluteSendTimeExtensionId,
-                                   AbsoluteSendTime::kUri);
+                                   AbsoluteSendTime::Uri());
   header_extensions_.RegisterByUri(kTransmissionOffsetExtensionId,
-                                   TransmissionOffset::kUri);
+                                   TransmissionOffset::Uri());
   std::unique_ptr<RtpSenderEgress> sender = CreateRtpSenderEgress();
 
   std::unique_ptr<RtpPacketToSend> packet = BuildRtpPacket();
@@ -776,7 +779,7 @@ TEST_P(RtpSenderEgressTest, SendPacketSetsPacketOptions) {
   const uint16_t kPacketId = 42;
   std::unique_ptr<RtpSenderEgress> sender = CreateRtpSenderEgress();
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
 
   std::unique_ptr<RtpPacketToSend> packet = BuildRtpPacket();
   packet->SetExtension<TransportSequenceNumber>(kPacketId);
@@ -813,7 +816,7 @@ TEST_P(RtpSenderEgressTest, SendPacketUpdatesStats) {
   auto sender = std::make_unique<RtpSenderEgress>(config, &packet_history_);
 
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
 
   const int64_t capture_time_ms = clock_->TimeInMilliseconds();
 
@@ -868,7 +871,7 @@ TEST_P(RtpSenderEgressTest, SendPacketUpdatesStats) {
 TEST_P(RtpSenderEgressTest, TransportFeedbackObserverWithRetransmission) {
   const uint16_t kTransportSequenceNumber = 17;
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
   std::unique_ptr<RtpPacketToSend> retransmission = BuildRtpPacket();
   retransmission->set_packet_type(RtpPacketMediaType::kRetransmission);
   retransmission->SetExtension<TransportSequenceNumber>(
@@ -890,7 +893,7 @@ TEST_P(RtpSenderEgressTest, TransportFeedbackObserverWithRetransmission) {
 TEST_P(RtpSenderEgressTest, TransportFeedbackObserverWithRtxRetransmission) {
   const uint16_t kTransportSequenceNumber = 17;
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
 
   std::unique_ptr<RtpPacketToSend> rtx_retransmission = BuildRtpPacket();
   rtx_retransmission->SetSsrc(kRtxSsrc);
@@ -914,7 +917,7 @@ TEST_P(RtpSenderEgressTest, TransportFeedbackObserverWithRtxRetransmission) {
 TEST_P(RtpSenderEgressTest, TransportFeedbackObserverPadding) {
   const uint16_t kTransportSequenceNumber = 17;
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
   std::unique_ptr<RtpPacketToSend> padding = BuildRtpPacket();
   padding->SetPadding(224);
   padding->set_packet_type(RtpPacketMediaType::kPadding);
@@ -932,7 +935,7 @@ TEST_P(RtpSenderEgressTest, TransportFeedbackObserverPadding) {
 TEST_P(RtpSenderEgressTest, TransportFeedbackObserverRtxPadding) {
   const uint16_t kTransportSequenceNumber = 17;
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
 
   std::unique_ptr<RtpPacketToSend> rtx_padding = BuildRtpPacket();
   rtx_padding->SetPadding(224);
@@ -952,7 +955,7 @@ TEST_P(RtpSenderEgressTest, TransportFeedbackObserverRtxPadding) {
 TEST_P(RtpSenderEgressTest, TransportFeedbackObserverFec) {
   const uint16_t kTransportSequenceNumber = 17;
   header_extensions_.RegisterByUri(kTransportSequenceNumberExtensionId,
-                                   TransportSequenceNumber::kUri);
+                                   TransportSequenceNumber::Uri());
 
   std::unique_ptr<RtpPacketToSend> fec_packet = BuildRtpPacket();
   fec_packet->SetSsrc(kFlexFecSsrc);

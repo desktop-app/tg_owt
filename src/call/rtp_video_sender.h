@@ -74,7 +74,7 @@ class RtpVideoSender : public RtpVideoSenderInterface,
   // Rtp modules are assumed to be sorted in simulcast index order.
   RtpVideoSender(
       Clock* clock,
-      std::map<uint32_t, RtpState> suspended_ssrcs,
+      const std::map<uint32_t, RtpState>& suspended_ssrcs,
       const std::map<uint32_t, RtpPayloadState>& states,
       const RtpConfig& rtp_config,
       int rtcp_report_interval_ms,
@@ -155,7 +155,7 @@ class RtpVideoSender : public RtpVideoSenderInterface,
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void UpdateModuleSendingState() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void ConfigureProtection();
-  void ConfigureSsrcs();
+  void ConfigureSsrcs(const std::map<uint32_t, RtpState>& suspended_ssrcs);
   void ConfigureRids();
   bool NackEnabled() const;
   uint32_t GetPacketizationOverheadRate() const;
@@ -168,14 +168,12 @@ class RtpVideoSender : public RtpVideoSenderInterface,
   const bool send_side_bwe_with_overhead_;
   const bool use_frame_rate_for_overhead_;
   const bool has_packet_feedback_;
-  const bool simulate_vp9_structure_;
+  const bool simulate_generic_structure_;
 
   // TODO(holmer): Remove mutex_ once RtpVideoSender runs on the
   // transport task queue.
   mutable Mutex mutex_;
   bool active_ RTC_GUARDED_BY(mutex_);
-
-  std::map<uint32_t, RtpState> suspended_ssrcs_;
 
   const std::unique_ptr<FecController> fec_controller_;
   bool fec_allowed_ RTC_GUARDED_BY(mutex_);

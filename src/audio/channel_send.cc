@@ -96,7 +96,7 @@ class ChannelSend : public ChannelSendInterface,
 
   // Codecs
   void OnBitrateAllocation(BitrateAllocationUpdate update) override;
-  int GetBitrate() const override;
+  int GetTargetBitrate() const override;
 
   // Network
   void ReceivedRTCPPacket(const uint8_t* data, size_t length) override;
@@ -237,9 +237,6 @@ class ChannelSend : public ChannelSendInterface,
   // ChannelSend::SendRtpAudio to send the transformed audio.
   rtc::scoped_refptr<ChannelSendFrameTransformerDelegate>
       frame_transformer_delegate_ RTC_GUARDED_BY(encoder_queue_);
-
-  mutable Mutex bitrate_mutex_;
-  int configured_bitrate_bps_ RTC_GUARDED_BY(bitrate_mutex_) = 0;
 
   // Defined last to ensure that there are no running tasks when the other
   // members are destroyed.
@@ -502,8 +499,6 @@ ChannelSend::ChannelSend(
   configuration.rtcp_packet_type_counter_observer = this;
 
   configuration.local_media_ssrc = ssrc;
-  configuration.use_deferred_sequencing =
-      !field_trial::IsDisabled("WebRTC-Audio-DeferredSequencing");
 
   rtp_rtcp_ = ModuleRtpRtcpImpl2::Create(configuration);
   rtp_rtcp_->SetSendingMediaStatus(false);
@@ -537,9 +532,12 @@ void ChannelSend::StartSend() {
   RTC_DCHECK(!sending_);
   sending_ = true;
 
+  RTC_DCHECK(packet_router_);
+  packet_router_->AddSendRtpModule(rtp_rtcp_.get(), /*remb_candidate=*/false);
   rtp_rtcp_->SetSendingMediaStatus(true);
   int ret = rtp_rtcp_->SetSendingStatus(true);
   RTC_DCHECK_EQ(0, ret);
+
   // It is now OK to start processing on the encoder task queue.
   encoder_queue_.PostTask([this] {
     RTC_DCHECK_RUN_ON(&encoder_queue_);
@@ -568,6 +566,9 @@ void ChannelSend::StopSend() {
     RTC_DLOG(LS_ERROR) << "StartSend() RTP/RTCP failed to stop sending";
   }
   rtp_rtcp_->SetSendingMediaStatus(false);
+
+  RTC_DCHECK(packet_router_);
+  packet_router_->RemoveSendRtpModule(rtp_rtcp_.get());
 }
 
 void ChannelSend::SetEncoder(int payload_type,
@@ -612,18 +613,14 @@ void ChannelSend::OnBitrateAllocation(BitrateAllocationUpdate update) {
   // rules.
   // RTC_DCHECK(worker_thread_checker_.IsCurrent() ||
   //            module_process_thread_checker_.IsCurrent());
-  MutexLock lock(&bitrate_mutex_);
-
   CallEncoder([&](AudioEncoder* encoder) {
     encoder->OnReceivedUplinkAllocation(update);
   });
   retransmission_rate_limiter_->SetMaxRate(update.target_bitrate.bps());
-  configured_bitrate_bps_ = update.target_bitrate.bps();
 }
 
-int ChannelSend::GetBitrate() const {
-  MutexLock lock(&bitrate_mutex_);
-  return configured_bitrate_bps_;
+int ChannelSend::GetTargetBitrate() const {
+  return audio_coding_->GetTargetBitrate();
 }
 
 void ChannelSend::OnUplinkPacketLossRate(float packet_loss_rate) {
@@ -704,9 +701,9 @@ void ChannelSend::SetSendAudioLevelIndicationStatus(bool enable, int id) {
   RTC_DCHECK_RUN_ON(&worker_thread_checker_);
   _includeAudioLevelIndication = enable;
   if (enable) {
-    rtp_rtcp_->RegisterRtpHeaderExtension(AudioLevel::kUri, id);
+    rtp_rtcp_->RegisterRtpHeaderExtension(AudioLevel::Uri(), id);
   } else {
-    rtp_rtcp_->DeregisterSendRtpHeaderExtension(AudioLevel::kUri);
+    rtp_rtcp_->DeregisterSendRtpHeaderExtension(AudioLevel::Uri());
   }
 }
 
@@ -723,8 +720,6 @@ void ChannelSend::RegisterSenderCongestionControlObjects(
   rtcp_observer_->SetBandwidthObserver(bandwidth_observer);
   rtp_packet_pacer_proxy_->SetPacketPacer(rtp_packet_pacer);
   rtp_rtcp_->SetStorePacketsStatus(true, 600);
-  constexpr bool remb_candidate = false;
-  packet_router->AddSendRtpModule(rtp_rtcp_.get(), remb_candidate);
   packet_router_ = packet_router;
 }
 
@@ -733,7 +728,6 @@ void ChannelSend::ResetSenderCongestionControlObjects() {
   RTC_DCHECK(packet_router_);
   rtp_rtcp_->SetStorePacketsStatus(false, 600);
   rtcp_observer_->SetBandwidthObserver(nullptr);
-  packet_router_->RemoveSendRtpModule(rtp_rtcp_.get());
   packet_router_ = nullptr;
   rtp_packet_pacer_proxy_->SetPacketPacer(nullptr);
 }

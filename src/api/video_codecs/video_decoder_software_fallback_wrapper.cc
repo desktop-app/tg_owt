@@ -167,12 +167,10 @@ void VideoDecoderSoftwareFallbackWrapper::UpdateFallbackDecoderHistograms() {
       RTC_HISTOGRAM_COUNTS_100000(kFallbackHistogramsUmaPrefix + "H264",
                                   hw_decoded_frames_since_last_fallback_);
       break;
-#ifndef DISABLE_H265
     case kVideoCodecH265:
       RTC_HISTOGRAM_COUNTS_100000(kFallbackHistogramsUmaPrefix + "H265",
                                   hw_decoded_frames_since_last_fallback_);
       break;
-#endif
     case kVideoCodecMultiplex:
       RTC_HISTOGRAM_COUNTS_100000(kFallbackHistogramsUmaPrefix + "Multiplex",
                                   hw_decoded_frames_since_last_fallback_);
@@ -221,7 +219,7 @@ int32_t VideoDecoderSoftwareFallbackWrapper::Decode(
       return fallback_decoder_->Decode(input_image, missing_frames,
                                        render_time_ms);
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       return WEBRTC_VIDEO_CODEC_ERROR;
   }
 }
@@ -246,7 +244,7 @@ int32_t VideoDecoderSoftwareFallbackWrapper::Release() {
       status = WEBRTC_VIDEO_CODEC_OK;
       break;
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       status = WEBRTC_VIDEO_CODEC_ERROR;
   }
 

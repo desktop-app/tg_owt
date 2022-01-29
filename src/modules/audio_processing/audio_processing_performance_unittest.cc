@@ -367,7 +367,7 @@ class TimedThreadApiProcessor {
 
     // Should not be reached, but the return statement is needed for the code to
     // build successfully on Android.
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
     return false;
   }
 
@@ -443,7 +443,6 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
       apm_config.gain_controller1.enabled = true;
       apm_config.gain_controller1.mode =
           AudioProcessing::Config::GainController1::kAdaptiveDigital;
-      apm_config.level_estimation.enabled = true;
       apm_config.voice_detection.enabled = true;
       apm->ApplyConfig(apm_config);
     };
@@ -456,7 +455,6 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
       apm_config.noise_suppression.enabled = true;
       apm_config.gain_controller1.mode =
           AudioProcessing::Config::GainController1::kAdaptiveDigital;
-      apm_config.level_estimation.enabled = true;
       apm_config.voice_detection.enabled = true;
       apm->ApplyConfig(apm_config);
     };
@@ -467,7 +465,6 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
       AudioProcessing::Config apm_config = apm->GetConfig();
       apm_config.echo_canceller.enabled = false;
       apm_config.gain_controller1.enabled = false;
-      apm_config.level_estimation.enabled = false;
       apm_config.noise_suppression.enabled = false;
       apm_config.voice_detection.enabled = false;
       apm->ApplyConfig(apm_config);
@@ -482,8 +479,7 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
         break;
       }
       case SettingsType::kDefaultApmDesktop: {
-        Config config;
-        apm_ = AudioProcessingBuilderForTesting().Create(config);
+        apm_ = AudioProcessingBuilderForTesting().Create();
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;
@@ -495,15 +491,13 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
         break;
       }
       case SettingsType::kDefaultApmDesktopWithoutDelayAgnostic: {
-        Config config;
-        apm_ = AudioProcessingBuilderForTesting().Create(config);
+        apm_ = AudioProcessingBuilderForTesting().Create();
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;
       }
       case SettingsType::kDefaultApmDesktopWithoutExtendedFilter: {
-        Config config;
-        apm_ = AudioProcessingBuilderForTesting().Create(config);
+        apm_ = AudioProcessingBuilderForTesting().Create();
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;

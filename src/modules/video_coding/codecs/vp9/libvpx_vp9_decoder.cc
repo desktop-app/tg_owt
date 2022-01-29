@@ -64,7 +64,7 @@ ColorSpace ExtractVP9ColorSpace(vpx_color_space_t space_t,
           transfer = ColorSpace::TransferID::kBT2020_10;
           break;
         default:
-          RTC_NOTREACHED();
+          RTC_DCHECK_NOTREACHED();
           break;
       }
       matrix = ColorSpace::MatrixID::kBT2020_NCL;
@@ -127,6 +127,7 @@ bool LibvpxVp9Decoder::Configure(const Settings& settings) {
 
   if (decoder_ == nullptr) {
     decoder_ = new vpx_codec_ctx_t;
+    memset(decoder_, 0, sizeof(*decoder_));
   }
   vpx_codec_dec_cfg_t cfg;
   memset(&cfg, 0, sizeof(cfg));
@@ -204,8 +205,9 @@ int LibvpxVp9Decoder::Decode(const EncodedImage& input_image,
   }
 
   if (input_image._frameType == VideoFrameType::kVideoFrameKey) {
-    absl::optional<vp9::FrameInfo> frame_info =
-        vp9::ParseIntraFrameInfo(input_image.data(), input_image.size());
+    absl::optional<Vp9UncompressedHeader> frame_info =
+        ParseUncompressedVp9Header(
+            rtc::MakeArrayView(input_image.data(), input_image.size()));
     if (frame_info) {
       RenderResolution frame_resolution(frame_info->frame_width,
                                         frame_info->frame_height);

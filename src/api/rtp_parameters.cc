@@ -131,6 +131,7 @@ constexpr char RtpExtension::kMidUri[];
 constexpr char RtpExtension::kRidUri[];
 constexpr char RtpExtension::kRepairedRidUri[];
 constexpr char RtpExtension::kVideoFrameTrackingIdUri[];
+constexpr char RtpExtension::kCsrcAudioLevelsUri[];
 
 constexpr int RtpExtension::kMinId;
 constexpr int RtpExtension::kMaxId;
@@ -235,12 +236,6 @@ const RtpExtension* RtpExtension::FindHeaderExtensionByUri(
 
   // Returning fallback extension (if any)
   return fallback_extension;
-}
-
-const RtpExtension* RtpExtension::FindHeaderExtensionByUri(
-    const std::vector<RtpExtension>& extensions,
-    absl::string_view uri) {
-  return FindHeaderExtensionByUri(extensions, uri, kPreferEncryptedExtension);
 }
 
 const RtpExtension* RtpExtension::FindHeaderExtensionByUriAndEncryption(

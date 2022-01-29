@@ -18,11 +18,6 @@
 #import "api/video_codec/RTCVideoEncoderVP9.h"
 #import "base/RTCVideoCodecInfo.h"
 
-#if !defined(DISABLE_H265)
-#import "RTCH265ProfileLevelId.h"
-#import "RTCVideoEncoderH265.h"
-#endif
-
 @implementation RTC_OBJC_TYPE (RTCDefaultVideoEncoderFactory)
 
 @synthesize preferredCodec;
@@ -54,11 +49,6 @@
     constrainedBaselineInfo,
     vp8Info,
   ] mutableCopy];
-    
-#if !defined(DISABLE_H265)
-  [result
-     addObject:[[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName: kRTCVideoCodecH265Name]];
-#endif
 
   if ([RTC_OBJC_TYPE(RTCVideoEncoderVP9) isSupported]) {
     [result
@@ -85,13 +75,6 @@
              [RTC_OBJC_TYPE(RTCVideoEncoderAV1) isSupported]) {
     return [RTC_OBJC_TYPE(RTCVideoEncoderAV1) av1Encoder];
   }
-#if !defined(DISABLE_H265)
-  else if (@available(iOS 11, *)) {
-    if ([info.name isEqualToString:kRTCVideoCodecH265Name]) {
-        return [[RTCVideoEncoderH265 alloc] initWithCodecInfo:info];
-    }
-  }
-#endif
 
   return nil;
 }

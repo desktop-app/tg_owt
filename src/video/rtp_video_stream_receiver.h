@@ -18,12 +18,14 @@
 #include <string>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/sequence_checker.h"
 #include "api/units/timestamp.h"
 #include "api/video/color_space.h"
+#include "api/video/video_codec_type.h"
 #include "api/video_codecs/video_codec.h"
 #include "call/rtp_packet_sink_interface.h"
 #include "call/syncable.h"
@@ -41,9 +43,7 @@
 #include "modules/rtp_rtcp/source/video_rtp_depacketizer.h"
 #include "modules/video_coding/h264_sps_pps_tracker.h"
 #include "modules/video_coding/loss_notification_controller.h"
-#ifndef DISABLE_H265
 #include "modules/video_coding/h265_vps_sps_pps_tracker.h"
-#endif
 #include "modules/video_coding/packet_buffer.h"
 #include "modules/video_coding/rtp_frame_reference_finder.h"
 #include "modules/video_coding/unique_timestamp_counter.h"
@@ -128,9 +128,18 @@ class RtpVideoStreamReceiver : public LossNotificationSender,
   ~RtpVideoStreamReceiver() override;
 
   void AddReceiveCodec(uint8_t payload_type,
-                       const VideoCodec& video_codec,
+                       VideoCodecType codec_type,
                        const std::map<std::string, std::string>& codec_params,
                        bool raw_payload);
+
+  ABSL_DEPRECATED("Use AddReceiveCodec above")
+  void AddReceiveCodec(uint8_t payload_type,
+                       const VideoCodec& video_codec,
+                       const std::map<std::string, std::string>& codec_params,
+                       bool raw_payload) {
+    AddReceiveCodec(payload_type, video_codec.codecType, codec_params,
+                    raw_payload);
+  }
 
   void StartReceive();
   void StopReceive();
@@ -378,11 +387,8 @@ class RtpVideoStreamReceiver : public LossNotificationSender,
   // Maps payload id to the depacketizer.
   std::map<uint8_t, std::unique_ptr<VideoRtpDepacketizer>> payload_type_map_;
 
-
-#ifndef DISABLE_H265
   video_coding::H265VpsSpsPpsTracker h265_tracker_;
-#endif
-
+                                   
   // TODO(johan): Remove pt_codec_params_ once
   // https://bugs.chromium.org/p/webrtc/issues/detail?id=6883 is resolved.
   // Maps a payload type to a map of out-of-band supplied codec parameters.

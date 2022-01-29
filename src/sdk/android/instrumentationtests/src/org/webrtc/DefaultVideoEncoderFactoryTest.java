@@ -12,7 +12,7 @@ package org.webrtc;
 
 import static org.junit.Assert.assertEquals;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 import androidx.test.filters.SmallTest;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -73,7 +73,7 @@ public class DefaultVideoEncoderFactoryTest {
     assertEquals(5, videoCodecs.length);
     assertEquals("VP8", videoCodecs[0].name);
     assertEquals("VP9", videoCodecs[1].name);
-    assertEquals("AV1X", videoCodecs[2].name);
+    assertEquals("AV1", videoCodecs[2].name);
     assertEquals("H264", videoCodecs[3].name);
     assertEquals("42e01f", videoCodecs[3].params.get("profile-level-id"));
     assertEquals("H264", videoCodecs[4].name);
@@ -89,7 +89,7 @@ public class DefaultVideoEncoderFactoryTest {
     assertEquals(4, videoCodecs.length);
     assertEquals("VP8", videoCodecs[0].name);
     assertEquals("VP9", videoCodecs[1].name);
-    assertEquals("AV1X", videoCodecs[2].name);
+    assertEquals("AV1", videoCodecs[2].name);
     assertEquals("H264", videoCodecs[3].name);
     assertEquals("42e01f", videoCodecs[3].params.get("profile-level-id"));
   }
@@ -103,7 +103,7 @@ public class DefaultVideoEncoderFactoryTest {
     assertEquals(5, videoCodecs.length);
     assertEquals("VP8", videoCodecs[0].name);
     assertEquals("VP9", videoCodecs[1].name);
-    assertEquals("AV1X", videoCodecs[2].name);
+    assertEquals("AV1", videoCodecs[2].name);
     assertEquals("H264", videoCodecs[3].name);
     assertEquals("42e01f", videoCodecs[3].params.get("profile-level-id"));
     assertEquals("H264", videoCodecs[4].name);

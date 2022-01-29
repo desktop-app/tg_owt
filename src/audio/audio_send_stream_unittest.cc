@@ -233,7 +233,7 @@ struct ConfigHelper {
         .WillRepeatedly(Return(&bandwidth_observer_));
     if (audio_bwe_enabled) {
       EXPECT_CALL(rtp_rtcp_,
-                  RegisterRtpHeaderExtension(TransportSequenceNumber::kUri,
+                  RegisterRtpHeaderExtension(TransportSequenceNumber::Uri(),
                                              kTransportSequenceNumberId))
           .Times(1);
       EXPECT_CALL(*channel_send_,
@@ -246,7 +246,6 @@ struct ConfigHelper {
           .Times(1);
     }
     EXPECT_CALL(*channel_send_, ResetSenderCongestionControlObjects()).Times(1);
-    EXPECT_CALL(rtp_rtcp_, SetRid(std::string())).Times(1);
   }
 
   void SetupMockForSetupSendCodec(bool expect_set_encoder_call) {
@@ -301,7 +300,7 @@ struct ConfigHelper {
         .WillRepeatedly(Return(report_blocks));
     EXPECT_CALL(*channel_send_, GetANAStatistics())
         .WillRepeatedly(Return(ANAStats()));
-    EXPECT_CALL(*channel_send_, GetBitrate()).WillRepeatedly(Return(0));
+    EXPECT_CALL(*channel_send_, GetTargetBitrate()).WillRepeatedly(Return(0));
 
     audio_processing_stats_.echo_return_loss = kEchoReturnLoss;
     audio_processing_stats_.echo_return_loss_enhancement =
@@ -387,7 +386,8 @@ TEST(AudioSendStreamTest, ConfigToString) {
       "min_bitrate_bps: 12000, max_bitrate_bps: 34000, has "
       "audio_network_adaptor_config: false, has_dscp: true, "
       "send_codec_spec: {nack_enabled: true, transport_cc_enabled: false, "
-      "cng_payload_type: 42, red_payload_type: 43, payload_type: 103, "
+      "enable_non_sender_rtt: false, cng_payload_type: 42, "
+      "red_payload_type: 43, payload_type: 103, "
       "format: {name: isac, clockrate_hz: 16000, num_channels: 1, "
       "parameters: {}}}}",
       config.ToString());
@@ -801,7 +801,7 @@ TEST(AudioSendStreamTest, ReconfigureTransportCcResetsFirst) {
     ConfigHelper::AddBweToConfig(&new_config);
 
     EXPECT_CALL(*helper.rtp_rtcp(),
-                RegisterRtpHeaderExtension(TransportSequenceNumber::kUri,
+                RegisterRtpHeaderExtension(TransportSequenceNumber::Uri(),
                                            kTransportSequenceNumberId))
         .Times(1);
     {

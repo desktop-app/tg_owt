@@ -358,7 +358,7 @@ RtpVideoStreamReceiver::~RtpVideoStreamReceiver() {
 
 void RtpVideoStreamReceiver::AddReceiveCodec(
     uint8_t payload_type,
-    const VideoCodec& video_codec,
+    VideoCodecType codec_type,
     const std::map<std::string, std::string>& codec_params,
     bool raw_payload) {
   if (codec_params.count(cricket::kH264FmtpSpsPpsIdrInKeyframe) ||
@@ -367,9 +367,8 @@ void RtpVideoStreamReceiver::AddReceiveCodec(
     packet_buffer_.ForceSpsPpsIdrIsH264Keyframe();
   }
   payload_type_map_.emplace(
-      payload_type, raw_payload
-                        ? std::make_unique<VideoRtpDepacketizerRaw>()
-                        : CreateVideoRtpDepacketizer(video_codec.codecType));
+      payload_type, raw_payload ? std::make_unique<VideoRtpDepacketizerRaw>()
+                                : CreateVideoRtpDepacketizer(codec_type));
   pt_codec_params_.emplace(payload_type, codec_params);
 }
 
@@ -628,9 +627,8 @@ void RtpVideoStreamReceiver::OnReceivedPayloadData(
         packet->video_payload = std::move(fixed.bitstream);
         break;
     }
-  }
-#ifndef DISABLE_H265
-  else if (packet->codec() == kVideoCodecH265) {
+
+  } else if (packet->codec() == kVideoCodecH265) {
     // Only when we start to receive packets will we know what payload type
     // that will be used. When we know the payload type insert the correct
     // sps/pps into the tracker.
@@ -655,9 +653,7 @@ void RtpVideoStreamReceiver::OnReceivedPayloadData(
         packet->video_payload = std::move(fixed.bitstream);
         break;
     }
-  }
-#endif
-  else {
+  } else {
     packet->video_payload = std::move(codec_payload);
   }
 
@@ -681,13 +677,20 @@ void RtpVideoStreamReceiver::OnReceivedPayloadData(
             .first->second;
 
     // Try to extrapolate absolute capture time if it is missing.
-    packet_info.set_absolute_capture_time(
+    absl::optional<AbsoluteCaptureTime> absolute_capture_time =
         absolute_capture_time_interpolator_.OnReceivePacket(
             AbsoluteCaptureTimeInterpolator::GetSource(packet_info.ssrc(),
                                                        packet_info.csrcs()),
             packet_info.rtp_timestamp(),
             // Assume frequency is the same one for all video frames.
-            kVideoPayloadTypeFrequency, packet_info.absolute_capture_time()));
+            kVideoPayloadTypeFrequency, packet_info.absolute_capture_time());
+    packet_info.set_absolute_capture_time(absolute_capture_time);
+
+    if (absolute_capture_time.has_value()) {
+      packet_info.set_local_capture_clock_offset(
+          capture_clock_offset_updater_.AdjustEstimatedCaptureClockOffset(
+              absolute_capture_time->estimated_capture_clock_offset));
+    }
 
     insert_result = packet_buffer_.InsertPacket(std::move(packet));
   }
@@ -802,8 +805,6 @@ void RtpVideoStreamReceiver::OnInsertedPacket(
         max_nack_count = packet->times_nacked;
         min_recv_time = packet_info.receive_time().ms();
         max_recv_time = packet_info.receive_time().ms();
-        payloads.clear();
-        packet_infos.clear();
       } else {
         max_nack_count = std::max(max_nack_count, packet->times_nacked);
         min_recv_time =
@@ -846,6 +847,8 @@ void RtpVideoStreamReceiver::OnInsertedPacket(
             last_packet.video_header.color_space,              //
             RtpPacketInfos(std::move(packet_infos)),           //
             std::move(bitstream)));
+        payloads.clear();
+        packet_infos.clear();
       }
     }
     RTC_DCHECK(frame_boundary);

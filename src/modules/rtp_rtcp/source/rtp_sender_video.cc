@@ -107,7 +107,7 @@ const char* FrameTypeToString(VideoFrameType frame_type) {
     case VideoFrameType::kVideoFrameDelta:
       return "video_delta";
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       return "";
   }
 }
@@ -175,9 +175,9 @@ RTPSenderVideo::RTPSenderVideo(const Config& config)
                     rtp_sender_->SSRC(),
                     config.send_transport_queue)
               : nullptr),
-      include_capture_clock_offset_(absl::StartsWith(
+      include_capture_clock_offset_(!absl::StartsWith(
           config.field_trials->Lookup(kIncludeCaptureClockOffset),
-          "Enabled")) {
+          "Disabled")) {
   if (frame_transformer_delegate_)
     frame_transformer_delegate_->Init();
 }
@@ -292,21 +292,33 @@ void RTPSenderVideo::SetVideoLayersAllocationAfterTransformation(
 void RTPSenderVideo::SetVideoLayersAllocationInternal(
     VideoLayersAllocation allocation) {
   RTC_DCHECK_RUNS_SERIALIZED(&send_checker_);
-  if (!allocation_ || allocation.active_spatial_layers.size() >
+  if (!allocation_ || allocation.active_spatial_layers.size() !=
                           allocation_->active_spatial_layers.size()) {
     send_allocation_ = SendVideoLayersAllocation::kSendWithResolution;
   } else if (send_allocation_ == SendVideoLayersAllocation::kDontSend) {
     send_allocation_ = SendVideoLayersAllocation::kSendWithoutResolution;
   }
+  if (send_allocation_ == SendVideoLayersAllocation::kSendWithoutResolution) {
+    // Check if frame rate changed more than 5fps since the last time the
+    // extension was sent with frame rate and resolution.
+    for (size_t i = 0; i < allocation.active_spatial_layers.size(); ++i) {
+      if (abs(static_cast<int>(
+                  allocation.active_spatial_layers[i].frame_rate_fps) -
+              static_cast<int>(
+                  last_full_sent_allocation_->active_spatial_layers[i]
+                      .frame_rate_fps)) > 5) {
+        send_allocation_ = SendVideoLayersAllocation::kSendWithResolution;
+        break;
+      }
+    }
+  }
   allocation_ = std::move(allocation);
 }
 
-void RTPSenderVideo::AddRtpHeaderExtensions(
-    const RTPVideoHeader& video_header,
-    const absl::optional<AbsoluteCaptureTime>& absolute_capture_time,
-    bool first_packet,
-    bool last_packet,
-    RtpPacketToSend* packet) const {
+void RTPSenderVideo::AddRtpHeaderExtensions(const RTPVideoHeader& video_header,
+                                            bool first_packet,
+                                            bool last_packet,
+                                            RtpPacketToSend* packet) const {
   // Send color space when changed or if the frame is a key frame. Keep
   // sending color space information until the first base layer frame to
   // guarantee that the information is retrieved by the receiver.
@@ -355,8 +367,9 @@ void RTPSenderVideo::AddRtpHeaderExtensions(
     packet->SetExtension<PlayoutDelayLimits>(current_playout_delay_);
   }
 
-  if (first_packet && absolute_capture_time) {
-    packet->SetExtension<AbsoluteCaptureTimeExtension>(*absolute_capture_time);
+  if (first_packet && video_header.absolute_capture_time.has_value()) {
+    packet->SetExtension<AbsoluteCaptureTimeExtension>(
+        *video_header.absolute_capture_time);
   }
 
   if (video_header.generic) {
@@ -463,8 +476,7 @@ bool RTPSenderVideo::SendVideo(
     int64_t capture_time_ms,
     rtc::ArrayView<const uint8_t> payload,
     RTPVideoHeader video_header,
-    absl::optional<int64_t> expected_retransmission_time_ms,
-    absl::optional<int64_t> estimated_capture_clock_offset_ms) {
+    absl::optional<int64_t> expected_retransmission_time_ms) {
 #if RTC_TRACE_EVENTS_ENABLED
   TRACE_EVENT_ASYNC_STEP1("webrtc", "Video", capture_time_ms, "Send", "type",
                           FrameTypeToString(video_header.frame_type));
@@ -524,22 +536,31 @@ bool RTPSenderVideo::SendVideo(
   single_packet->SetTimestamp(rtp_timestamp);
   single_packet->set_capture_time_ms(capture_time_ms);
 
-  const absl::optional<AbsoluteCaptureTime> absolute_capture_time =
+  // Construct the absolute capture time extension if not provided.
+  if (!video_header.absolute_capture_time.has_value()) {
+    video_header.absolute_capture_time.emplace();
+    video_header.absolute_capture_time->absolute_capture_timestamp =
+        Int64MsToUQ32x32(
+            clock_->ConvertTimestampToNtpTimeInMilliseconds(capture_time_ms));
+    if (include_capture_clock_offset_) {
+      video_header.absolute_capture_time->estimated_capture_clock_offset = 0;
+    }
+  }
+
+  // Let `absolute_capture_time_sender_` decide if the extension should be sent.
+  video_header.absolute_capture_time =
       absolute_capture_time_sender_.OnSendPacket(
           AbsoluteCaptureTimeSender::GetSource(single_packet->Ssrc(),
                                                single_packet->Csrcs()),
           single_packet->Timestamp(), kVideoPayloadTypeFrequency,
-          Int64MsToUQ32x32(
-              clock_->ConvertTimestampToNtpTimeInMilliseconds(capture_time_ms)),
-          /*estimated_capture_clock_offset=*/
-          include_capture_clock_offset_ ? estimated_capture_clock_offset_ms
-                                        : absl::nullopt);
+          video_header.absolute_capture_time->absolute_capture_timestamp,
+          video_header.absolute_capture_time->estimated_capture_clock_offset);
 
   auto first_packet = std::make_unique<RtpPacketToSend>(*single_packet);
   auto middle_packet = std::make_unique<RtpPacketToSend>(*single_packet);
   auto last_packet = std::make_unique<RtpPacketToSend>(*single_packet);
   // Simplest way to estimate how much extensions would occupy is to set them.
-  AddRtpHeaderExtensions(video_header, absolute_capture_time,
+  AddRtpHeaderExtensions(video_header,
                          /*first_packet=*/true, /*last_packet=*/true,
                          single_packet.get());
   if (video_structure_ != nullptr &&
@@ -554,13 +575,13 @@ bool RTPSenderVideo::SendVideo(
     video_structure_ = nullptr;
   }
 
-  AddRtpHeaderExtensions(video_header, absolute_capture_time,
+  AddRtpHeaderExtensions(video_header,
                          /*first_packet=*/true, /*last_packet=*/false,
                          first_packet.get());
-  AddRtpHeaderExtensions(video_header, absolute_capture_time,
+  AddRtpHeaderExtensions(video_header,
                          /*first_packet=*/false, /*last_packet=*/false,
                          middle_packet.get());
-  AddRtpHeaderExtensions(video_header, absolute_capture_time,
+  AddRtpHeaderExtensions(video_header,
                          /*first_packet=*/false, /*last_packet=*/true,
                          last_packet.get());
 
@@ -672,8 +693,6 @@ bool RTPSenderVideo::SendVideo(
     packet->set_is_key_frame(video_header.frame_type ==
                              VideoFrameType::kVideoFrameKey);
 
-    packet->set_is_key_frame(video_header.frame_type == VideoFrameType::kVideoFrameKey);
-
     // Put packetization finish timestamp into extension.
     if (packet->HasExtension<VideoTimingExtension>()) {
       packet->set_packetization_finish_time_ms(clock_->TimeInMilliseconds());
@@ -710,12 +729,6 @@ bool RTPSenderVideo::SendVideo(
     }
   }
 
-  if (!rtp_sender_->deferred_sequence_numbering() &&
-      !rtp_sender_->AssignSequenceNumbersAndStoreLastPacketState(rtp_packets)) {
-    // Media not being sent.
-    return false;
-  }
-
   LogAndSendToNetwork(std::move(rtp_packets), payload.size());
 
   // Update details about the last sent frame.
@@ -734,6 +747,9 @@ bool RTPSenderVideo::SendVideo(
     // This frame will likely be delivered, no need to populate playout
     // delay extensions until it changes again.
     playout_delay_pending_ = false;
+    if (send_allocation_ == SendVideoLayersAllocation::kSendWithResolution) {
+      last_full_sent_allocation_ = allocation_;
+    }
     send_allocation_ = SendVideoLayersAllocation::kDontSend;
   }
 
@@ -800,12 +816,10 @@ uint8_t RTPSenderVideo::GetTemporalId(const RTPVideoHeader& header) {
       return vp9.temporal_idx;
     }
     uint8_t operator()(const RTPVideoHeaderH264&) { return kNoTemporalIdx; }
+    uint8_t operator()(const RTPVideoHeaderH265&) { return kNoTemporalIdx; }
     uint8_t operator()(const RTPVideoHeaderLegacyGeneric&) {
       return kNoTemporalIdx;
     }
-#ifndef DISABLE_H265
-    uint8_t operator()(const RTPVideoHeaderH265&) { return kNoTemporalIdx; }
-#endif
     uint8_t operator()(const absl::monostate&) { return kNoTemporalIdx; }
   };
   return absl::visit(TemporalIdGetter(), header.video_type_header);

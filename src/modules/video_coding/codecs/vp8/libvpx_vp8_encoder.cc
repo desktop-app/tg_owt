@@ -49,6 +49,8 @@ constexpr char kVP8IosMaxNumberOfThreadFieldTrial[] =
 constexpr char kVP8IosMaxNumberOfThreadFieldTrialParameter[] = "max_thread";
 #endif
 
+constexpr absl::string_view kSupportedScalabilityModes[] = {"L1T2", "L1T3"};
+
 constexpr char kVp8ForcePartitionResilience[] =
     "WebRTC-VP8-ForcePartitionResilience";
 
@@ -203,7 +205,7 @@ void SetRawImagePlanes(vpx_image_t* raw_image, VideoFrameBuffer* buffer) {
       break;
     }
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
   }
 }
 
@@ -228,6 +230,15 @@ std::unique_ptr<VideoEncoder> VP8Encoder::Create(
       std::move(frame_buffer_controller_factory);
   return std::make_unique<LibvpxVp8Encoder>(LibvpxInterface::Create(),
                                             std::move(settings));
+}
+
+bool VP8Encoder::SupportsScalabilityMode(absl::string_view scalability_mode) {
+  for (const auto& entry : kSupportedScalabilityModes) {
+    if (entry == scalability_mode) {
+      return true;
+    }
+  }
+  return false;
 }
 
 vpx_enc_frame_flags_t LibvpxVp8Encoder::EncodeFlags(
@@ -1204,7 +1215,6 @@ VideoEncoder::EncoderInfo LibvpxVp8Encoder::GetEncoderInfo() const {
   info.has_trusted_rate_controller =
       rate_control_settings_.LibvpxVp8TrustedRateController();
   info.is_hardware_accelerated = false;
-  info.has_internal_source = false;
   info.supports_simulcast = true;
   if (!resolution_bitrate_limits_.empty()) {
     info.resolution_bitrate_limits = resolution_bitrate_limits_;
@@ -1282,8 +1292,8 @@ void LibvpxVp8Encoder::MaybeUpdatePixelFormat(vpx_img_fmt fmt) {
         << "Not all raw images had the right format!";
     return;
   }
-  RTC_LOG(INFO) << "Updating vp8 encoder pixel format to "
-                << (fmt == VPX_IMG_FMT_NV12 ? "NV12" : "I420");
+  RTC_LOG(LS_INFO) << "Updating vp8 encoder pixel format to "
+                   << (fmt == VPX_IMG_FMT_NV12 ? "NV12" : "I420");
   for (size_t i = 0; i < raw_images_.size(); ++i) {
     vpx_image_t& img = raw_images_[i];
     auto d_w = img.d_w;
@@ -1346,7 +1356,7 @@ LibvpxVp8Encoder::PrepareBuffers(rtc::scoped_refptr<VideoFrameBuffer> buffer) {
       MaybeUpdatePixelFormat(VPX_IMG_FMT_NV12);
       break;
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
   }
 
   // Prepare `raw_images_` from `mapped_buffer` and, if simulcast, scaled
@@ -1388,10 +1398,11 @@ LibvpxVp8Encoder::PrepareBuffers(rtc::scoped_refptr<VideoFrameBuffer> buffer) {
                         << " instead of "
                         << VideoFrameBufferTypeToString(mapped_buffer->type())
                         << ". Can't encode frame.";
-      RTC_NOTREACHED() << "Scaled buffer type "
-                       << VideoFrameBufferTypeToString(scaled_buffer->type())
-                       << " is not compatible with mapped buffer type "
-                       << VideoFrameBufferTypeToString(mapped_buffer->type());
+      RTC_DCHECK_NOTREACHED()
+          << "Scaled buffer type "
+          << VideoFrameBufferTypeToString(scaled_buffer->type())
+          << " is not compatible with mapped buffer type "
+          << VideoFrameBufferTypeToString(mapped_buffer->type());
       return {};
     }
     SetRawImagePlanes(&raw_images_[i], scaled_buffer);

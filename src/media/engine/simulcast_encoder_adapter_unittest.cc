@@ -171,6 +171,9 @@ class MockVideoEncoderFactory : public VideoEncoderFactory {
 
   const std::vector<MockVideoEncoder*>& encoders() const;
   void SetEncoderNames(const std::vector<const char*>& encoder_names);
+  void set_create_video_encode_return_nullptr(bool return_nullptr) {
+    create_video_encoder_return_nullptr_ = return_nullptr;
+  }
   void set_init_encode_return_value(int32_t value);
   void set_requested_resolution_alignments(
       std::vector<int> requested_resolution_alignments) {
@@ -183,6 +186,7 @@ class MockVideoEncoderFactory : public VideoEncoderFactory {
   void DestroyVideoEncoder(VideoEncoder* encoder);
 
  private:
+  bool create_video_encoder_return_nullptr_ = false;
   int32_t init_encode_return_value_ = 0;
   std::vector<MockVideoEncoder*> encoders_;
   std::vector<const char*> encoder_names_;
@@ -238,7 +242,6 @@ class MockVideoEncoder : public VideoEncoder {
         apply_alignment_to_all_simulcast_layers_;
     info.has_trusted_rate_controller = has_trusted_rate_controller_;
     info.is_hardware_accelerated = is_hardware_accelerated_;
-    info.has_internal_source = has_internal_source_;
     info.fps_allocation[0] = fps_allocation_;
     info.supports_simulcast = supports_simulcast_;
     info.is_qp_trusted = is_qp_trusted_;
@@ -291,10 +294,6 @@ class MockVideoEncoder : public VideoEncoder {
     is_hardware_accelerated_ = is_hardware_accelerated;
   }
 
-  void set_has_internal_source(bool has_internal_source) {
-    has_internal_source_ = has_internal_source;
-  }
-
   void set_fps_allocation(const FramerateFractions& fps_allocation) {
     fps_allocation_ = fps_allocation;
   }
@@ -326,7 +325,6 @@ class MockVideoEncoder : public VideoEncoder {
   bool apply_alignment_to_all_simulcast_layers_ = false;
   bool has_trusted_rate_controller_ = false;
   bool is_hardware_accelerated_ = false;
-  bool has_internal_source_ = false;
   int32_t init_encode_return_value_ = 0;
   VideoEncoder::RateControlParameters last_set_rates_;
   FramerateFractions fps_allocation_;
@@ -346,6 +344,10 @@ std::vector<SdpVideoFormat> MockVideoEncoderFactory::GetSupportedFormats()
 
 std::unique_ptr<VideoEncoder> MockVideoEncoderFactory::CreateVideoEncoder(
     const SdpVideoFormat& format) {
+  if (create_video_encoder_return_nullptr_) {
+    return nullptr;
+  }
+
   auto encoder = std::make_unique<::testing::NiceMock<MockVideoEncoder>>(this);
   encoder->set_init_encode_return_value(init_encode_return_value_);
   const char* encoder_name = encoder_names_.empty()
@@ -984,7 +986,7 @@ class FakeNativeBufferI420 : public VideoFrameBuffer {
     if (allow_to_i420_) {
       return I420Buffer::Create(width_, height_);
     } else {
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
     }
     return nullptr;
   }
@@ -1371,28 +1373,6 @@ TEST_F(TestSimulcastEncoderAdapterFake,
           VideoEncoder::ResolutionBitrateLimits{789, 33000, 66000, 99000}));
 }
 
-TEST_F(TestSimulcastEncoderAdapterFake, ReportsInternalSource) {
-  SimulcastTestFixtureImpl::DefaultSettings(
-      &codec_, static_cast<const int*>(kTestTemporalLayerProfile),
-      kVideoCodecVP8);
-  codec_.numberOfSimulcastStreams = 3;
-  adapter_->RegisterEncodeCompleteCallback(this);
-  EXPECT_EQ(0, adapter_->InitEncode(&codec_, kSettings));
-  ASSERT_EQ(3u, helper_->factory()->encoders().size());
-
-  // All encoders have internal source, simulcast adapter reports true.
-  for (MockVideoEncoder* encoder : helper_->factory()->encoders()) {
-    encoder->set_has_internal_source(true);
-  }
-  EXPECT_EQ(0, adapter_->InitEncode(&codec_, kSettings));
-  EXPECT_TRUE(adapter_->GetEncoderInfo().has_internal_source);
-
-  // One encoder does not have internal source, simulcast adapter reports false.
-  helper_->factory()->encoders()[2]->set_has_internal_source(false);
-  EXPECT_EQ(0, adapter_->InitEncode(&codec_, kSettings));
-  EXPECT_FALSE(adapter_->GetEncoderInfo().has_internal_source);
-}
-
 TEST_F(TestSimulcastEncoderAdapterFake, ReportsIsQpTrusted) {
   SimulcastTestFixtureImpl::DefaultSettings(
       &codec_, static_cast<const int*>(kTestTemporalLayerProfile),
@@ -1709,6 +1689,47 @@ TEST_F(TestSimulcastEncoderAdapterFake,
   SetupCodec(/*active_streams=*/{true, false});
   ASSERT_EQ(1u, helper_->factory()->encoders().size());
   EXPECT_NE(helper_->factory()->encoders()[0], prev_encoder);
+}
+
+TEST_F(TestSimulcastEncoderAdapterFake,
+       UseFallbackEncoderIfCreatePrimaryEncoderFailed) {
+  // Enable support for fallback encoder factory and re-setup.
+  use_fallback_factory_ = true;
+  SetUp();
+  SimulcastTestFixtureImpl::DefaultSettings(
+      &codec_, static_cast<const int*>(kTestTemporalLayerProfile),
+      kVideoCodecVP8);
+  codec_.numberOfSimulcastStreams = 1;
+  helper_->factory()->SetEncoderNames({"primary"});
+  helper_->fallback_factory()->SetEncoderNames({"fallback"});
+
+  // Emulate failure at creating of primary encoder and verify that SEA switches
+  // to fallback encoder.
+  helper_->factory()->set_create_video_encode_return_nullptr(true);
+  EXPECT_EQ(0, adapter_->InitEncode(&codec_, kSettings));
+  ASSERT_EQ(0u, helper_->factory()->encoders().size());
+  ASSERT_EQ(1u, helper_->fallback_factory()->encoders().size());
+  EXPECT_EQ("fallback", adapter_->GetEncoderInfo().implementation_name);
+}
+
+TEST_F(TestSimulcastEncoderAdapterFake,
+       InitEncodeReturnsErrorIfEncoderCannotBeCreated) {
+  // Enable support for fallback encoder factory and re-setup.
+  use_fallback_factory_ = true;
+  SetUp();
+  SimulcastTestFixtureImpl::DefaultSettings(
+      &codec_, static_cast<const int*>(kTestTemporalLayerProfile),
+      kVideoCodecVP8);
+  codec_.numberOfSimulcastStreams = 1;
+  helper_->factory()->SetEncoderNames({"primary"});
+  helper_->fallback_factory()->SetEncoderNames({"fallback"});
+
+  // Emulate failure at creating of primary and fallback encoders and verify
+  // that `InitEncode` returns an error.
+  helper_->factory()->set_create_video_encode_return_nullptr(true);
+  helper_->fallback_factory()->set_create_video_encode_return_nullptr(true);
+  EXPECT_EQ(WEBRTC_VIDEO_CODEC_MEMORY,
+            adapter_->InitEncode(&codec_, kSettings));
 }
 
 }  // namespace test

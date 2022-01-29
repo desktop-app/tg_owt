@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <map>
 #include <utility>
 #include <vector>
@@ -27,6 +28,19 @@
 
 namespace dcsctp {
 
+RRSendQueue::RRSendQueue(absl::string_view log_prefix,
+                         size_t buffer_size,
+                         std::function<void(StreamID)> on_buffered_amount_low,
+                         size_t total_buffered_amount_low_threshold,
+                         std::function<void()> on_total_buffered_amount_low,
+                         const DcSctpSocketHandoverState* handover_state)
+    : log_prefix_(std::string(log_prefix) + "fcfs: "),
+      buffer_size_(buffer_size),
+      on_buffered_amount_low_(std::move(on_buffered_amount_low)),
+      total_buffered_amount_(std::move(on_total_buffered_amount_low)) {
+  total_buffered_amount_.SetLowThreshold(total_buffered_amount_low_threshold);
+}
+
 bool RRSendQueue::OutgoingStream::HasDataToSend(TimeMs now) {
   while (!items_.empty()) {
     RRSendQueue::OutgoingStream::Item& item = items_.front();
@@ -36,7 +50,7 @@ bool RRSendQueue::OutgoingStream::HasDataToSend(TimeMs now) {
     }
 
     // Message has expired. Remove it and inspect the next one.
-    if (item.expires_at.has_value() && *item.expires_at <= now) {
+    if (item.expires_at <= now) {
       buffered_amount_.Decrease(item.remaining_size);
       total_buffered_amount_.Decrease(item.remaining_size);
       items_.pop_front();
@@ -51,6 +65,13 @@ bool RRSendQueue::OutgoingStream::HasDataToSend(TimeMs now) {
     return true;
   }
   return false;
+}
+
+void RRSendQueue::OutgoingStream::AddHandoverState(
+    DcSctpSocketHandoverState::OutgoingStream& state) const {
+  state.next_ssn = next_ssn_.value();
+  state.next_ordered_mid = next_ordered_mid_.value();
+  state.next_unordered_mid = next_unordered_mid_.value();
 }
 
 bool RRSendQueue::IsConsistent() const {
@@ -105,7 +126,7 @@ void RRSendQueue::ThresholdWatcher::SetLowThreshold(size_t low_threshold) {
 }
 
 void RRSendQueue::OutgoingStream::Add(DcSctpMessage message,
-                                      absl::optional<TimeMs> expires_at,
+                                      TimeMs expires_at,
                                       const SendOptions& send_options) {
   buffered_amount_.Increase(message.payload().size());
   total_buffered_amount_.Increase(message.payload().size());
@@ -166,7 +187,14 @@ absl::optional<SendQueue::DataToSend> RRSendQueue::OutgoingStream::Produce(
                                    item->message_id.value(), fsn, ppid,
                                    std::move(payload), is_beginning, is_end,
                                    item->send_options.unordered));
-  chunk.max_retransmissions = item->send_options.max_retransmissions;
+  if (item->send_options.max_retransmissions.has_value() &&
+      *item->send_options.max_retransmissions >=
+          std::numeric_limits<MaxRetransmits::UnderlyingType>::min() &&
+      *item->send_options.max_retransmissions <=
+          std::numeric_limits<MaxRetransmits::UnderlyingType>::max()) {
+    chunk.max_retransmissions =
+        MaxRetransmits(*item->send_options.max_retransmissions);
+  }
   chunk.expires_at = item->expires_at;
 
   if (is_end) {
@@ -258,7 +286,7 @@ void RRSendQueue::Add(TimeMs now,
   RTC_DCHECK(!message.payload().empty());
   // Any limited lifetime should start counting from now - when the message
   // has been added to the queue.
-  absl::optional<TimeMs> expires_at = absl::nullopt;
+  TimeMs expires_at = TimeMs::InfiniteFuture();
   if (send_options.lifetime.has_value()) {
     // `expires_at` is the time when it expires. Which is slightly larger than
     // the message's lifetime, as the message is alive during its entire
@@ -432,5 +460,34 @@ RRSendQueue::OutgoingStream& RRSendQueue::GetOrCreateStreamInfo(
                    [this, stream_id]() { on_buffered_amount_low_(stream_id); },
                    total_buffered_amount_))
       .first->second;
+}
+
+HandoverReadinessStatus RRSendQueue::GetHandoverReadiness() const {
+  HandoverReadinessStatus status;
+  if (!IsEmpty()) {
+    status.Add(HandoverUnreadinessReason::kSendQueueNotEmpty);
+  }
+  return status;
+}
+
+void RRSendQueue::AddHandoverState(DcSctpSocketHandoverState& state) {
+  for (const auto& entry : streams_) {
+    DcSctpSocketHandoverState::OutgoingStream state_stream;
+    state_stream.id = entry.first.value();
+    entry.second.AddHandoverState(state_stream);
+    state.tx.streams.push_back(std::move(state_stream));
+  }
+}
+
+void RRSendQueue::RestoreFromState(const DcSctpSocketHandoverState& state) {
+  for (const DcSctpSocketHandoverState::OutgoingStream& state_stream :
+       state.tx.streams) {
+    StreamID stream_id(state_stream.id);
+    streams_.emplace(stream_id, OutgoingStream(
+                                    [this, stream_id]() {
+                                      on_buffered_amount_low_(stream_id);
+                                    },
+                                    total_buffered_amount_, &state_stream));
+  }
 }
 }  // namespace dcsctp

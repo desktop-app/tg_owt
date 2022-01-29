@@ -226,6 +226,7 @@ rtc_library("media_protocol_names") {
     "media_protocol_names.cc",
     "media_protocol_names.h",
   ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 }
 
 rtc_library("peerconnection") {
@@ -873,6 +874,7 @@ if (rtc_include_tests && !build_with_chromium) {
     testonly = true
 
     sources = [
+      "audio_rtp_receiver_unittest.cc",
       "channel_manager_unittest.cc",
       "channel_unittest.cc",
       "dtls_srtp_transport_unittest.cc",
@@ -901,6 +903,7 @@ if (rtc_include_tests && !build_with_chromium) {
     }
 
     deps = [
+      ":audio_rtp_receiver",
       ":libjingle_peerconnection",
       ":pc_test_utils",
       ":peerconnection",
@@ -938,6 +941,7 @@ if (rtc_include_tests && !build_with_chromium) {
       "../rtc_base/third_party/sigslot",
       "../system_wrappers:metrics",
       "../test:field_trial",
+      "../test:test_common",
       "../test:test_main",
       "../test:test_support",
       "//third_party/abseil-cpp/absl/algorithm:container",
@@ -1053,6 +1057,7 @@ if (rtc_include_tests && !build_with_chromium) {
       "rtp_sender_receiver_unittest.cc",
       "rtp_transceiver_unittest.cc",
       "sctp_utils_unittest.cc",
+      "sdp_offer_answer_unittest.cc",
       "sdp_serializer_unittest.cc",
       "stats_collector_unittest.cc",
       "test/fake_audio_capture_module_unittest.cc",
@@ -1343,6 +1348,7 @@ if (rtc_include_tests && !build_with_chromium) {
       "test/mock_peer_connection_observers.h",
       "test/mock_rtp_receiver_internal.h",
       "test/mock_rtp_sender_internal.h",
+      "test/mock_voice_media_channel.h",
       "test/peer_connection_test_wrapper.cc",
       "test/peer_connection_test_wrapper.h",
       "test/rtc_stats_obtainer.h",

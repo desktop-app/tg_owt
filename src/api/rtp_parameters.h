@@ -277,11 +277,6 @@ struct RTC_EXPORT RtpExtension {
       const std::vector<RtpExtension>& extensions,
       absl::string_view uri,
       Filter filter);
-  ABSL_DEPRECATED(
-      "Use RtpExtension::FindHeaderExtensionByUri with filter argument")
-  static const RtpExtension* FindHeaderExtensionByUri(
-      const std::vector<RtpExtension>& extensions,
-      absl::string_view uri);
 
   // Returns the header extension with the given URI and encrypt parameter,
   // if found, otherwise nullptr.
@@ -489,8 +484,6 @@ struct RTC_EXPORT RtpEncodingParameters {
 
   // Specifies the number of temporal layers for video (if the feature is
   // supported by the codec implementation).
-  // TODO(asapersson): Different number of temporal layers are not supported
-  // per simulcast layer.
   // Screencast support is experimental.
   absl::optional<int> num_temporal_layers;
 

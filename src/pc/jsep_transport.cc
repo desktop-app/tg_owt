@@ -399,7 +399,7 @@ webrtc::RTCError JsepTransport::VerifyCertificateFingerprint(
 void JsepTransport::SetActiveResetSrtpParams(bool active_reset_srtp_params) {
   RTC_DCHECK_RUN_ON(network_thread_);
   if (dtls_srtp_transport_) {
-    RTC_LOG(INFO)
+    RTC_LOG(LS_INFO)
         << "Setting active_reset_srtp_params of DtlsSrtpTransport to: "
         << active_reset_srtp_params;
     dtls_srtp_transport_->SetActiveResetSrtpParams(active_reset_srtp_params);
@@ -460,7 +460,7 @@ bool JsepTransport::SetRtcpMux(bool enable,
       }
       break;
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
   }
 
   if (!ret) {
@@ -619,6 +619,9 @@ webrtc::RTCError JsepTransport::NegotiateDtlsRole(
   // ClientHello over each flow (host/port quartet).
   // IOW - actpass and passive modes should be treated as server and
   // active as client.
+  // RFC 8842 section 5.3 updates this text, so that it is mandated
+  // for the responder to handle offers with "active" and "passive"
+  // as well as "actpass"
   bool is_remote_server = false;
   if (local_description_type == SdpType::kOffer) {
     if (local_connection_role != CONNECTIONROLE_ACTPASS) {
@@ -649,15 +652,37 @@ webrtc::RTCError JsepTransport::NegotiateDtlsRole(
       // See https://datatracker.ietf.org/doc/html/draft-ietf-mmusic-dtls-sdp,
       // section 5.5.
       auto current_dtls_role = GetDtlsRole();
-      if (!current_dtls_role ||
-          (*current_dtls_role == rtc::SSL_CLIENT &&
-           remote_connection_role == CONNECTIONROLE_ACTIVE) ||
-          (*current_dtls_role == rtc::SSL_SERVER &&
-           remote_connection_role == CONNECTIONROLE_PASSIVE)) {
-        return webrtc::RTCError(
-            webrtc::RTCErrorType::INVALID_PARAMETER,
-            "Offerer must use actpass value or current negotiated role for "
-            "setup attribute.");
+      if (!current_dtls_role) {
+        // Role not assigned yet. Verify that local role fits with remote role.
+        switch (remote_connection_role) {
+          case CONNECTIONROLE_ACTIVE:
+            if (local_connection_role != CONNECTIONROLE_PASSIVE) {
+              return webrtc::RTCError(
+                  webrtc::RTCErrorType::INVALID_PARAMETER,
+                  "Answerer must be passive when offerer is active");
+            }
+            break;
+          case CONNECTIONROLE_PASSIVE:
+            if (local_connection_role != CONNECTIONROLE_ACTIVE) {
+              return webrtc::RTCError(
+                  webrtc::RTCErrorType::INVALID_PARAMETER,
+                  "Answerer must be active when offerer is passive");
+            }
+            break;
+          default:
+            RTC_DCHECK_NOTREACHED();
+            break;
+        }
+      } else {
+        if ((*current_dtls_role == rtc::SSL_CLIENT &&
+             remote_connection_role == CONNECTIONROLE_ACTIVE) ||
+            (*current_dtls_role == rtc::SSL_SERVER &&
+             remote_connection_role == CONNECTIONROLE_PASSIVE)) {
+          return webrtc::RTCError(
+              webrtc::RTCErrorType::INVALID_PARAMETER,
+              "Offerer must use current negotiated role for "
+              "setup attribute.");
+        }
       }
     }
 

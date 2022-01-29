@@ -487,8 +487,6 @@ void AudioProcessingSimulator::ConfigureAudioProcessor() {
     if (settings_.agc2_use_adaptive_gain) {
       apm_config.gain_controller2.adaptive_digital.enabled =
           *settings_.agc2_use_adaptive_gain;
-      apm_config.gain_controller2.adaptive_digital.level_estimator =
-          settings_.agc2_adaptive_level_estimator;
     }
   }
   if (settings_.use_pre_amplifier) {
@@ -538,10 +536,6 @@ void AudioProcessingSimulator::ConfigureAudioProcessor() {
 
   if (settings_.use_hpf) {
     apm_config.high_pass_filter.enabled = *settings_.use_hpf;
-  }
-
-  if (settings_.use_le) {
-    apm_config.level_estimation.enabled = *settings_.use_le;
   }
 
   if (settings_.use_vad) {

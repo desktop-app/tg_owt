@@ -17,7 +17,7 @@ import android.media.MediaCodecInfo;
 import android.media.MediaCodecInfo.CodecCapabilities;
 import android.media.MediaCodecList;
 import android.os.Build;
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,7 +46,7 @@ class MediaCodecVideoDecoderFactory implements VideoDecoderFactory {
   @Nullable
   @Override
   public VideoDecoder createDecoder(VideoCodecInfo codecType) {
-    VideoCodecMimeType type = VideoCodecMimeType.fromSdpCodecName(codecType.getName());
+    VideoCodecMimeType type = VideoCodecMimeType.valueOf(codecType.getName());
     MediaCodecInfo info = findCodecForType(type);
 
     if (info == null) {
@@ -68,7 +68,7 @@ class MediaCodecVideoDecoderFactory implements VideoDecoderFactory {
              VideoCodecMimeType.VP9, VideoCodecMimeType.H264, VideoCodecMimeType.AV1}) {
       MediaCodecInfo codec = findCodecForType(type);
       if (codec != null) {
-        String name = type.toSdpCodecName();
+        String name = type.name();
         if (type == VideoCodecMimeType.H264 && isH264HighProfileSupported(codec)) {
           supportedCodecInfos.add(new VideoCodecInfo(
               name, MediaCodecUtils.getCodecProperties(type, /* highProfile= */ true)));
@@ -110,7 +110,6 @@ class MediaCodecVideoDecoderFactory implements VideoDecoderFactory {
 
   // Returns true if the given MediaCodecInfo indicates a supported encoder for the given type.
   private boolean isSupportedCodec(MediaCodecInfo info, VideoCodecMimeType type) {
-    String name = info.getName();
     if (!MediaCodecUtils.codecSupportsType(info, type)) {
       return false;
     }

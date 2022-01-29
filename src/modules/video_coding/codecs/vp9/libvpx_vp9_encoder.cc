@@ -227,9 +227,6 @@ LibvpxVp9Encoder::LibvpxVp9Encoder(const cricket::VideoCodec& codec,
       first_frame_in_picture_(true),
       ss_info_needed_(false),
       force_all_active_layers_(false),
-      use_svc_controller_(
-          absl::StartsWith(trials.Lookup("WebRTC-Vp9DependencyDescriptor"),
-                           "Enabled")),
       is_flexible_mode_(false),
       variable_framerate_experiment_(ParseVariableFramerateConfig(trials)),
       variable_framerate_controller_(
@@ -399,20 +396,77 @@ bool LibvpxVp9Encoder::SetSvcRates(
   }
 
   if (svc_controller_) {
-    VideoBitrateAllocation allocation;
     for (int sid = 0; sid < num_spatial_layers_; ++sid) {
+      // Bitrates in `layer_target_bitrate` are accumulated for each temporal
+      // layer but in `VideoBitrateAllocation` they should be separated.
+      int previous_bitrate_kbps = 0;
       for (int tid = 0; tid < num_temporal_layers_; ++tid) {
-        allocation.SetBitrate(
-            sid, tid,
-            config_->layer_target_bitrate[sid * num_temporal_layers_ + tid] *
-                1000);
+        int accumulated_bitrate_kbps =
+            config_->layer_target_bitrate[sid * num_temporal_layers_ + tid];
+        int single_layer_bitrate_kbps =
+            accumulated_bitrate_kbps - previous_bitrate_kbps;
+        RTC_DCHECK_GE(single_layer_bitrate_kbps, 0);
+        current_bitrate_allocation_.SetBitrate(
+            sid, tid, single_layer_bitrate_kbps * 1'000);
+        previous_bitrate_kbps = accumulated_bitrate_kbps;
       }
     }
-    svc_controller_->OnRatesUpdated(allocation);
+    svc_controller_->OnRatesUpdated(current_bitrate_allocation_);
+  } else {
+    current_bitrate_allocation_ = bitrate_allocation;
   }
-  current_bitrate_allocation_ = bitrate_allocation;
   config_changed_ = true;
   return true;
+}
+
+void LibvpxVp9Encoder::DisableSpatialLayer(int sid) {
+  RTC_DCHECK_LT(sid, num_spatial_layers_);
+  if (config_->ss_target_bitrate[sid] == 0) {
+    return;
+  }
+  config_->ss_target_bitrate[sid] = 0;
+  for (int tid = 0; tid < num_temporal_layers_; ++tid) {
+    config_->layer_target_bitrate[sid * num_temporal_layers_ + tid] = 0;
+  }
+  config_changed_ = true;
+}
+
+void LibvpxVp9Encoder::EnableSpatialLayer(int sid) {
+  RTC_DCHECK_LT(sid, num_spatial_layers_);
+  if (config_->ss_target_bitrate[sid] > 0) {
+    return;
+  }
+  for (int tid = 0; tid < num_temporal_layers_; ++tid) {
+    config_->layer_target_bitrate[sid * num_temporal_layers_ + tid] =
+        current_bitrate_allocation_.GetBitrate(sid, tid) / 1000;
+  }
+  config_->ss_target_bitrate[sid] =
+      current_bitrate_allocation_.GetSpatialLayerSum(sid) / 1000;
+  RTC_DCHECK_GT(config_->ss_target_bitrate[sid], 0);
+  config_changed_ = true;
+}
+
+void LibvpxVp9Encoder::SetActiveSpatialLayers() {
+  // Svc controller may decide to skip a frame at certain spatial layer even
+  // when bitrate for it is non-zero, however libvpx uses configured bitrate as
+  // a signal which layers should be produced.
+  RTC_DCHECK(svc_controller_);
+  RTC_DCHECK(!layer_frames_.empty());
+  RTC_DCHECK(absl::c_is_sorted(
+      layer_frames_, [](const ScalableVideoController::LayerFrameConfig& lhs,
+                        const ScalableVideoController::LayerFrameConfig& rhs) {
+        return lhs.SpatialId() < rhs.SpatialId();
+      }));
+
+  auto frame_it = layer_frames_.begin();
+  for (int sid = 0; sid < num_spatial_layers_; ++sid) {
+    if (frame_it != layer_frames_.end() && frame_it->SpatialId() == sid) {
+      EnableSpatialLayer(sid);
+      ++frame_it;
+    } else {
+      DisableSpatialLayer(sid);
+    }
+  }
 }
 
 void LibvpxVp9Encoder::SetRates(const RateControlParameters& parameters) {
@@ -473,9 +527,11 @@ int LibvpxVp9Encoder::InitEncode(const VideoCodec* inst,
   }
   if (encoder_ == nullptr) {
     encoder_ = new vpx_codec_ctx_t;
+    memset(encoder_, 0, sizeof(*encoder_));
   }
   if (config_ == nullptr) {
     config_ = new vpx_codec_enc_cfg_t;
+    memset(config_, 0, sizeof(*config_));
   }
   timestamp_ = 0;
   if (&codec_ != inst) {
@@ -493,11 +549,9 @@ int LibvpxVp9Encoder::InitEncode(const VideoCodec* inst,
     num_temporal_layers_ = 1;
   }
 
-  if (use_svc_controller_) {
-    svc_controller_ = CreateVp9ScalabilityStructure(*inst);
-  }
-  framerate_controller_ = std::vector<FramerateController>(
-      num_spatial_layers_, FramerateController(codec_.maxFramerate));
+  svc_controller_ = CreateVp9ScalabilityStructure(*inst);
+  framerate_controller_ = std::vector<FramerateControllerDeprecated>(
+      num_spatial_layers_, FramerateControllerDeprecated(codec_.maxFramerate));
 
   is_svc_ = (num_spatial_layers_ > 1 || num_temporal_layers_ > 1);
 
@@ -519,7 +573,7 @@ int LibvpxVp9Encoder::InitEncode(const VideoCodec* inst,
     case VP9Profile::kProfile1:
       // Encoding of profile 1 is not implemented. It would require extended
       // support for I444, I422, and I440 buffers.
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       break;
     case VP9Profile::kProfile2:
       img_fmt = VPX_IMG_FMT_I42016;
@@ -779,7 +833,7 @@ int LibvpxVp9Encoder::InitAndSetControlSettings(const VideoCodec* inst) {
         libvpx_->codec_control(encoder_, VP9E_SET_SVC_INTER_LAYER_PRED, 2);
         break;
       default:
-        RTC_NOTREACHED();
+        RTC_DCHECK_NOTREACHED();
     }
 
     memset(&svc_drop_frame_, 0, sizeof(svc_drop_frame_));
@@ -978,6 +1032,7 @@ int LibvpxVp9Encoder::Encode(const VideoFrame& input_image,
       layer_id.temporal_layer_id_per_spatial[layer.SpatialId()] =
           layer.TemporalId();
     }
+    SetActiveSpatialLayers();
   }
 
   if (is_svc_ && performance_flags_.use_per_layer_speed) {
@@ -1056,7 +1111,7 @@ int LibvpxVp9Encoder::Encode(const VideoFrame& input_image,
       break;
     }
     case VP9Profile::kProfile1: {
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       break;
     }
     case VP9Profile::kProfile2: {
@@ -1680,7 +1735,6 @@ VideoEncoder::EncoderInfo LibvpxVp9Encoder::GetEncoderInfo() const {
   }
   info.has_trusted_rate_controller = trusted_rate_controller_;
   info.is_hardware_accelerated = false;
-  info.has_internal_source = false;
   if (inited_) {
     // Find the max configured fps of any active spatial layer.
     float max_fps = 0.0;
@@ -1875,8 +1929,8 @@ void LibvpxVp9Encoder::MaybeRewrapRawWithFormat(const vpx_img_fmt fmt) {
     raw_ = libvpx_->img_wrap(nullptr, fmt, codec_.width, codec_.height, 1,
                              nullptr);
   } else if (raw_->fmt != fmt) {
-    RTC_LOG(INFO) << "Switching VP9 encoder pixel format to "
-                  << (fmt == VPX_IMG_FMT_NV12 ? "NV12" : "I420");
+    RTC_LOG(LS_INFO) << "Switching VP9 encoder pixel format to "
+                     << (fmt == VPX_IMG_FMT_NV12 ? "NV12" : "I420");
     libvpx_->img_free(raw_);
     raw_ = libvpx_->img_wrap(nullptr, fmt, codec_.width, codec_.height, 1,
                              nullptr);
@@ -1946,7 +2000,7 @@ rtc::scoped_refptr<VideoFrameBuffer> LibvpxVp9Encoder::PrepareBufferForProfile0(
       break;
     }
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
   }
   return mapped_buffer;
 }

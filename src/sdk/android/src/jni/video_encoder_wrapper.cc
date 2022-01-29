@@ -13,9 +13,6 @@
 #include <utility>
 
 #include "common_video/h264/h264_common.h"
-#ifndef DISABLE_H265
-#include "common_video/h265/h265_common.h"
-#endif
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "modules/video_coding/svc/scalable_video_controller_no_layering.h"
@@ -104,7 +101,6 @@ int32_t VideoEncoderWrapper::InitEncodeInternal(JNIEnv* jni) {
 
 void VideoEncoderWrapper::UpdateEncoderInfo(JNIEnv* jni) {
   encoder_info_.supports_native_handle = true;
-  encoder_info_.has_internal_source = false;
 
   encoder_info_.implementation_name = JavaToStdString(
       jni, Java_VideoEncoder_getImplementationName(jni, encoder_));
@@ -116,6 +112,12 @@ void VideoEncoderWrapper::UpdateEncoderInfo(JNIEnv* jni) {
 
   encoder_info_.resolution_bitrate_limits = JavaToNativeResolutionBitrateLimits(
       jni, Java_VideoEncoder_getResolutionBitrateLimits(jni, encoder_));
+
+  EncoderInfo info = GetEncoderInfoInternal(jni);
+  encoder_info_.requested_resolution_alignment =
+      info.requested_resolution_alignment;
+  encoder_info_.apply_alignment_to_all_simulcast_layers =
+      info.apply_alignment_to_all_simulcast_layers;
 }
 
 int32_t VideoEncoderWrapper::RegisterEncodeCompleteCallback(
@@ -170,15 +172,14 @@ int32_t VideoEncoderWrapper::Encode(
   return HandleReturnCode(jni, ret, "encode");
 }
 
-void VideoEncoderWrapper::SetRates(const RateControlParameters& parameters) {
+void VideoEncoderWrapper::SetRates(const RateControlParameters& rc_parameters) {
   JNIEnv* jni = AttachCurrentThreadIfNeeded();
 
-  ScopedJavaLocalRef<jobject> j_bitrate_allocation =
-      ToJavaBitrateAllocation(jni, parameters.bitrate);
-  ScopedJavaLocalRef<jobject> ret = Java_VideoEncoder_setRateAllocation(
-      jni, encoder_, j_bitrate_allocation,
-      (jint)(parameters.framerate_fps + 0.5));
-  HandleReturnCode(jni, ret, "setRateAllocation");
+  ScopedJavaLocalRef<jobject> j_rc_parameters =
+      ToJavaRateControlParameters(jni, rc_parameters);
+  ScopedJavaLocalRef<jobject> ret =
+      Java_VideoEncoder_setRates(jni, encoder_, j_rc_parameters);
+  HandleReturnCode(jni, ret, "setRates");
 }
 
 VideoEncoder::EncoderInfo VideoEncoderWrapper::GetEncoderInfo() const {
@@ -232,6 +233,26 @@ VideoEncoderWrapper::GetScalingSettingsInternal(JNIEnv* jni) const {
     default:
       return ScalingSettings::kOff;
   }
+}
+
+VideoEncoder::EncoderInfo VideoEncoderWrapper::GetEncoderInfoInternal(
+    JNIEnv* jni) const {
+  ScopedJavaLocalRef<jobject> j_encoder_info =
+      Java_VideoEncoder_getEncoderInfo(jni, encoder_);
+
+  jint requested_resolution_alignment =
+      Java_EncoderInfo_getRequestedResolutionAlignment(jni, j_encoder_info);
+
+  jboolean apply_alignment_to_all_simulcast_layers =
+      Java_EncoderInfo_getApplyAlignmentToAllSimulcastLayers(jni,
+                                                             j_encoder_info);
+
+  VideoEncoder::EncoderInfo info;
+  info.requested_resolution_alignment = requested_resolution_alignment;
+  info.apply_alignment_to_all_simulcast_layers =
+      apply_alignment_to_all_simulcast_layers;
+
+  return info;
 }
 
 void VideoEncoderWrapper::OnEncodedFrame(
@@ -315,54 +336,6 @@ int32_t VideoEncoderWrapper::HandleReturnCode(JNIEnv* jni,
   return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
 }
 
-RTPFragmentationHeader VideoEncoderWrapper::ParseFragmentationHeader(
-    rtc::ArrayView<const uint8_t> buffer) {
-  RTPFragmentationHeader header;
-  if (codec_settings_.codecType == kVideoCodecH264) {
-      h264_bitstream_parser_.ParseBitstream(buffer.data(), buffer.size());
-    // For H.264 search for start codes.
-    const std::vector<H264::NaluIndex> nalu_idxs =
-        H264::FindNaluIndices(buffer.data(), buffer.size());
-    if (nalu_idxs.empty()) {
-      RTC_LOG(LS_ERROR) << "Start code is not found!";
-      RTC_LOG(LS_ERROR) << "Data:" << buffer[0] << " " << buffer[1] << " "
-                        << buffer[2] << " " << buffer[3] << " " << buffer[4]
-                        << " " << buffer[5];
-    }
-    header.VerifyAndAllocateFragmentationHeader(nalu_idxs.size());
-    for (size_t i = 0; i < nalu_idxs.size(); i++) {
-      header.fragmentationOffset[i] = nalu_idxs[i].payload_start_offset;
-      header.fragmentationLength[i] = nalu_idxs[i].payload_size;
-    }
-  }
-#ifndef DISABLE_H265
-  else if (codec_settings_.codecType == kVideoCodecH265) {
-    h265_bitstream_parser_.ParseBitstream(buffer.data(), buffer.size());
-    // For H.265 search for start codes.
-    const std::vector<H265::NaluIndex> nalu_idxs =
-        H265::FindNaluIndices(buffer.data(), buffer.size());
-    if (nalu_idxs.empty()) {
-      RTC_LOG(LS_ERROR) << "Start code is not found!";
-      RTC_LOG(LS_ERROR) << "Data:" << buffer[0] << " " << buffer[1] << " "
-                        << buffer[2] << " " << buffer[3] << " " << buffer[4]
-                        << " " << buffer[5];
-    }
-    header.VerifyAndAllocateFragmentationHeader(nalu_idxs.size());
-    for (size_t i = 0; i < nalu_idxs.size(); i++) {
-      header.fragmentationOffset[i] = nalu_idxs[i].payload_start_offset;
-      header.fragmentationLength[i] = nalu_idxs[i].payload_size;
-    }
-  }
-#endif
-  else {
-    // Generate a header describing a single fragment.
-    header.VerifyAndAllocateFragmentationHeader(1);
-    header.fragmentationOffset[0] = 0;
-    header.fragmentationLength[0] = buffer.size();
-  }
-  return header;
-}
-
 int VideoEncoderWrapper::ParseQp(rtc::ArrayView<const uint8_t> buffer) {
   int qp;
   bool success;
@@ -378,11 +351,6 @@ int VideoEncoderWrapper::ParseQp(rtc::ArrayView<const uint8_t> buffer) {
       qp = h264_bitstream_parser_.GetLastSliceQp().value_or(-1);
       success = (qp >= 0);
       break;
-#ifndef DISABLE_H265
-    case kVideoCodecH265:
-      success = h265_bitstream_parser_.GetLastSliceQp(&qp);
-      break;
-#endif
     default:  // Default is to not provide QP.
       success = false;
       break;
@@ -464,6 +432,16 @@ ScopedJavaLocalRef<jobject> VideoEncoderWrapper::ToJavaBitrateAllocation(
                                j_array_spatial_layer.obj());
   }
   return Java_BitrateAllocation_Constructor(jni, j_allocation_array);
+}
+
+ScopedJavaLocalRef<jobject> VideoEncoderWrapper::ToJavaRateControlParameters(
+    JNIEnv* jni,
+    const VideoEncoder::RateControlParameters& rc_parameters) {
+  ScopedJavaLocalRef<jobject> j_bitrate_allocation =
+      ToJavaBitrateAllocation(jni, rc_parameters.bitrate);
+
+  return Java_RateControlParameters_Constructor(jni, j_bitrate_allocation,
+                                                rc_parameters.framerate_fps);
 }
 
 std::unique_ptr<VideoEncoder> JavaToNativeVideoEncoder(

@@ -21,7 +21,6 @@
 #include "api/units/timestamp.h"
 #include "rtc_base/task_utils/pending_task_safety_flag.h"
 #include "system_wrappers/include/clock.h"
-#include "absl/meta/type_traits.h"
 
 namespace webrtc {
 
@@ -69,8 +68,8 @@ class RepeatingTaskImpl final : public RepeatingTaskBase {
         closure_(std::forward<Closure>(closure)) {
     static_assert(
         std::is_same<TimeDelta,
-                     absl::result_of_t<decltype (&Closure::operator())(
-                         Closure)>>::value,
+                     typename std::result_of<decltype (&Closure::operator())(
+                         Closure)>::type>::value,
         "");
   }
 

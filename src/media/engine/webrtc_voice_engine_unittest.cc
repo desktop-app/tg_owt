@@ -148,7 +148,7 @@ TEST(WebRtcVoiceEngineTestStubLibrary, StartupShutdown) {
     AdmSetupExpectations(adm);
     rtc::scoped_refptr<StrictMock<webrtc::test::MockAudioProcessing>> apm =
         use_null_apm ? nullptr
-                     : new rtc::RefCountedObject<
+                     : rtc::make_ref_counted<
                            StrictMock<webrtc::test::MockAudioProcessing>>();
 
     webrtc::AudioProcessing::Config apm_config;
@@ -188,7 +188,7 @@ class WebRtcVoiceEngineTestFake : public ::testing::TestWithParam<bool> {
         adm_(webrtc::test::MockAudioDeviceModule::CreateStrict()),
         apm_(use_null_apm_
                  ? nullptr
-                 : new rtc::RefCountedObject<
+                 : rtc::make_ref_counted<
                        StrictMock<webrtc::test::MockAudioProcessing>>()),
         call_(),
         override_field_trials_(field_trials) {
@@ -760,8 +760,6 @@ class WebRtcVoiceEngineTestFake : public ::testing::TestWithParam<bool> {
   void VerifyGainControlEnabledCorrectly() {
     EXPECT_TRUE(apm_config_.gain_controller1.enabled);
     EXPECT_EQ(kDefaultAgcMode, apm_config_.gain_controller1.mode);
-    EXPECT_EQ(0, apm_config_.gain_controller1.analog_level_minimum);
-    EXPECT_EQ(255, apm_config_.gain_controller1.analog_level_maximum);
   }
 
   void VerifyGainControlDefaultSettings() {
@@ -1022,23 +1020,25 @@ TEST_P(WebRtcVoiceEngineTestFake, ChangeRecvCodecPayloadType) {
   EXPECT_TRUE(channel_->SetRecvParameters(parameters));
 }
 
-// Test that we set Opus/Red under the field trial.
-TEST_P(WebRtcVoiceEngineTestFake, RecvRed) {
-  webrtc::test::ScopedFieldTrials override_field_trials(
-      "WebRTC-Audio-Red-For-Opus/Enabled/");
-
+// Test that we do allow setting Opus/Red by default.
+TEST_P(WebRtcVoiceEngineTestFake, RecvRedDefault) {
   EXPECT_TRUE(SetupRecvStream());
   cricket::AudioRecvParameters parameters;
   parameters.codecs.push_back(kOpusCodec);
   parameters.codecs.push_back(kRed48000Codec);
+  parameters.codecs[1].params[""] = "111/111";
   EXPECT_TRUE(channel_->SetRecvParameters(parameters));
   EXPECT_THAT(GetRecvStreamConfig(kSsrcX).decoder_map,
               (ContainerEq<std::map<int, webrtc::SdpAudioFormat>>(
-                  {{111, {"opus", 48000, 2}}, {112, {"red", 48000, 2}}})));
+                  {{111, {"opus", 48000, 2}},
+                   {112, {"red", 48000, 2, {{"", "111/111"}}}}})));
 }
 
-// Test that we do not allow setting Opus/Red by default.
-TEST_P(WebRtcVoiceEngineTestFake, RecvRedDefault) {
+// Test that we disable Opus/Red with the kill switch.
+TEST_P(WebRtcVoiceEngineTestFake, RecvRed) {
+  webrtc::test::ScopedFieldTrials override_field_trials(
+      "WebRTC-Audio-Red-For-Opus/Disabled/");
+
   EXPECT_TRUE(SetupRecvStream());
   cricket::AudioRecvParameters parameters;
   parameters.codecs.push_back(kOpusCodec);
@@ -1495,15 +1495,13 @@ TEST_P(WebRtcVoiceEngineTestFake, SetSendCodecs) {
   EXPECT_FALSE(channel_->CanInsertDtmf());
 }
 
-// Test that we use Opus/Red under the field trial when it is
-// listed as the first codec.
+// Test that we use Opus/Red by default when it is
+// listed as the first codec and there is an fmtp line.
 TEST_P(WebRtcVoiceEngineTestFake, SetSendCodecsRed) {
-  webrtc::test::ScopedFieldTrials override_field_trials(
-      "WebRTC-Audio-Red-For-Opus/Enabled/");
-
   EXPECT_TRUE(SetupSendStream());
   cricket::AudioSendParameters parameters;
   parameters.codecs.push_back(kRed48000Codec);
+  parameters.codecs[0].params[""] = "111/111";
   parameters.codecs.push_back(kOpusCodec);
   SetSendParameters(parameters);
   const auto& send_codec_spec = *GetSendStreamConfig(kSsrcX).send_codec_spec;
@@ -1512,20 +1510,74 @@ TEST_P(WebRtcVoiceEngineTestFake, SetSendCodecsRed) {
   EXPECT_EQ(112, send_codec_spec.red_payload_type);
 }
 
-// Test that we do not use Opus/Red under the field trial by default.
-TEST_P(WebRtcVoiceEngineTestFake, SetSendCodecsRedDefault) {
-  webrtc::test::ScopedFieldTrials override_field_trials(
-      "WebRTC-Audio-Red-For-Opus/Enabled/");
-
+// Test that we do not use Opus/Red by default when it is
+// listed as the first codec but there is no fmtp line.
+TEST_P(WebRtcVoiceEngineTestFake, SetSendCodecsRedNoFmtp) {
   EXPECT_TRUE(SetupSendStream());
   cricket::AudioSendParameters parameters;
-  parameters.codecs.push_back(kOpusCodec);
   parameters.codecs.push_back(kRed48000Codec);
+  parameters.codecs.push_back(kOpusCodec);
   SetSendParameters(parameters);
   const auto& send_codec_spec = *GetSendStreamConfig(kSsrcX).send_codec_spec;
   EXPECT_EQ(111, send_codec_spec.payload_type);
   EXPECT_STRCASEEQ("opus", send_codec_spec.format.name.c_str());
   EXPECT_EQ(absl::nullopt, send_codec_spec.red_payload_type);
+}
+
+// Test that we do not use Opus/Red by default.
+TEST_P(WebRtcVoiceEngineTestFake, SetSendCodecsRedDefault) {
+  EXPECT_TRUE(SetupSendStream());
+  cricket::AudioSendParameters parameters;
+  parameters.codecs.push_back(kOpusCodec);
+  parameters.codecs.push_back(kRed48000Codec);
+  parameters.codecs[1].params[""] = "111/111";
+  SetSendParameters(parameters);
+  const auto& send_codec_spec = *GetSendStreamConfig(kSsrcX).send_codec_spec;
+  EXPECT_EQ(111, send_codec_spec.payload_type);
+  EXPECT_STRCASEEQ("opus", send_codec_spec.format.name.c_str());
+  EXPECT_EQ(absl::nullopt, send_codec_spec.red_payload_type);
+}
+
+// Test that the RED fmtp line must match the payload type.
+TEST_P(WebRtcVoiceEngineTestFake, SetSendCodecsRedFmtpMismatch) {
+  EXPECT_TRUE(SetupSendStream());
+  cricket::AudioSendParameters parameters;
+  parameters.codecs.push_back(kRed48000Codec);
+  parameters.codecs[0].params[""] = "8/8";
+  parameters.codecs.push_back(kOpusCodec);
+  SetSendParameters(parameters);
+  const auto& send_codec_spec = *GetSendStreamConfig(kSsrcX).send_codec_spec;
+  EXPECT_EQ(111, send_codec_spec.payload_type);
+  EXPECT_STRCASEEQ("opus", send_codec_spec.format.name.c_str());
+  EXPECT_EQ(absl::nullopt, send_codec_spec.red_payload_type);
+}
+
+// Test that the RED fmtp line must show 2..32 payloads.
+TEST_P(WebRtcVoiceEngineTestFake, SetSendCodecsRedFmtpAmountOfRedundancy) {
+  EXPECT_TRUE(SetupSendStream());
+  cricket::AudioSendParameters parameters;
+  parameters.codecs.push_back(kRed48000Codec);
+  parameters.codecs[0].params[""] = "111";
+  parameters.codecs.push_back(kOpusCodec);
+  SetSendParameters(parameters);
+  const auto& send_codec_spec = *GetSendStreamConfig(kSsrcX).send_codec_spec;
+  EXPECT_EQ(111, send_codec_spec.payload_type);
+  EXPECT_STRCASEEQ("opus", send_codec_spec.format.name.c_str());
+  EXPECT_EQ(absl::nullopt, send_codec_spec.red_payload_type);
+  for (int i = 1; i < 32; i++) {
+    parameters.codecs[0].params[""] += "/111";
+    SetSendParameters(parameters);
+    const auto& send_codec_spec2 = *GetSendStreamConfig(kSsrcX).send_codec_spec;
+    EXPECT_EQ(111, send_codec_spec2.payload_type);
+    EXPECT_STRCASEEQ("opus", send_codec_spec2.format.name.c_str());
+    EXPECT_EQ(112, send_codec_spec2.red_payload_type);
+  }
+  parameters.codecs[0].params[""] += "/111";
+  SetSendParameters(parameters);
+  const auto& send_codec_spec3 = *GetSendStreamConfig(kSsrcX).send_codec_spec;
+  EXPECT_EQ(111, send_codec_spec3.payload_type);
+  EXPECT_STRCASEEQ("opus", send_codec_spec3.format.name.c_str());
+  EXPECT_EQ(absl::nullopt, send_codec_spec3.red_payload_type);
 }
 
 // Test that WebRtcVoiceEngine reconfigures, rather than recreates its
@@ -3656,10 +3708,8 @@ TEST(WebRtcVoiceEngineTest, StartupShutdownWithExternalADM) {
   for (bool use_null_apm : {false, true}) {
     std::unique_ptr<webrtc::TaskQueueFactory> task_queue_factory =
         webrtc::CreateDefaultTaskQueueFactory();
-    rtc::scoped_refptr<rtc::RefCountedObject<
-        ::testing::NiceMock<webrtc::test::MockAudioDeviceModule>>>
-        adm(new rtc::RefCountedObject<
-            ::testing::NiceMock<webrtc::test::MockAudioDeviceModule>>());
+    auto adm = rtc::make_ref_counted<
+        ::testing::NiceMock<webrtc::test::MockAudioDeviceModule>>();
     {
       rtc::scoped_refptr<webrtc::AudioProcessing> apm =
           use_null_apm ? nullptr : webrtc::AudioProcessingBuilder().Create();
@@ -3682,7 +3732,8 @@ TEST(WebRtcVoiceEngineTest, StartupShutdownWithExternalADM) {
       delete channel;
     }
     // The engine/channel should have dropped their references.
-    EXPECT_TRUE(adm->HasOneRef());
+    EXPECT_EQ(adm.release()->Release(),
+              rtc::RefCountReleaseStatus::kDroppedLastRef);
   }
 }
 
@@ -3844,7 +3895,7 @@ TEST(WebRtcVoiceEngineTest, CollectRecvCodecs) {
     rtc::scoped_refptr<webrtc::MockAudioEncoderFactory> unused_encoder_factory =
         webrtc::MockAudioEncoderFactory::CreateUnusedFactory();
     rtc::scoped_refptr<webrtc::MockAudioDecoderFactory> mock_decoder_factory =
-        new rtc::RefCountedObject<webrtc::MockAudioDecoderFactory>;
+        rtc::make_ref_counted<webrtc::MockAudioDecoderFactory>();
     EXPECT_CALL(*mock_decoder_factory.get(), GetSupportedDecoders())
         .WillOnce(Return(specs));
     rtc::scoped_refptr<webrtc::test::MockAudioDeviceModule> adm =

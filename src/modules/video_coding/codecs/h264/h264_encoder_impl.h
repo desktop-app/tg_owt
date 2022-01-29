@@ -17,6 +17,10 @@
 // #ifdef unless needed and tested.
 #ifdef WEBRTC_USE_H264
 
+#if defined(WEBRTC_WIN) && !defined(__clang__)
+#error "See: bugs.webrtc.org/9213#c13."
+#endif
+
 #include <memory>
 #include <vector>
 
@@ -25,7 +29,7 @@
 #include "common_video/h264/h264_bitstream_parser.h"
 #include "modules/video_coding/codecs/h264/include/h264.h"
 #include "modules/video_coding/utility/quality_scaler.h"
-#include <wels/codec_app_def.h>
+#include "third_party/openh264/src/codec/api/svc/codec_app_def.h"
 
 class ISVCEncoder;
 

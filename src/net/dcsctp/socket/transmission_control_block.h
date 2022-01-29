@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/functional/bind_front.h"
 #include "absl/strings/string_view.h"
 #include "net/dcsctp/common/sequence_numbers.h"
 #include "net/dcsctp/packet/chunk/cookie_echo_chunk.h"
@@ -28,6 +29,7 @@
 #include "net/dcsctp/socket/capabilities.h"
 #include "net/dcsctp/socket/context.h"
 #include "net/dcsctp/socket/heartbeat_handler.h"
+#include "net/dcsctp/socket/packet_sender.h"
 #include "net/dcsctp/socket/stream_reset_handler.h"
 #include "net/dcsctp/timer/timer.h"
 #include "net/dcsctp/tx/retransmission_error_counter.h"
@@ -42,20 +44,22 @@ namespace dcsctp {
 // closed or restarted, this object will be deleted and/or replaced.
 class TransmissionControlBlock : public Context {
  public:
-  TransmissionControlBlock(TimerManager& timer_manager,
-                           absl::string_view log_prefix,
-                           const DcSctpOptions& options,
-                           const Capabilities& capabilities,
-                           DcSctpSocketCallbacks& callbacks,
-                           SendQueue& send_queue,
-                           VerificationTag my_verification_tag,
-                           TSN my_initial_tsn,
-                           VerificationTag peer_verification_tag,
-                           TSN peer_initial_tsn,
-                           size_t a_rwnd,
-                           TieTag tie_tag,
-                           std::function<bool()> is_connection_established,
-                           std::function<void(SctpPacket::Builder&)> send_fn)
+  TransmissionControlBlock(
+      TimerManager& timer_manager,
+      absl::string_view log_prefix,
+      const DcSctpOptions& options,
+      const Capabilities& capabilities,
+      DcSctpSocketCallbacks& callbacks,
+      SendQueue& send_queue,
+      VerificationTag my_verification_tag,
+      TSN my_initial_tsn,
+      VerificationTag peer_verification_tag,
+      TSN peer_initial_tsn,
+      size_t a_rwnd,
+      TieTag tie_tag,
+      PacketSender& packet_sender,
+      std::function<bool()> is_connection_established,
+      const DcSctpSocketHandoverState* handover_state = nullptr)
       : log_prefix_(log_prefix),
         options_(options),
         timer_manager_(timer_manager),
@@ -63,11 +67,15 @@ class TransmissionControlBlock : public Context {
         callbacks_(callbacks),
         t3_rtx_(timer_manager_.CreateTimer(
             "t3-rtx",
-            [this]() { return OnRtxTimerExpiry(); },
-            TimerOptions(options.rto_initial))),
+            absl::bind_front(&TransmissionControlBlock::OnRtxTimerExpiry, this),
+            TimerOptions(options.rto_initial,
+                         TimerBackoffAlgorithm::kExponential,
+                         /*max_restarts=*/absl::nullopt,
+                         options.max_timer_backoff_duration))),
         delayed_ack_timer_(timer_manager_.CreateTimer(
             "delayed-ack",
-            [this]() { return OnDelayedAckTimerExpiry(); },
+            absl::bind_front(&TransmissionControlBlock::OnDelayedAckTimerExpiry,
+                             this),
             TimerOptions(options.delayed_ack_max_timeout,
                          TimerBackoffAlgorithm::kExponential,
                          /*max_restarts=*/0))),
@@ -77,30 +85,36 @@ class TransmissionControlBlock : public Context {
         peer_initial_tsn_(peer_initial_tsn),
         tie_tag_(tie_tag),
         is_connection_established_(std::move(is_connection_established)),
-        send_fn_(std::move(send_fn)),
+        packet_sender_(packet_sender),
         rto_(options),
         tx_error_counter_(log_prefix, options),
-        data_tracker_(log_prefix, delayed_ack_timer_.get(), peer_initial_tsn),
+        data_tracker_(log_prefix,
+                      delayed_ack_timer_.get(),
+                      peer_initial_tsn,
+                      handover_state),
         reassembly_queue_(log_prefix,
                           peer_initial_tsn,
-                          options.max_receiver_window_buffer_size),
+                          options.max_receiver_window_buffer_size,
+                          handover_state),
         retransmission_queue_(
             log_prefix,
             my_initial_tsn,
             a_rwnd,
             send_queue,
-            [this](DurationMs rtt) { return ObserveRTT(rtt); },
+            absl::bind_front(&TransmissionControlBlock::ObserveRTT, this),
             [this]() { tx_error_counter_.Clear(); },
             *t3_rtx_,
             options,
             capabilities.partial_reliability,
-            capabilities.message_interleaving),
+            capabilities.message_interleaving,
+            handover_state),
         stream_reset_handler_(log_prefix,
                               this,
                               &timer_manager,
                               &data_tracker_,
                               &reassembly_queue_,
-                              &retransmission_queue_),
+                              &retransmission_queue_,
+                              handover_state),
         heartbeat_handler_(log_prefix, options, this, &timer_manager_) {}
 
   // Implementation of `Context`.
@@ -122,7 +136,9 @@ class TransmissionControlBlock : public Context {
   bool HasTooManyTxErrors() const override {
     return tx_error_counter_.IsExhausted();
   }
-  void Send(SctpPacket::Builder& builder) override { send_fn_(builder); }
+  void Send(SctpPacket::Builder& builder) override {
+    packet_sender_.Send(builder);
+  }
 
   // Other accessors
   DataTracker& data_tracker() { return data_tracker_; }
@@ -146,6 +162,9 @@ class TransmissionControlBlock : public Context {
 
   // Sends a SACK, if there is a need to.
   void MaybeSendSack();
+
+  // Sends a FORWARD-TSN, if it is needed and allowed (rate-limited).
+  void MaybeSendForwardTsn(SctpPacket::Builder& builder, TimeMs now);
 
   // Will be set while the socket is in kCookieEcho state. In this state, there
   // can only be a single packet outstanding, and it must contain the COOKIE
@@ -177,6 +196,10 @@ class TransmissionControlBlock : public Context {
   // Returns a textual representation of this object, for logging.
   std::string ToString() const;
 
+  HandoverReadinessStatus GetHandoverReadiness() const;
+
+  void AddHandoverState(DcSctpSocketHandoverState& state);
+
  private:
   // Will be called when the retransmission timer (t3-rtx) expires.
   absl::optional<DurationMs> OnRtxTimerExpiry();
@@ -200,7 +223,9 @@ class TransmissionControlBlock : public Context {
   // Nonce, used to detect reconnections.
   const TieTag tie_tag_;
   const std::function<bool()> is_connection_established_;
-  const std::function<void(SctpPacket::Builder&)> send_fn_;
+  PacketSender& packet_sender_;
+  // Rate limiting of FORWARD-TSN. Next can be sent at or after this timestamp.
+  TimeMs limit_forward_tsn_until_ = TimeMs(0);
 
   RetransmissionTimeout rto_;
   RetransmissionErrorCounter tx_error_counter_;

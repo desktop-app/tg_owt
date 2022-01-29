@@ -42,6 +42,7 @@ extern const char kCodecParamRtxTime[];
 extern const char kCodecParamAssociatedPayloadType[];
 
 extern const char kCodecParamAssociatedCodecName[];
+extern const char kCodecParamNotInNameValueFormat[];
 
 extern const char kOpusCodecName[];
 extern const char kIsacCodecName[];
@@ -123,9 +124,7 @@ RTC_EXPORT extern const char kVp8CodecName[];
 RTC_EXPORT extern const char kVp9CodecName[];
 RTC_EXPORT extern const char kAv1CodecName[];
 RTC_EXPORT extern const char kH264CodecName[];
-#ifndef DISABLE_H265
 RTC_EXPORT extern const char kH265CodecName[];
-#endif
 
 // RFC 6184 RTP Payload Format for H.264 video
 RTC_EXPORT extern const char kH264FmtpProfileLevelId[];
@@ -136,13 +135,12 @@ extern const char kH264FmtpSpsPpsIdrInKeyframe[];
 extern const char kH264ProfileLevelConstrainedBaseline[];
 extern const char kH264ProfileLevelConstrainedHigh[];
 
-#ifndef DISABLE_H265
 // RFC 7798 RTP Payload Format for H.265 video
 RTC_EXPORT extern const char kH265FmtpProfileSpace[];
 RTC_EXPORT extern const char kH265FmtpProfileId[];
 RTC_EXPORT extern const char kH265FmtpTierFlag[];
 RTC_EXPORT extern const char kH265FmtpLevelId[];
-#endif
+
 extern const int kDefaultVideoMaxFramerate;
 
 extern const size_t kConferenceMaxNumSpatialLayers;

@@ -153,7 +153,10 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
         nat_factory_(vss_.get(), kNatUdpAddr, kNatTcpAddr),
         nat_socket_factory_(new rtc::BasicPacketSocketFactory(&nat_factory_)),
         stun_server_(TestStunServer::Create(fss_.get(), kStunAddr)),
-        turn_server_(rtc::Thread::Current(), kTurnUdpIntAddr, kTurnUdpExtAddr),
+        turn_server_(rtc::Thread::Current(),
+                     fss_.get(),
+                     kTurnUdpIntAddr,
+                     kTurnUdpExtAddr),
         candidate_allocation_done_(false) {
     ServerAddresses stun_servers;
     stun_servers.insert(kStunAddr);
@@ -176,17 +179,17 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
                     rtc::AdapterType type) {
     network_manager_.AddInterface(addr, if_name, type);
   }
-  // The default route is the public address that STUN server will observe when
-  // the endpoint is sitting on the public internet and the local port is bound
-  // to the "any" address. This may be different from the default local address
-  // which the endpoint observes. This can occur if the route to the public
-  // endpoint like 8.8.8.8 (specified as the default local address) is
-  // different from the route to the STUN server (the default route).
-  void AddInterfaceAsDefaultRoute(const SocketAddress& addr) {
+  // The default source address is the public address that STUN server will
+  // observe when the endpoint is sitting on the public internet and the local
+  // port is bound to the "any" address. Intended for simulating the situation
+  // that client binds the "any" address, and that's also the address returned
+  // by getsockname/GetLocalAddress, so that the client can learn the actual
+  // local address only from the STUN response.
+  void AddInterfaceAsDefaultSourceAddresss(const SocketAddress& addr) {
     AddInterface(addr);
     // When a binding comes from the any address, the `addr` will be used as the
     // srflx address.
-    vss_->SetDefaultRoute(addr.ipaddr());
+    vss_->SetDefaultSourceAddress(addr.ipaddr());
   }
   void RemoveInterface(const SocketAddress& addr) {
     network_manager_.RemoveInterface(addr);
@@ -470,7 +473,8 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
           rtc::NAT_OPEN_CONE, vss_.get(), kNatUdpAddr, kNatTcpAddr, vss_.get(),
           rtc::SocketAddress(kNatUdpAddr.ipaddr(), 0)));
     } else {
-      nat_socket_factory_.reset(new rtc::BasicPacketSocketFactory());
+      nat_socket_factory_ =
+          std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get());
     }
 
     ServerAddresses stun_servers;
@@ -1322,7 +1326,7 @@ TEST_F(BasicPortAllocatorTest,
 TEST_F(BasicPortAllocatorTest,
        TestDisableAdapterEnumerationWithoutNatLocalhostCandDisabledDiffRoute) {
   ResetWithStunServerNoNat(kStunAddr);
-  AddInterfaceAsDefaultRoute(kClientAddr);
+  AddInterfaceAsDefaultSourceAddresss(kClientAddr);
   ASSERT_TRUE(CreateSession(ICE_CANDIDATE_COMPONENT_RTP));
   session_->set_flags(PORTALLOCATOR_DISABLE_DEFAULT_LOCAL_CANDIDATE);
   // Expect to see 2 ports: STUN and TCP ports, localhost candidate and STUN

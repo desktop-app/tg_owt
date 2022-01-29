@@ -92,39 +92,36 @@ void VideoEncoderConfig::EncoderSpecificSettings::FillEncoderSpecificSettings(
     VideoCodec* codec) const {
   if (codec->codecType == kVideoCodecH264) {
     FillVideoCodecH264(codec->H264());
+  } else if (codec->codecType == kVideoCodecH265) {
+    FillVideoCodecH265(codec->H265());
   } else if (codec->codecType == kVideoCodecVP8) {
     FillVideoCodecVp8(codec->VP8());
   } else if (codec->codecType == kVideoCodecVP9) {
     FillVideoCodecVp9(codec->VP9());
-#ifndef DISABLE_H265
-  } else if (codec->codecType == kVideoCodecH265) {
-    FillVideoCodecH265(codec->H265());
-#endif
   } else {
-    RTC_NOTREACHED() << "Encoder specifics set/used for unknown codec type.";
+    RTC_DCHECK_NOTREACHED()
+        << "Encoder specifics set/used for unknown codec type.";
   }
 }
 
 void VideoEncoderConfig::EncoderSpecificSettings::FillVideoCodecH264(
     VideoCodecH264* h264_settings) const {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
 }
 
-#ifndef DISABLE_H265
 void VideoEncoderConfig::EncoderSpecificSettings::FillVideoCodecH265(
     VideoCodecH265* h265_settings) const {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
 }
-#endif
 
 void VideoEncoderConfig::EncoderSpecificSettings::FillVideoCodecVp8(
     VideoCodecVP8* vp8_settings) const {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
 }
 
 void VideoEncoderConfig::EncoderSpecificSettings::FillVideoCodecVp9(
     VideoCodecVP9* vp9_settings) const {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
 }
 
 VideoEncoderConfig::H264EncoderSpecificSettings::H264EncoderSpecificSettings(
@@ -136,7 +133,6 @@ void VideoEncoderConfig::H264EncoderSpecificSettings::FillVideoCodecH264(
   *h264_settings = specifics_;
 }
 
-#ifndef DISABLE_H265
 VideoEncoderConfig::H265EncoderSpecificSettings::H265EncoderSpecificSettings(
     const VideoCodecH265& specifics)
     : specifics_(specifics) {}
@@ -145,7 +141,6 @@ void VideoEncoderConfig::H265EncoderSpecificSettings::FillVideoCodecH265(
     VideoCodecH265* h265_settings) const {
   *h265_settings = specifics_;
 }
-#endif
 
 VideoEncoderConfig::Vp8EncoderSpecificSettings::Vp8EncoderSpecificSettings(
     const VideoCodecVP8& specifics)

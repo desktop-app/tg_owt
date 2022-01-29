@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/functional/bind_front.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "api/array_view.h"
@@ -95,11 +96,11 @@ HeartbeatHandler::HeartbeatHandler(absl::string_view log_prefix,
           options.heartbeat_interval_include_rtt),
       interval_timer_(timer_manager_->CreateTimer(
           "heartbeat-interval",
-          [this]() { return OnIntervalTimerExpiry(); },
+          absl::bind_front(&HeartbeatHandler::OnIntervalTimerExpiry, this),
           TimerOptions(interval_duration_, TimerBackoffAlgorithm::kFixed))),
       timeout_timer_(timer_manager_->CreateTimer(
           "heartbeat-timeout",
-          [this]() { return OnTimeoutTimerExpiry(); },
+          absl::bind_front(&HeartbeatHandler::OnTimeoutTimerExpiry, this),
           TimerOptions(options.rto_initial,
                        TimerBackoffAlgorithm::kExponential,
                        /*max_restarts=*/0))) {
@@ -152,9 +153,10 @@ void HeartbeatHandler::HandleHeartbeatAck(HeartbeatAckChunk chunk) {
     return;
   }
 
-  DurationMs duration(*ctx_->callbacks().TimeMillis() - *info->created_at());
-
-  ctx_->ObserveRTT(duration);
+  TimeMs now = ctx_->callbacks().TimeMillis();
+  if (info->created_at() > TimeMs(0) && info->created_at() <= now) {
+    ctx_->ObserveRTT(now - info->created_at());
+  }
 
   // https://tools.ietf.org/html/rfc4960#section-8.1
   // "The counter shall be reset each time ... a HEARTBEAT ACK is received from

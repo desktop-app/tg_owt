@@ -17,6 +17,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "api/array_view.h"
+#include "net/dcsctp/public/dcsctp_handover_state.h"
 #include "net/dcsctp/public/dcsctp_message.h"
 #include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/packet_observer.h"
@@ -155,6 +156,19 @@ inline constexpr absl::string_view ToString(ResetStreamsStatus error) {
   }
 }
 
+// Return value of DcSctpSocketCallbacks::SendPacketWithStatus.
+enum class SendPacketStatus {
+  // Indicates that the packet was successfully sent. As sending is unreliable,
+  // there are no guarantees that the packet was actually delivered.
+  kSuccess,
+  // The packet was not sent due to a temporary failure, such as the local send
+  // buffer becoming exhausted. This return value indicates that the socket will
+  // recover and sending that packet can be retried at a later time.
+  kTemporaryFailure,
+  // The packet was not sent due to other reasons.
+  kError,
+};
+
 // Tracked metrics, which is the return value of GetMetrics. Optional members
 // will be unset when they are not yet known.
 struct Metrics {
@@ -192,7 +206,32 @@ struct Metrics {
   absl::optional<uint32_t> peer_rwnd_bytes = absl::nullopt;
 };
 
-// Callbacks that the DcSctpSocket will be done synchronously to the owning
+// Represent known SCTP implementations.
+enum class SctpImplementation {
+  // There is not enough information toto determine any SCTP implementation.
+  kUnknown,
+  // This implementation.
+  kDcsctp,
+  // https://github.com/sctplab/usrsctp.
+  kUsrSctp,
+  // Any other implementation.
+  kOther,
+};
+
+inline constexpr absl::string_view ToString(SctpImplementation implementation) {
+  switch (implementation) {
+    case SctpImplementation::kUnknown:
+      return "unknown";
+    case SctpImplementation::kDcsctp:
+      return "dcsctp";
+    case SctpImplementation::kUsrSctp:
+      return "usrsctp";
+    case SctpImplementation::kOther:
+      return "other";
+  }
+}
+
+// Callbacks that the DcSctpSocket will call synchronously to the owning
 // client. It is allowed to call back into the library from callbacks that start
 // with "On". It has been explicitly documented when it's not allowed to call
 // back into this library from within a callback.
@@ -205,9 +244,22 @@ class DcSctpSocketCallbacks {
 
   // Called when the library wants the packet serialized as `data` to be sent.
   //
+  // TODO(bugs.webrtc.org/12943): This method is deprecated, see
+  // `SendPacketWithStatus`.
+  //
   // Note that it's NOT ALLOWED to call into this library from within this
   // callback.
-  virtual void SendPacket(rtc::ArrayView<const uint8_t> data) = 0;
+  virtual void SendPacket(rtc::ArrayView<const uint8_t> data) {}
+
+  // Called when the library wants the packet serialized as `data` to be sent.
+  //
+  // Note that it's NOT ALLOWED to call into this library from within this
+  // callback.
+  virtual SendPacketStatus SendPacketWithStatus(
+      rtc::ArrayView<const uint8_t> data) {
+    SendPacket(data);
+    return SendPacketStatus::kSuccess;
+  }
 
   // Called when the library wants to create a Timeout. The callback must return
   // an object that implements that interface.
@@ -313,6 +365,7 @@ class DcSctpSocketCallbacks {
 };
 
 // The DcSctpSocket implementation implements the following interface.
+// This class is thread-compatible.
 class DcSctpSocketInterface {
  public:
   virtual ~DcSctpSocketInterface() = default;
@@ -327,6 +380,14 @@ class DcSctpSocketInterface {
   // Connects the socket. This is an asynchronous operation, and
   // `DcSctpSocketCallbacks::OnConnected` will be called on success.
   virtual void Connect() = 0;
+
+  // Puts this socket to the state in which the original socket was when its
+  // `DcSctpSocketHandoverState` was captured by `GetHandoverStateAndClose`.
+  // `RestoreFromState` is allowed only on the closed socket.
+  // `DcSctpSocketCallbacks::OnConnected` will be called if a connected socket
+  // state is restored.
+  // `DcSctpSocketCallbacks::OnError` will be called on error.
+  virtual void RestoreFromState(const DcSctpSocketHandoverState& state) = 0;
 
   // Gracefully shutdowns the socket and sends all outstanding data. This is an
   // asynchronous operation and `DcSctpSocketCallbacks::OnClosed` will be called
@@ -390,6 +451,29 @@ class DcSctpSocketInterface {
 
   // Retrieves the latest metrics.
   virtual Metrics GetMetrics() const = 0;
+
+  // Returns empty bitmask if the socket is in the state in which a snapshot of
+  // the state can be made by `GetHandoverStateAndClose()`. Return value is
+  // invalidated by a call to any non-const method.
+  virtual HandoverReadinessStatus GetHandoverReadiness() const = 0;
+
+  // Collects a snapshot of the socket state that can be used to reconstruct
+  // this socket in another process. On success this socket object is closed
+  // synchronously and no callbacks will be made after the method has returned.
+  // The method fails if the socket is not in a state ready for handover.
+  // nullopt indicates the failure. `DcSctpSocketCallbacks::OnClosed` will be
+  // called on success.
+  virtual absl::optional<DcSctpSocketHandoverState>
+  GetHandoverStateAndClose() = 0;
+
+  // Returns the detected SCTP implementation of the peer. As this is not
+  // explicitly signalled during the connection establishment, heuristics is
+  // used to analyze e.g. the state cookie in the INIT-ACK chunk.
+  //
+  // If this method is called too early (before
+  // `DcSctpSocketCallbacks::OnConnected` has triggered), this will likely
+  // return `SctpImplementation::kUnknown`.
+  virtual SctpImplementation peer_implementation() const = 0;
 };
 }  // namespace dcsctp
 

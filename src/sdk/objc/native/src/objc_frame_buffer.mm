@@ -66,11 +66,9 @@ int ObjCFrameBuffer::height() const {
 }
 
 rtc::scoped_refptr<I420BufferInterface> ObjCFrameBuffer::ToI420() {
-  rtc::scoped_refptr<I420BufferInterface> buffer;
-  @autoreleasepool {
-  buffer =
+  rtc::scoped_refptr<I420BufferInterface> buffer =
       new rtc::RefCountedObject<ObjCI420FrameBuffer>([frame_buffer_ toI420]);
-  }
+
   return buffer;
 }
 

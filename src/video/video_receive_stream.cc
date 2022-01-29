@@ -59,8 +59,6 @@ constexpr int VideoReceiveStream::kMaxWaitForKeyFrameMs;
 
 namespace {
 
-using ReturnReason = video_coding::FrameBuffer::ReturnReason;
-
 constexpr int kMinBaseMinimumDelayMs = 0;
 constexpr int kMaxBaseMinimumDelayMs = 10000;
 
@@ -111,47 +109,13 @@ class WebRtcRecordableEncodedFrame : public RecordableEncodedFrame {
   absl::optional<webrtc::ColorSpace> color_space_;
 };
 
-VideoCodec CreateDecoderVideoCodec(const VideoReceiveStream::Decoder& decoder) {
-  VideoCodec codec;
-  codec.codecType = PayloadStringToCodecType(decoder.video_format.name);
-
-  if (codec.codecType == kVideoCodecVP8) {
-    *(codec.VP8()) = VideoEncoder::GetDefaultVp8Settings();
-  } else if (codec.codecType == kVideoCodecVP9) {
-    *(codec.VP9()) = VideoEncoder::GetDefaultVp9Settings();
-  } else if (codec.codecType == kVideoCodecH264) {
-    *(codec.H264()) = VideoEncoder::GetDefaultH264Settings();
-  } else if (codec.codecType == kVideoCodecMultiplex) {
-    VideoReceiveStream::Decoder associated_decoder = decoder;
-    associated_decoder.video_format =
-        SdpVideoFormat(CodecTypeToPayloadString(kVideoCodecVP9));
-    VideoCodec associated_codec = CreateDecoderVideoCodec(associated_decoder);
-    associated_codec.codecType = kVideoCodecMultiplex;
-    return associated_codec;
-  }
-#ifndef DISABLE_H265
-  else if (codec.codecType == kVideoCodecH265) {
-    *(codec.H265()) = VideoEncoder::GetDefaultH265Settings();
-  }
-#endif
-
-  codec.width = 320;
-  codec.height = 180;
-  const int kDefaultStartBitrate = 300;
-  codec.startBitrate = codec.minBitrate = codec.maxBitrate =
-      kDefaultStartBitrate;
-
-  return codec;
-}
-
 // Video decoder class to be used for unknown codecs. Doesn't support decoding
 // but logs messages to LS_ERROR.
 class NullVideoDecoder : public webrtc::VideoDecoder {
  public:
-  int32_t InitDecode(const webrtc::VideoCodec* codec_settings,
-                     int32_t number_of_cores) override {
+  bool Configure(const Settings& settings) override {
     RTC_LOG(LS_ERROR) << "Can't initialize NullVideoDecoder.";
-    return WEBRTC_VIDEO_CODEC_OK;
+    return true;
   }
 
   int32_t Decode(const webrtc::EncodedImage& input_image,
@@ -205,7 +169,7 @@ VideoReceiveStream::VideoReceiveStream(
       clock_(clock),
       call_stats_(call_stats),
       source_tracker_(clock_),
-      stats_proxy_(&config_, clock_),
+      stats_proxy_(config_.rtp.remote_ssrc, clock_),
       rtp_receive_statistics_(ReceiveStatistics::Create(clock_)),
       timing_(timing),
       video_receiver_(clock_, timing_.get()),
@@ -369,15 +333,18 @@ void VideoReceiveStream::Start() {
 
     video_receiver_.RegisterExternalDecoder(video_decoders_.back().get(),
                                             decoder.payload_type);
-    VideoCodec codec = CreateDecoderVideoCodec(decoder);
+    VideoDecoder::Settings settings;
+    settings.set_codec_type(
+        PayloadStringToCodecType(decoder.video_format.name));
+    settings.set_max_render_resolution({320, 180});
+    settings.set_number_of_cores(num_cpu_cores_);
 
     const bool raw_payload =
         config_.rtp.raw_payload_types.count(decoder.payload_type) > 0;
-    rtp_video_stream_receiver_.AddReceiveCodec(decoder.payload_type, codec,
-                                               decoder.video_format.parameters,
-                                               raw_payload);
-    RTC_CHECK_EQ(VCM_OK, video_receiver_.RegisterReceiveCodec(
-                             decoder.payload_type, &codec, num_cpu_cores_));
+    rtp_video_stream_receiver_.AddReceiveCodec(
+        decoder.payload_type, settings.codec_type(),
+        decoder.video_format.parameters, raw_payload);
+    video_receiver_.RegisterReceiveCodec(decoder.payload_type, settings);
   }
 
   RTC_DCHECK(renderer != nullptr);
@@ -485,6 +452,12 @@ void VideoReceiveStream::AddSecondarySink(RtpPacketSinkInterface* sink) {
 void VideoReceiveStream::RemoveSecondarySink(
     const RtpPacketSinkInterface* sink) {
   rtp_video_stream_receiver_.RemoveSecondarySink(sink);
+}
+
+void VideoReceiveStream::SetRtpExtensions(
+    std::vector<RtpExtension> extensions) {
+  // VideoReceiveStream is deprecated and this function not supported.
+  RTC_DCHECK_NOTREACHED();
 }
 
 bool VideoReceiveStream::SetBaseMinimumPlayoutDelayMs(int delay_ms) {
@@ -609,14 +582,14 @@ absl::optional<Syncable::Info> VideoReceiveStream::GetInfo() const {
 
 bool VideoReceiveStream::GetPlayoutRtpTimestamp(uint32_t* rtp_timestamp,
                                                 int64_t* time_ms) const {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return 0;
 }
 
 void VideoReceiveStream::SetEstimatedPlayoutNtpTimestampMs(
     int64_t ntp_timestamp_ms,
     int64_t time_ms) {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
 }
 
 bool VideoReceiveStream::SetMinimumPlayoutDelay(int delay_ms) {
@@ -634,22 +607,19 @@ int64_t VideoReceiveStream::GetWaitMs() const {
 
 void VideoReceiveStream::StartNextDecode() {
   TRACE_EVENT0("webrtc", "VideoReceiveStream::StartNextDecode");
-  frame_buffer_->NextFrame(
-      GetWaitMs(), keyframe_required_, &decode_queue_,
-      /* encoded frame handler */
-      [this](std::unique_ptr<EncodedFrame> frame, ReturnReason res) {
-        RTC_DCHECK_EQ(frame == nullptr, res == ReturnReason::kTimeout);
-        RTC_DCHECK_EQ(frame != nullptr, res == ReturnReason::kFrameFound);
-        RTC_DCHECK_RUN_ON(&decode_queue_);
-        if (decoder_stopped_)
-          return;
-        if (frame) {
-          HandleEncodedFrame(std::move(frame));
-        } else {
-          HandleFrameBufferTimeout();
-        }
-        StartNextDecode();
-      });
+  frame_buffer_->NextFrame(GetWaitMs(), keyframe_required_, &decode_queue_,
+                           /* encoded frame handler */
+                           [this](std::unique_ptr<EncodedFrame> frame) {
+                             RTC_DCHECK_RUN_ON(&decode_queue_);
+                             if (decoder_stopped_)
+                               return;
+                             if (frame) {
+                               HandleEncodedFrame(std::move(frame));
+                             } else {
+                               HandleFrameBufferTimeout();
+                             }
+                             StartNextDecode();
+                           });
 }
 
 void VideoReceiveStream::HandleEncodedFrame(

@@ -11,7 +11,6 @@
 #import "RTCPeerConnectionFactory.h"
 
 #include "api/scoped_refptr.h"
-#include "api/peer_connection_interface.h"
 
 namespace webrtc {
 
@@ -72,7 +71,6 @@ NS_ASSUME_NONNULL_BEGIN
     initWithEncoderFactory:(nullable id<RTC_OBJC_TYPE(RTCVideoEncoderFactory)>)encoderFactory
             decoderFactory:(nullable id<RTC_OBJC_TYPE(RTCVideoDecoderFactory)>)decoderFactory;
 
-
 /** Initialize an RTCPeerConnection with a configuration, constraints, and
  *  dependencies.
  */
@@ -82,11 +80,6 @@ NS_ASSUME_NONNULL_BEGIN
                       dependencies:(std::unique_ptr<webrtc::PeerConnectionDependencies>)dependencies
                           delegate:(nullable id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate;
 
-
-- (instancetype)initWithNativePeerConnectionFactory:(
-    rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface>)factory;
-
 @end
-
 
 NS_ASSUME_NONNULL_END

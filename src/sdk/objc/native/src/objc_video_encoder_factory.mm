@@ -16,9 +16,6 @@
 #import "base/RTCVideoEncoder.h"
 #import "base/RTCVideoEncoderFactory.h"
 #import "components/video_codec/RTCCodecSpecificInfoH264+Private.h"
-#ifndef DISABLE_H265
-#import "components/video_codec/RTCCodecSpecificInfoH265+Private.h"
-#endif
 #import "sdk/objc/api/peerconnection/RTCEncodedImage+Private.h"
 #import "sdk/objc/api/peerconnection/RTCVideoCodecInfo+Private.h"
 #import "sdk/objc/api/peerconnection/RTCVideoEncoderSettings+Private.h"
@@ -76,18 +73,14 @@ class ObjCVideoEncoder : public VideoEncoder {
 
   int32_t Encode(const VideoFrame &frame,
                  const std::vector<VideoFrameType> *frame_types) override {
-    int32_t result = 0;
-    @autoreleasepool {
     NSMutableArray<NSNumber *> *rtcFrameTypes = [NSMutableArray array];
     for (size_t i = 0; i < frame_types->size(); ++i) {
       [rtcFrameTypes addObject:@(RTCFrameType(frame_types->at(i)))];
     }
 
-    result = [encoder_ encode:ToObjCVideoFrame(frame)
+    return [encoder_ encode:ToObjCVideoFrame(frame)
           codecSpecificInfo:nil
                  frameTypes:rtcFrameTypes];
-    }
-    return result;
   }
 
   void SetRates(const RateControlParameters &parameters) override {
@@ -108,7 +101,6 @@ class ObjCVideoEncoder : public VideoEncoder {
     info.apply_alignment_to_all_simulcast_layers = encoder_.applyAlignmentToAllSimulcastLayers;
     info.supports_native_handle = encoder_.supportsNativeHandle;
     info.is_hardware_accelerated = true;
-    info.has_internal_source = false;
     return info;
   }
 

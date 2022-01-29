@@ -20,7 +20,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/string_utils.h"
-#include "rtc_base/win32.h"
+#include "rtc_base/win/windows_version.h"
 
 namespace webrtc {
 
@@ -179,7 +179,8 @@ bool GetCroppedWindowRect(HWND window,
   // As of Windows8, transparent resize borders are added by the OS at
   // left/bottom/right sides of a resizeable window. If the cropped window
   // doesn't remove these borders, the background will be exposed a bit.
-  if (rtc::IsWindows8OrLater() || is_maximized) {
+  if (rtc::rtc_win::GetVersion() >= rtc::rtc_win::Version::VERSION_WIN8 ||
+      is_maximized) {
     // Only apply this cropping to windows with a resize border (otherwise,
     // it'd clip the edges of captured pop-up windows without this border).
     LONG style = GetWindowLong(window, GWL_STYLE);
@@ -232,7 +233,7 @@ bool GetWindowContentRect(HWND window, DesktopRect* result) {
     result->Extend(shrink, 0, shrink, 0);
     // Usually this should not happen, just in case we have received a strange
     // window, which has only left and right borders.
-    if (result->height() + shrink * 2 > 0) {
+    if (result->height() > shrink * 2) {
       result->Extend(0, shrink, 0, shrink);
     }
     RTC_DCHECK(!result->is_empty());
@@ -311,7 +312,7 @@ WindowCaptureHelperWin::WindowCaptureHelperWin() {
             GetProcAddress(dwmapi_library_, "DwmGetWindowAttribute"));
   }
 
-  if (rtc::IsWindows10OrLater()) {
+  if (rtc::rtc_win::GetVersion() >= rtc::rtc_win::Version::VERSION_WIN10) {
     if (FAILED(::CoCreateInstance(__uuidof(VirtualDesktopManager), nullptr,
                                   CLSCTX_ALL,
                                   IID_PPV_ARGS(&virtual_desktop_manager_)))) {
