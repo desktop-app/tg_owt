@@ -110,11 +110,16 @@ if (TG_OWT_USE_PIPEWIRE)
         PRIVATE
             WEBRTC_DLOPEN_PIPEWIRE
         )
+
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(DRM REQUIRED libdrm)
+
         target_include_directories(tg_owt
         PRIVATE
             ${webrtc_loc}/third_party/pipewire/spa/include
             ${webrtc_loc}/third_party/pipewire/src
             ${webrtc_loc}/third_party/pipewire/build/src
+            ${DRM_INCLUDE_DIRS}
         )
     else()
         link_pipewire(tg_owt)
