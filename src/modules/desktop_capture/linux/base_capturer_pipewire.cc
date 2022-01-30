@@ -33,7 +33,6 @@
 #if defined(WEBRTC_DLOPEN_PIPEWIRE)
 #include "modules/desktop_capture/linux/pipewire_stubs.h"
 using modules_desktop_capture_linux::InitializeStubs;
-using modules_desktop_capture_linux::kModuleDrm;
 using modules_desktop_capture_linux::kModulePipewire;
 using modules_desktop_capture_linux::StubPathMap;
 #endif  // defined(WEBRTC_DLOPEN_PIPEWIRE)
@@ -52,7 +51,6 @@ const int kBytesPerPixel = 4;
 
 #if defined(WEBRTC_DLOPEN_PIPEWIRE)
 const char kPipeWireLib[] = "libpipewire-0.3.so.0";
-const char kDrmLib[] = "libdrm.so.2";
 #endif
 
 #if !PW_CHECK_VERSION(0, 3, 29)
@@ -430,7 +428,6 @@ void BaseCapturerPipeWire::Init() {
 
   // Check if the PipeWire and DRM libraries are available.
   paths[kModulePipewire].push_back(kPipeWireLib);
-  paths[kModuleDrm].push_back(kDrmLib);
   if (!InitializeStubs(paths)) {
     RTC_LOG(LS_ERROR) << "Failed to load the PipeWire library and symbols.";
     portal_init_failed_ = true;
