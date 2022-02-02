@@ -121,6 +121,8 @@ if (TG_OWT_USE_PIPEWIRE)
         link_pipewire(tg_owt)
     endif()
 
+    link_glib(tg_owt)
+
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GBM REQUIRED gbm)
     pkg_check_modules(DRM REQUIRED libdrm)
@@ -188,7 +190,6 @@ target_link_libraries(tg_owt PUBLIC tg_owt::libwebrtcbuild)
 
 if (UNIX AND NOT APPLE)
     link_x11(tg_owt)
-    link_glib(tg_owt)
 endif()
 
 function(add_sublibrary postfix)
@@ -2254,6 +2255,15 @@ if (NOT TG_OWT_USE_PROTOBUF)
     remove_target_sources(tg_owt ${webrtc_loc}
         logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.cc
         logging/rtc_event_log/encoder/rtc_event_log_encoder_new_format.cc
+    )
+endif()
+
+if (NOT TG_OWT_USE_PIPEWIRE)
+    remove_target_sources(tg_owt ${webrtc_loc}
+        modules/desktop_capture/linux/base_capturer_pipewire.cc
+        modules/desktop_capture/linux/base_capturer_pipewire.h
+        modules/desktop_capture/linux/egl_dmabuf.cc
+        modules/desktop_capture/linux/egl_dmabuf.h
     )
 endif()
 
