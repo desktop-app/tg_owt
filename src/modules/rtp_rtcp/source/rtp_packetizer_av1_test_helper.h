@@ -11,6 +11,7 @@
 #ifndef MODULES_RTP_RTCP_SOURCE_RTP_PACKETIZER_AV1_TEST_HELPER_H_
 #define MODULES_RTP_RTCP_SOURCE_RTP_PACKETIZER_AV1_TEST_HELPER_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <initializer_list>
