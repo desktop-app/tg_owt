@@ -307,13 +307,13 @@ static bool LoadDRM() {
 
 RTC_NO_SANITIZE("cfi-icall")
 EglDmaBuf::EglDmaBuf() {
-  absl::optional<std::string> render_node = GetRenderNode();
-  if (!render_node) {
+  if (!LoadDRM()) {
+    RTC_LOG(LS_ERROR) << "Unable to load libdrm library.";
     return;
   }
 
-  if (!LoadDRM()) {
-    RTC_LOG(LS_ERROR) << "Unable to load libdrm library.";
+  absl::optional<std::string> render_node = GetRenderNode();
+  if (!render_node) {
     return;
   }
 
