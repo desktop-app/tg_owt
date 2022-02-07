@@ -15,7 +15,6 @@
 #include <EGL/eglplatform.h>
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include <asm/ioctl.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <gbm.h>
