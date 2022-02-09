@@ -3,14 +3,14 @@ set(TG_OWT_OPENSSL_INCLUDE_PATH "" CACHE STRING "Include path for openssl.")
 function(link_openssl target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(OpenSSL REQUIRED)
-        target_include_directories(${target_name} PRIVATE ${OPENSSL_INCLUDE_DIR})
+        target_include_directories(${target_name} SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
         target_link_libraries(${target_name} PRIVATE ${OPENSSL_LIBRARIES})
     else()
         if (TG_OWT_OPENSSL_INCLUDE_PATH STREQUAL "")
             message(FATAL_ERROR "You should specify 'TG_OWT_OPENSSL_INCLUDE_PATH'.")
         endif()
 
-        target_include_directories(${target_name}
+        target_include_directories(${target_name} SYSTEM
         PRIVATE
             ${TG_OWT_OPENSSL_INCLUDE_PATH}
         )
@@ -23,14 +23,14 @@ function(link_opus target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(OPUS REQUIRED opus)
-        target_include_directories(${target_name} PRIVATE ${OPUS_INCLUDE_DIRS})
+        target_include_directories(${target_name} SYSTEM PRIVATE ${OPUS_INCLUDE_DIRS})
         target_link_libraries(${target_name} PRIVATE ${OPUS_LINK_LIBRARIES})
     else()
         if (TG_OWT_OPUS_INCLUDE_PATH STREQUAL "")
             message(FATAL_ERROR "You should specify 'TG_OWT_OPUS_INCLUDE_PATH'.")
         endif()
 
-        target_include_directories(${target_name}
+        target_include_directories(${target_name} SYSTEM
         PRIVATE
             ${TG_OWT_OPUS_INCLUDE_PATH}
         )
@@ -47,14 +47,16 @@ function(link_ffmpeg target_name)
         pkg_check_modules(AVUTIL REQUIRED libavutil)
         pkg_check_modules(SWSCALE REQUIRED libswscale)
         pkg_check_modules(SWRESAMPLE REQUIRED libswresample)
-        target_include_directories(${target_name} PRIVATE
+        target_include_directories(${target_name} SYSTEM
+        PRIVATE
             ${AVCODEC_INCLUDE_DIRS}
             ${AVFORMAT_INCLUDE_DIRS}
             ${AVUTIL_INCLUDE_DIRS}
             ${SWSCALE_INCLUDE_DIRS}
             ${SWRESAMPLE_INCLUDE_DIRS}
         )
-        target_link_libraries(${target_name} PRIVATE
+        target_link_libraries(${target_name}
+        PRIVATE
             ${AVCODEC_LINK_LIBRARIES}
             ${AVFORMAT_LINK_LIBRARIES}
             ${AVUTIL_LINK_LIBRARIES}
@@ -66,7 +68,7 @@ function(link_ffmpeg target_name)
             message(FATAL_ERROR "You should specify 'TG_OWT_FFMPEG_INCLUDE_PATH'.")
         endif()
 
-        target_include_directories(${target_name}
+        target_include_directories(${target_name} SYSTEM
         PRIVATE
             ${TG_OWT_FFMPEG_INCLUDE_PATH}
         )
@@ -78,14 +80,14 @@ set(TG_OWT_LIBJPEG_INCLUDE_PATH "" CACHE STRING "Include path for libjpeg.")
 function(link_libjpeg target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(JPEG REQUIRED)
-        target_include_directories(${target_name} PRIVATE ${JPEG_INCLUDE_DIRS})
+        target_include_directories(${target_name} SYSTEM PRIVATE ${JPEG_INCLUDE_DIRS})
         target_link_libraries(${target_name} PRIVATE ${JPEG_LIBRARIES})
     else()
         if (TG_OWT_LIBJPEG_INCLUDE_PATH STREQUAL "")
             message(FATAL_ERROR "You should specify 'TG_OWT_LIBJPEG_INCLUDE_PATH'.")
         endif()
 
-        target_include_directories(${target_name}
+        target_include_directories(${target_name} SYSTEM
         PRIVATE
             ${TG_OWT_LIBJPEG_INCLUDE_PATH}
             ${TG_OWT_LIBJPEG_INCLUDE_PATH}/src
@@ -135,12 +137,12 @@ function(link_libopenh264 target_name)
         set(LIBOPENH264_FOUND ${LIBOPENH264_FOUND} PARENT_SCOPE)
         if (LIBOPENH264_FOUND)
             target_link_libraries(${target_name} PRIVATE ${LIBOPENH264_LINK_LIBRARIES})
-            target_include_directories(${target_name} PRIVATE ${LIBOPENH264_INCLUDE_DIRS})
+            target_include_directories(${target_name} SYSTEM PRIVATE ${LIBOPENH264_INCLUDE_DIRS})
         endif()
     endif()
     if (NOT LIBOPENH264_FOUND)
         target_link_libraries(${target_name} PRIVATE tg_owt::libopenh264)
-        target_include_directories(${target_name} PRIVATE ${libopenh264_loc}/include)
+        target_include_directories(${target_name} SYSTEM PRIVATE ${libopenh264_loc}/include)
     endif()
 endfunction()
 
@@ -152,7 +154,7 @@ function(link_libusrsctp target_name)
         set(LIBUSRSCTP_FOUND ${LIBUSRSCTP_FOUND} PARENT_SCOPE)
         if (LIBUSRSCTP_FOUND)
             target_link_libraries(${target_name} PRIVATE ${LIBUSRSCTP_LINK_LIBRARIES})
-            target_include_directories(${target_name} PRIVATE ${LIBUSRSCTP_INCLUDE_DIRS})
+            target_include_directories(${target_name} SYSTEM PRIVATE ${LIBUSRSCTP_INCLUDE_DIRS})
         endif()
     endif()
     if (NOT LIBUSRSCTP_FOUND)
@@ -167,13 +169,13 @@ function(link_libvpx target_name)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(LIBVPX REQUIRED vpx>=1.10.0)
         target_link_libraries(${target_name} PRIVATE ${LIBVPX_LINK_LIBRARIES})
-        target_include_directories(${target_name} PRIVATE ${LIBVPX_INCLUDE_DIRS})
+        target_include_directories(${target_name} SYSTEM PRIVATE ${LIBVPX_INCLUDE_DIRS})
     else()
         if (TG_OWT_LIBVPX_INCLUDE_PATH STREQUAL "")
             message(FATAL_ERROR "You should specify 'TG_OWT_LIBVPX_INCLUDE_PATH'.")
         endif()
 
-        target_include_directories(${target_name}
+        target_include_directories(${target_name} SYSTEM
         PRIVATE
             ${TG_OWT_LIBVPX_INCLUDE_PATH}
         )
@@ -186,7 +188,7 @@ function(link_glib target_name)
     pkg_check_modules(GOBJECT REQUIRED gobject-2.0)
     pkg_check_modules(GIO REQUIRED gio-2.0)
     pkg_check_modules(GIO_UNIX REQUIRED  gio-unix-2.0)
-    target_include_directories(${target_name}
+    target_include_directories(${target_name} SYSTEM
     PRIVATE
         ${GIO_UNIX_INCLUDE_DIRS}
         ${GIO_INCLUDE_DIRS}
@@ -208,7 +210,7 @@ endfunction()
 function(link_x11 target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(X11 REQUIRED COMPONENTS Xcomposite Xdamage Xext Xfixes Xrender Xrandr Xtst)
-        target_include_directories(${target_name}
+        target_include_directories(${target_name} SYSTEM
         PRIVATE
             ${X11_X11_INCLUDE_PATH}
             ${X11_Xlib_INCLUDE_PATH}
@@ -238,7 +240,7 @@ endfunction()
 function(link_pipewire target_name)
     find_package(PkgConfig REQUIRED)
     pkg_search_module(PIPEWIRE REQUIRED libpipewire-0.3 libpipewire-0.2)
-    target_include_directories(${target_name} PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
+    target_include_directories(${target_name} SYSTEM PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
     target_link_libraries(${target_name} PRIVATE ${PIPEWIRE_LINK_LIBRARIES})
 endfunction()
 
@@ -246,7 +248,7 @@ endfunction()
 function(link_libalsa target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(ALSA REQUIRED)
-        target_include_directories(${target_name} PRIVATE ${ALSA_INCLUDE_DIRS})
+        target_include_directories(${target_name} SYSTEM PRIVATE ${ALSA_INCLUDE_DIRS})
     endif()
 endfunction()
 
@@ -255,7 +257,7 @@ function(link_libpulse target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(PULSE REQUIRED libpulse)
-        target_include_directories(${target_name} PRIVATE ${PULSE_INCLUDE_DIRS})
+        target_include_directories(${target_name} SYSTEM PRIVATE ${PULSE_INCLUDE_DIRS})
     endif()
 endfunction()
 
