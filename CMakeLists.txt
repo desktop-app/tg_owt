@@ -128,7 +128,7 @@ if (TG_OWT_USE_PIPEWIRE)
     pkg_check_modules(DRM REQUIRED libdrm)
     pkg_check_modules(EPOXY REQUIRED epoxy)
 
-    target_include_directories(tg_owt
+    target_include_directories(tg_owt SYSTEM
     PRIVATE
         ${GBM_INCLUDE_DIRS}
         ${DRM_INCLUDE_DIRS}
