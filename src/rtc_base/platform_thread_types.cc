@@ -25,9 +25,7 @@ typedef HRESULT(WINAPI* RTC_SetThreadDescription)(HANDLE hThread,
                                                   PCWSTR lpThreadDescription);
 #endif
 
-#if defined(WEBRTC_FREEBSD)
-#include <pthread_np.h>
-#elif defined(WEBRTC_OPENBSD)
+#if defined(WEBRTC_FREEBSD) || defined(WEBRTC_OPENBSD)
 #include <pthread_np.h>
 #endif
 
