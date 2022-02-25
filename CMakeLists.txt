@@ -830,8 +830,6 @@ PRIVATE
     media/engine/webrtc_media_engine_defaults.cc
     media/engine/webrtc_video_engine.cc
     media/engine/webrtc_voice_engine.cc
-    media/sctp/dcsctp_transport.cc
-    media/sctp/dcsctp_transport.h
     media/sctp/sctp_transport_factory.cc
     media/sctp/sctp_transport_factory.h
     media/sctp/usrsctp_transport.cc
