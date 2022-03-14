@@ -90,13 +90,14 @@ class CaptureInputPin : public IMemInputPin, public IPin {
   // clang-format on
 
   SequenceChecker main_checker_;
-  SequenceChecker capture_checker_;
+  //SequenceChecker capture_checker_;
+  std::atomic_bool in_receive_;
 
   VideoCaptureCapability requested_capability_ RTC_GUARDED_BY(main_checker_);
   // Accessed on the main thread when Filter()->IsStopped() (capture thread not
   // running), otherwise accessed on the capture thread.
   VideoCaptureCapability resulting_capability_;
-  DWORD capture_thread_id_ = 0;
+  //DWORD capture_thread_id_ = 0;
   rtc::scoped_refptr<IMemAllocator> allocator_ RTC_GUARDED_BY(main_checker_);
   rtc::scoped_refptr<IPin> receive_pin_ RTC_GUARDED_BY(main_checker_);
   std::atomic_bool flushing_{false};

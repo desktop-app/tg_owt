@@ -383,7 +383,7 @@ class MediaTypesEnum : public IEnumMediaTypes {
 }  // namespace
 
 CaptureInputPin::CaptureInputPin(CaptureSinkFilter* filter) {
-  capture_checker_.Detach();
+  //capture_checker_.Detach();
   // No reference held to avoid circular references.
   info_.pFilter = filter;
   info_.dir = PINDIR_INPUT;
@@ -407,8 +407,8 @@ void CaptureInputPin::OnFilterActivated() {
   RTC_DCHECK_RUN_ON(&main_checker_);
   runtime_error_ = false;
   flushing_ = false;
-  capture_checker_.Detach();
-  capture_thread_id_ = 0;
+  //capture_checker_.Detach();
+  //capture_thread_id_ = 0;
 }
 
 void CaptureInputPin::OnFilterDeactivated() {
@@ -732,9 +732,7 @@ CaptureInputPin::GetAllocatorRequirements(ALLOCATOR_PROPERTIES* props) {
 
 COM_DECLSPEC_NOTHROW STDMETHODIMP
 CaptureInputPin::Receive(IMediaSample* media_sample) {
-  RTC_DCHECK_RUN_ON(&capture_checker_);
-
-  CaptureSinkFilter* const filter = static_cast<CaptureSinkFilter*>(Filter());
+  //RTC_DCHECK_RUN_ON(&capture_checker_);
 
   if (flushing_.load(std::memory_order_relaxed))
     return S_FALSE;
@@ -742,11 +740,25 @@ CaptureInputPin::Receive(IMediaSample* media_sample) {
   if (runtime_error_.load(std::memory_order_relaxed))
     return VFW_E_RUNTIME_ERROR;
 
-  if (!capture_thread_id_) {
-    // Make sure we set the thread name only once.
-    capture_thread_id_ = GetCurrentThreadId();
-    rtc::SetCurrentThreadName("webrtc_video_capture");
-  }
+  struct Guard {
+      Guard(std::atomic_bool &flag) : flag_(flag) {
+          RTC_DCHECK(!flag_);
+          flag_ = true;
+      }
+      ~Guard() {
+          flag_ = false;
+      }
+      std::atomic_bool &flag_;
+  };
+  Guard guard(in_receive_);
+
+  CaptureSinkFilter* const filter = static_cast<CaptureSinkFilter*>(Filter());
+
+  //if (!capture_thread_id_) {
+  //  // Make sure we set the thread name only once.
+  //  capture_thread_id_ = GetCurrentThreadId();
+  //  rtc::SetCurrentThreadName("webrtc_video_capture");
+  //}
 
   AM_SAMPLE2_PROPERTIES sample_props = {};
   GetSampleProperties(media_sample, &sample_props);
