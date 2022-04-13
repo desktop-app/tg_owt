@@ -12,6 +12,7 @@
 #define MODULES_DESKTOP_CAPTURE_LINUX_EGL_DMABUF_H_
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GL/gl.h>
 #include <gbm.h>
 
