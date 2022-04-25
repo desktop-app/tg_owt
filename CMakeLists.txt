@@ -117,11 +117,10 @@ if (TG_OWT_USE_PIPEWIRE)
             ${webrtc_loc}/third_party/pipewire/src
             ${webrtc_loc}/third_party/pipewire/build/src
         )
-    else()
-        link_pipewire(tg_owt)
     endif()
 
     link_glib(tg_owt)
+    link_pipewire(tg_owt ${TG_OWT_DLOPEN_PIPEWIRE})
 
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GBM REQUIRED gbm)
