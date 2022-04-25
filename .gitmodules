@@ -1,9 +1,6 @@
 [submodule "src/third_party/libyuv"]
 	path = src/third_party/libyuv
 	url = https://gitlab.com/chromiumsrc/libyuv.git
-[submodule "src/third_party/pipewire"]
-	path = src/third_party/pipewire
-	url = https://github.com/PipeWire/pipewire.git
 [submodule "src/third_party/crc32c/src"]
 	path = src/third_party/crc32c/src
 	url = https://github.com/google/crc32c.git
