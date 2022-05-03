@@ -12,7 +12,7 @@
 
 #if defined(WEBRTC_WIN)
 #include <windows.h>
-#elif defined(WEBRTC_LINUX) || defined(WEBRTC_FREEBSD)
+#elif defined(WEBRTC_LINUX)
 #include <unistd.h>
 #elif defined(WEBRTC_MAC)
 #include <sys/sysctl.h>
@@ -30,9 +30,9 @@ static int DetectNumberOfCores() {
   SYSTEM_INFO si;
   GetNativeSystemInfo(&si);
   number_of_cores = static_cast<int>(si.dwNumberOfProcessors);
-#elif defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID) || defined(WEBRTC_FREEBSD)
+#elif defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
   number_of_cores = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
-  if (number_of_cores < 0) {
+  if (number_of_cores <= 0) {
     RTC_LOG(LS_ERROR) << "Failed to get number of cores";
     number_of_cores = 1;
   }

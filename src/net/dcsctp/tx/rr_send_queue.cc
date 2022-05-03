@@ -32,8 +32,7 @@ RRSendQueue::RRSendQueue(absl::string_view log_prefix,
                          size_t buffer_size,
                          std::function<void(StreamID)> on_buffered_amount_low,
                          size_t total_buffered_amount_low_threshold,
-                         std::function<void()> on_total_buffered_amount_low,
-                         const DcSctpSocketHandoverState* handover_state)
+                         std::function<void()> on_total_buffered_amount_low)
     : log_prefix_(std::string(log_prefix) + "fcfs: "),
       buffer_size_(buffer_size),
       on_buffered_amount_low_(std::move(on_buffered_amount_low)),
@@ -76,8 +75,8 @@ void RRSendQueue::OutgoingStream::AddHandoverState(
 
 bool RRSendQueue::IsConsistent() const {
   size_t total_buffered_amount = 0;
-  for (const auto& stream_entry : streams_) {
-    total_buffered_amount += stream_entry.second.buffered_amount().value();
+  for (const auto& [unused, stream] : streams_) {
+    total_buffered_amount += stream.buffered_amount().value();
   }
 
   if (previous_message_has_ended_) {
@@ -391,9 +390,8 @@ void RRSendQueue::PrepareResetStreams(rtc::ArrayView<const StreamID> streams) {
 bool RRSendQueue::CanResetStreams() const {
   // Streams can be reset if those streams that are paused don't have any
   // messages that are partially sent.
-  for (auto& stream : streams_) {
-    if (stream.second.is_paused() &&
-        stream.second.has_partially_sent_message()) {
+  for (auto& [unused, stream] : streams_) {
+    if (stream.is_paused() && stream.has_partially_sent_message()) {
       return false;
     }
   }
@@ -401,17 +399,17 @@ bool RRSendQueue::CanResetStreams() const {
 }
 
 void RRSendQueue::CommitResetStreams() {
-  for (auto& stream_entry : streams_) {
-    if (stream_entry.second.is_paused()) {
-      stream_entry.second.Reset();
+  for (auto& [unused, stream] : streams_) {
+    if (stream.is_paused()) {
+      stream.Reset();
     }
   }
   RTC_DCHECK(IsConsistent());
 }
 
 void RRSendQueue::RollbackResetStreams() {
-  for (auto& stream_entry : streams_) {
-    stream_entry.second.Resume();
+  for (auto& [unused, stream] : streams_) {
+    stream.Resume();
   }
   RTC_DCHECK(IsConsistent());
 }
@@ -419,8 +417,7 @@ void RRSendQueue::RollbackResetStreams() {
 void RRSendQueue::Reset() {
   // Recalculate buffered amount, as partially sent messages may have been put
   // fully back in the queue.
-  for (auto& stream_entry : streams_) {
-    OutgoingStream& stream = stream_entry.second;
+  for (auto& [unused, stream] : streams_) {
     stream.Reset();
   }
   previous_message_has_ended_ = true;
@@ -471,10 +468,10 @@ HandoverReadinessStatus RRSendQueue::GetHandoverReadiness() const {
 }
 
 void RRSendQueue::AddHandoverState(DcSctpSocketHandoverState& state) {
-  for (const auto& entry : streams_) {
+  for (const auto& [stream_id, stream] : streams_) {
     DcSctpSocketHandoverState::OutgoingStream state_stream;
-    state_stream.id = entry.first.value();
-    entry.second.AddHandoverState(state_stream);
+    state_stream.id = stream_id.value();
+    stream.AddHandoverState(state_stream);
     state.tx.streams.push_back(std::move(state_stream));
   }
 }

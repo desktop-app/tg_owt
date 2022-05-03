@@ -42,6 +42,7 @@ static const int kMaxLogLineSize = 1024 - 60;
 #include <vector>
 
 #include "absl/base/attributes.h"
+#include "absl/strings/string_view.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/platform_thread_types.h"
 #include "rtc_base/string_encode.h"
@@ -55,12 +56,14 @@ namespace rtc {
 namespace {
 // By default, release builds don't log, debug builds at info level
 #if !defined(NDEBUG)
-static LoggingSeverity g_min_sev = LS_INFO;
-static LoggingSeverity g_dbg_sev = LS_INFO;
+constexpr LoggingSeverity kDefaultLoggingSeverity = LS_INFO;
 #else
-static LoggingSeverity g_min_sev = LS_NONE;
-static LoggingSeverity g_dbg_sev = LS_NONE;
+constexpr LoggingSeverity kDefaultLoggingSeverity = LS_NONE;
 #endif
+
+// Note: `g_min_sev` and `g_dbg_sev` can be changed while running.
+LoggingSeverity g_min_sev = kDefaultLoggingSeverity;
+LoggingSeverity g_dbg_sev = kDefaultLoggingSeverity;
 
 // Return the filename portion of the string (that following the last slash).
 const char* FilenameFromPath(const char* file) {
@@ -560,5 +563,21 @@ void LogSink::OnLogMessage(const std::string& msg,
 void LogSink::OnLogMessage(const std::string& msg,
                            LoggingSeverity /* severity */) {
   OnLogMessage(msg);
+}
+
+// Inefficient default implementation, override is recommended.
+void LogSink::OnLogMessage(absl::string_view msg,
+                           LoggingSeverity severity,
+                           const char* tag) {
+  OnLogMessage(tag + (": " + std::string(msg)), severity);
+}
+
+void LogSink::OnLogMessage(absl::string_view msg,
+                           LoggingSeverity /* severity */) {
+  OnLogMessage(msg);
+}
+
+void LogSink::OnLogMessage(absl::string_view msg) {
+  OnLogMessage(std::string(msg));
 }
 }  // namespace rtc

@@ -12,9 +12,7 @@
 
 #include <limits.h>
 #include <stdint.h>
-#include <string.h>
 
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,32 +20,26 @@
 #include "absl/strings/str_replace.h"
 #include "absl/types/optional.h"
 #include "api/audio/audio_mixer.h"
-#include "api/audio_codecs/audio_decoder_factory.h"
-#include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/call/call_factory_interface.h"
 #include "api/create_peerconnection_factory.h"
 #include "api/data_channel_interface.h"
 #include "api/jsep.h"
-#include "api/jsep_session_description.h"
 #include "api/media_stream_interface.h"
 #include "api/media_types.h"
 #include "api/rtc_error.h"
 #include "api/rtc_event_log/rtc_event_log.h"
 #include "api/rtc_event_log/rtc_event_log_factory.h"
 #include "api/rtc_event_log_output.h"
-#include "api/rtc_event_log_output_file.h"
 #include "api/rtp_receiver_interface.h"
 #include "api/rtp_sender_interface.h"
-#include "api/rtp_transceiver_interface.h"
+#include "api/rtp_transceiver_direction.h"
 #include "api/scoped_refptr.h"
 #include "api/task_queue/default_task_queue_factory.h"
 #include "api/transport/field_trial_based_config.h"
 #include "api/video_codecs/builtin_video_decoder_factory.h"
 #include "api/video_codecs/builtin_video_encoder_factory.h"
-#include "api/video_codecs/video_decoder_factory.h"
-#include "api/video_codecs/video_encoder_factory.h"
 #include "media/base/codec.h"
 #include "media/base/media_config.h"
 #include "media/base/media_engine.h"
@@ -68,8 +60,8 @@
 #include "pc/media_stream.h"
 #include "pc/peer_connection.h"
 #include "pc/peer_connection_factory.h"
-#include "pc/rtc_stats_collector.h"
 #include "pc/rtp_sender.h"
+#include "pc/rtp_sender_proxy.h"
 #include "pc/session_description.h"
 #include "pc/stream_collection.h"
 #include "pc/test/fake_audio_capture_module.h"
@@ -79,17 +71,14 @@
 #include "pc/test/test_sdp_strings.h"
 #include "pc/video_track.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/copy_on_write_buffer.h"
 #include "rtc_base/gunit.h"
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/thread.h"
-#include "rtc_base/time_utils.h"
 #include "rtc_base/virtual_socket_server.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
-#include "test/testsupport/file_utils.h"
 
 #ifdef WEBRTC_ANDROID
 #include "pc/test/android_test_initializer.h"
@@ -1332,6 +1321,7 @@ TEST_P(PeerConnectionInterfaceTest,
 // in the RTCConfiguration.
 TEST_P(PeerConnectionInterfaceTest, CreatePeerConnectionWithPooledCandidates) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   PeerConnectionInterface::IceServer server;
   server.uri = kStunAddressOnly;
   config.servers.push_back(server);
@@ -1375,6 +1365,7 @@ TEST_P(PeerConnectionInterfaceTest,
   // Create RTCConfiguration with some network-related fields relevant to
   // PortAllocator populated.
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   config.disable_ipv6_on_wifi = true;
   config.max_ipv6_networks = 10;
   config.tcp_candidate_policy =
@@ -1415,6 +1406,7 @@ TEST_P(PeerConnectionInterfaceTest,
 // constructed with, before SetConfiguration is called.
 TEST_P(PeerConnectionInterfaceTest, GetConfigurationAfterCreatePeerConnection) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   config.type = PeerConnectionInterface::kRelay;
   CreatePeerConnection(config);
 
@@ -1427,6 +1419,7 @@ TEST_P(PeerConnectionInterfaceTest, GetConfigurationAfterCreatePeerConnection) {
 // SetConfiguration.
 TEST_P(PeerConnectionInterfaceTest, GetConfigurationAfterSetConfiguration) {
   PeerConnectionInterface::RTCConfiguration starting_config;
+  starting_config.sdp_semantics = sdp_semantics_;
   starting_config.bundle_policy =
       webrtc::PeerConnection::kBundlePolicyMaxBundle;
   CreatePeerConnection(starting_config);
@@ -1557,8 +1550,8 @@ TEST_F(PeerConnectionInterfaceTestPlanB, AddTrackRemoveTrack) {
   EXPECT_TRUE(DoSetLocalDescription(std::move(offer)));
 
   // Now try removing the tracks.
-  EXPECT_TRUE(pc_->RemoveTrack(audio_sender));
-  EXPECT_TRUE(pc_->RemoveTrack(video_sender));
+  EXPECT_TRUE(pc_->RemoveTrackOrError(audio_sender).ok());
+  EXPECT_TRUE(pc_->RemoveTrackOrError(video_sender).ok());
 
   // Create a new offer and ensure it doesn't contain the removed senders.
   ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
@@ -1575,8 +1568,8 @@ TEST_F(PeerConnectionInterfaceTestPlanB, AddTrackRemoveTrack) {
 
   // Calling RemoveTrack on a sender no longer attached to a PeerConnection
   // should return false.
-  EXPECT_FALSE(pc_->RemoveTrack(audio_sender));
-  EXPECT_FALSE(pc_->RemoveTrack(video_sender));
+  EXPECT_FALSE(pc_->RemoveTrackOrError(audio_sender).ok());
+  EXPECT_FALSE(pc_->RemoveTrackOrError(video_sender).ok());
 }
 
 // Test creating senders without a stream specified,
@@ -1863,7 +1856,7 @@ TEST_P(PeerConnectionInterfaceTest, GetStatsForSpecificTrack) {
 
   // Remove the stream. Since we are sending to our selves the local
   // and the remote stream is the same.
-  pc_->RemoveTrack(pc_->GetSenders()[0]);
+  pc_->RemoveTrackOrError(pc_->GetSenders()[0]);
   // Do a re-negotiation.
   CreateOfferReceiveAnswer();
 
@@ -2456,8 +2449,8 @@ TEST_F(PeerConnectionInterfaceTestPlanB, CloseAndTestMethods) {
   CreateAnswerAsLocalDescription();
 
   ASSERT_EQ(1u, pc_->local_streams()->count());
-  rtc::scoped_refptr<MediaStreamInterface> local_stream =
-      pc_->local_streams()->at(0);
+  rtc::scoped_refptr<MediaStreamInterface> local_stream(
+      pc_->local_streams()->at(0));
 
   pc_->Close();
 
@@ -3009,6 +3002,7 @@ TEST_P(PeerConnectionInterfaceTest, OnAddTrackCallback) {
 // changing, the next offer causes an ICE restart.
 TEST_P(PeerConnectionInterfaceTest, SetConfigurationCausingIceRestart) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   config.type = PeerConnectionInterface::kRelay;
   CreatePeerConnection(config);
   config = pc_->GetConfiguration();
@@ -3043,6 +3037,7 @@ TEST_P(PeerConnectionInterfaceTest, SetConfigurationCausingIceRestart) {
 // changing, the next offer does *not* cause an ICE restart.
 TEST_P(PeerConnectionInterfaceTest, SetConfigurationNotCausingIceRestart) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   config.type = PeerConnectionInterface::kRelay;
   CreatePeerConnection(config);
   config = pc_->GetConfiguration();
@@ -3077,6 +3072,7 @@ TEST_P(PeerConnectionInterfaceTest, SetConfigurationNotCausingIceRestart) {
 //    that was already restarted.
 TEST_P(PeerConnectionInterfaceTest, SetConfigurationCausingPartialIceRestart) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   config.type = PeerConnectionInterface::kRelay;
   CreatePeerConnection(config);
   config = pc_->GetConfiguration();
@@ -3237,6 +3233,7 @@ TEST_P(PeerConnectionInterfaceTest, OffersAndAnswersHaveTrickleIceOption) {
 // RTCConfiguration.
 TEST_P(PeerConnectionInterfaceTest, IceRenominationNotOffered) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   config.enable_ice_renomination = false;
   CreatePeerConnection(config);
   AddAudioTrack("foo");
@@ -3253,6 +3250,7 @@ TEST_P(PeerConnectionInterfaceTest, IceRenominationNotOffered) {
 // if it's enabled in the PC's RTCConfiguration.
 TEST_P(PeerConnectionInterfaceTest, IceRenominationOptionInOfferAndAnswer) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   config.enable_ice_renomination = true;
   CreatePeerConnection(config);
   AddAudioTrack("foo");
@@ -3337,6 +3335,7 @@ TEST_P(PeerConnectionInterfaceTest,
        DISABLED_DataChannelOnlyOfferWithMaxBundlePolicy) {
 #endif  // WEBRTC_HAVE_SCTP
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = sdp_semantics_;
   config.bundle_policy = PeerConnectionInterface::kBundlePolicyMaxBundle;
   CreatePeerConnection(config);
 
@@ -3676,6 +3675,7 @@ class PeerConnectionMediaConfigTest : public ::testing::Test {
 // This sanity check validates the test infrastructure itself.
 TEST_F(PeerConnectionMediaConfigTest, TestCreateAndClose) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
   rtc::scoped_refptr<PeerConnectionInterface> pc(
       pcf_->CreatePeerConnection(config, nullptr, nullptr, &observer_));
   EXPECT_TRUE(pc.get());
@@ -3688,6 +3688,7 @@ TEST_F(PeerConnectionMediaConfigTest, TestCreateAndClose) {
 // default RTCConfiguration.
 TEST_F(PeerConnectionMediaConfigTest, TestDefaults) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
 
   const cricket::MediaConfig& media_config = TestCreatePeerConnection(config);
 
@@ -3702,6 +3703,7 @@ TEST_F(PeerConnectionMediaConfigTest, TestDefaults) {
 // propagated from RTCConfiguration to the PeerConnection.
 TEST_F(PeerConnectionMediaConfigTest, TestDisablePrerendererSmoothingTrue) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
 
   config.set_prerenderer_smoothing(false);
   const cricket::MediaConfig& media_config = TestCreatePeerConnection(config);
@@ -3713,6 +3715,7 @@ TEST_F(PeerConnectionMediaConfigTest, TestDisablePrerendererSmoothingTrue) {
 // propagated from RTCConfiguration to the PeerConnection.
 TEST_F(PeerConnectionMediaConfigTest, TestEnableExperimentCpuLoadEstimator) {
   PeerConnectionInterface::RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
 
   config.set_experiment_cpu_load_estimator(true);
   const cricket::MediaConfig& media_config = TestCreatePeerConnection(config);

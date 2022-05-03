@@ -25,7 +25,6 @@
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_rtcp_impl2.h"
 #include "modules/rtp_rtcp/source/rtp_sender.h"
-#include "modules/utility/include/process_thread.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/location.h"
@@ -359,8 +358,10 @@ RtpVideoSender::RtpVideoSender(
     std::unique_ptr<FecController> fec_controller,
     FrameEncryptorInterface* frame_encryptor,
     const CryptoOptions& crypto_options,
-    rtc::scoped_refptr<FrameTransformerInterface> frame_transformer)
-    : send_side_bwe_with_overhead_(!absl::StartsWith(
+    rtc::scoped_refptr<FrameTransformerInterface> frame_transformer,
+    const WebRtcKeyValueConfig& field_trials)
+    : field_trials_(field_trials),
+      send_side_bwe_with_overhead_(!absl::StartsWith(
           field_trials_.Lookup("WebRTC-SendSideBwe-WithOverhead"),
           "Disabled")),
       use_frame_rate_for_overhead_(absl::StartsWith(
@@ -394,6 +395,7 @@ RtpVideoSender::RtpVideoSender(
       encoder_target_rate_bps_(0),
       frame_counts_(rtp_config.ssrcs.size()),
       frame_count_observer_(observers.frame_count_observer) {
+  transport_checker_.Detach();
   RTC_DCHECK_EQ(rtp_config_.ssrcs.size(), rtp_streams_.size());
   if (send_side_bwe_with_overhead_ && has_packet_feedback_)
     transport_->IncludeOverheadInPacedSender();
@@ -445,9 +447,6 @@ RtpVideoSender::RtpVideoSender(
   fec_controller_->SetProtectionMethod(fec_enabled, NackEnabled());
 
   fec_controller_->SetProtectionCallback(this);
-  // Signal congestion controller this object is ready for OnPacket* callbacks.
-  transport_->GetStreamFeedbackProvider()->RegisterStreamFeedbackObserver(
-      rtp_config_.ssrcs, this);
 
   // Construction happens on the worker thread (see Call::CreateVideoSendStream)
   // but subseqeuent calls to the RTP state will happen on one of two threads:
@@ -460,27 +459,44 @@ RtpVideoSender::RtpVideoSender(
 }
 
 RtpVideoSender::~RtpVideoSender() {
+  // TODO(bugs.webrtc.org/13517): Remove once RtpVideoSender gets deleted on the
+  // transport task queue.
+  transport_checker_.Detach();
+
   SetActiveModulesLocked(
       std::vector<bool>(rtp_streams_.size(), /*active=*/false));
-  transport_->GetStreamFeedbackProvider()->DeRegisterStreamFeedbackObserver(
-      this);
+
+  RTC_DCHECK(!registered_for_feedback_);
 }
 
 void RtpVideoSender::SetActive(bool active) {
+  RTC_DCHECK_RUN_ON(&transport_checker_);
   MutexLock lock(&mutex_);
   if (active_ == active)
     return;
+
   const std::vector<bool> active_modules(rtp_streams_.size(), active);
   SetActiveModulesLocked(active_modules);
+
+  auto* feedback_provider = transport_->GetStreamFeedbackProvider();
+  if (active && !registered_for_feedback_) {
+    feedback_provider->RegisterStreamFeedbackObserver(rtp_config_.ssrcs, this);
+    registered_for_feedback_ = true;
+  } else if (!active && registered_for_feedback_) {
+    feedback_provider->DeRegisterStreamFeedbackObserver(this);
+    registered_for_feedback_ = false;
+  }
 }
 
 void RtpVideoSender::SetActiveModules(const std::vector<bool> active_modules) {
+  RTC_DCHECK_RUN_ON(&transport_checker_);
   MutexLock lock(&mutex_);
   return SetActiveModulesLocked(active_modules);
 }
 
 void RtpVideoSender::SetActiveModulesLocked(
     const std::vector<bool> active_modules) {
+  RTC_DCHECK_RUN_ON(&transport_checker_);
   RTC_DCHECK_EQ(rtp_streams_.size(), active_modules.size());
   active_ = false;
   for (size_t i = 0; i < active_modules.size(); ++i) {
@@ -514,6 +530,7 @@ void RtpVideoSender::SetActiveModulesLocked(
 }
 
 bool RtpVideoSender::IsActive() {
+  RTC_DCHECK_RUN_ON(&transport_checker_);
   MutexLock lock(&mutex_);
   return IsActiveLocked();
 }
@@ -622,6 +639,7 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
 
 void RtpVideoSender::OnBitrateAllocationUpdated(
     const VideoBitrateAllocation& bitrate) {
+  RTC_DCHECK_RUN_ON(&transport_checker_);
   MutexLock lock(&mutex_);
   if (IsActiveLocked()) {
     if (rtp_streams_.size() == 1) {

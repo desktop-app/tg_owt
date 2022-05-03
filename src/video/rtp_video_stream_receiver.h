@@ -23,6 +23,7 @@
 #include "api/array_view.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/sequence_checker.h"
+#include "api/transport/field_trial_based_config.h"
 #include "api/units/timestamp.h"
 #include "api/video/color_space.h"
 #include "api/video/video_codec_type.h"
@@ -47,7 +48,6 @@
 #include "modules/video_coding/packet_buffer.h"
 #include "modules/video_coding/rtp_frame_reference_finder.h"
 #include "modules/video_coding/unique_timestamp_counter.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/numerics/sequence_number_util.h"
 #include "rtc_base/synchronization/mutex.h"
@@ -103,7 +103,8 @@ class RtpVideoStreamReceiver : public LossNotificationSender,
       KeyFrameRequestSender* keyframe_request_sender,
       OnCompleteFrameCallback* complete_frame_callback,
       rtc::scoped_refptr<FrameDecryptorInterface> frame_decryptor,
-      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer);
+      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer,
+      const WebRtcKeyValueConfig* field_trials = nullptr);
 
   RtpVideoStreamReceiver(
       Clock* clock,
@@ -124,7 +125,8 @@ class RtpVideoStreamReceiver : public LossNotificationSender,
       KeyFrameRequestSender* keyframe_request_sender,
       OnCompleteFrameCallback* complete_frame_callback,
       rtc::scoped_refptr<FrameDecryptorInterface> frame_decryptor,
-      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer);
+      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer,
+      const WebRtcKeyValueConfig* field_trials = nullptr);
   ~RtpVideoStreamReceiver() override;
 
   void AddReceiveCodec(uint8_t payload_type,
@@ -327,6 +329,9 @@ class RtpVideoStreamReceiver : public LossNotificationSender,
   void UpdatePacketReceiveTimestamps(const RtpPacketReceived& packet,
                                      bool is_keyframe)
       RTC_RUN_ON(worker_task_checker_);
+
+  const WebRtcKeyValueConfig& field_trials_;
+  FieldTrialBasedConfig owned_field_trials_;
 
   Clock* const clock_;
   // Ownership of this object lies with VideoReceiveStream, which owns `this`.

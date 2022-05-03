@@ -28,6 +28,7 @@
 #include "api/video/video_stream_encoder_settings.h"
 #include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder.h"
+#include "api/webrtc_key_value_config.h"
 #include "call/adaptation/adaptation_constraint.h"
 #include "call/adaptation/resource_adaptation_processor.h"
 #include "call/adaptation/resource_adaptation_processor_interface.h"
@@ -79,8 +80,12 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
       std::unique_ptr<FrameCadenceAdapterInterface> frame_cadence_adapter,
       std::unique_ptr<webrtc::TaskQueueBase, webrtc::TaskQueueDeleter>
           encoder_queue,
-      BitrateAllocationCallbackType allocation_cb_type);
+      BitrateAllocationCallbackType allocation_cb_type,
+      const WebRtcKeyValueConfig& field_trials);
   ~VideoStreamEncoder() override;
+
+  VideoStreamEncoder(const VideoStreamEncoder&) = delete;
+  VideoStreamEncoder& operator=(const VideoStreamEncoder&) = delete;
 
   void AddAdaptationResource(rtc::scoped_refptr<Resource> resource) override;
   std::vector<rtc::scoped_refptr<Resource>> GetAdaptationResources() override;
@@ -155,6 +160,9 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
     void OnDiscardedFrame() override {
       video_stream_encoder_.OnDiscardedFrame();
     }
+    void RequestRefreshFrame() override {
+      video_stream_encoder_.RequestRefreshFrame();
+    }
 
    private:
     VideoStreamEncoder& video_stream_encoder_;
@@ -199,6 +207,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
                int frames_scheduled_for_processing,
                const VideoFrame& video_frame);
   void OnDiscardedFrame();
+  void RequestRefreshFrame();
 
   void MaybeEncodeVideoFrame(const VideoFrame& frame,
                              int64_t time_when_posted_in_ms);
@@ -241,6 +250,9 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
                                int64_t time_when_posted_in_ms)
       RTC_RUN_ON(&encoder_queue_);
 
+  void RequestEncoderSwitch() RTC_RUN_ON(&encoder_queue_);
+
+  const WebRtcKeyValueConfig& field_trials_;
   TaskQueueBase* const worker_queue_;
 
   const uint32_t number_of_cores_;
@@ -388,13 +400,13 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   // Provides video stream input states: current resolution and frame rate.
   VideoStreamInputStateProvider input_state_provider_;
 
-  std::unique_ptr<VideoStreamAdapter> video_stream_adapter_
+  const std::unique_ptr<VideoStreamAdapter> video_stream_adapter_
       RTC_GUARDED_BY(&encoder_queue_);
   // Responsible for adapting input resolution or frame rate to ensure resources
   // (e.g. CPU or bandwidth) are not overused. Adding resources can occur on any
   // thread.
   std::unique_ptr<ResourceAdaptationProcessorInterface>
-      resource_adaptation_processor_;
+      resource_adaptation_processor_ RTC_GUARDED_BY(&encoder_queue_);
   std::unique_ptr<DegradationPreferenceManager> degradation_preference_manager_
       RTC_GUARDED_BY(&encoder_queue_);
   std::vector<AdaptationConstraint*> adaptation_constraints_
@@ -425,14 +437,15 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   QpParser qp_parser_;
   const bool qp_parsing_allowed_;
 
+  // Enables encoder switching on initialization failures.
+  bool switch_encoder_on_init_failures_;
+
   // Public methods are proxied to the task queues. The queues must be destroyed
   // first to make sure no tasks run that use other members.
   rtc::TaskQueue encoder_queue_;
 
   // Used to cancel any potentially pending tasks to the worker thread.
   ScopedTaskSafety task_safety_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(VideoStreamEncoder);
 };
 
 }  // namespace webrtc

@@ -61,7 +61,7 @@ RTC_PUSH_IGNORING_WUNDEF()
 #ifdef WEBRTC_ANDROID_PLATFORM_BUILD
 #include "external/webrtc/webrtc/logging/rtc_event_log/rtc_event_log.pb.h"
 #else
-#include <rtc_event_log.pb.h>
+#include "logging/rtc_event_log/rtc_event_log.pb.h"
 #endif
 RTC_POP_IGNORING_WUNDEF()
 
@@ -363,6 +363,12 @@ std::string RtcEventLogEncoderLegacy::Encode(const RtcEvent& event) {
           static_cast<const RtcEventVideoSendStreamConfig&>(event);
       return EncodeVideoSendStreamConfig(rtc_event);
     }
+    case RtcEvent::Type::BeginV3Log:
+    case RtcEvent::Type::EndV3Log:
+      // These special events are written as part of starting
+      // and stopping the log, and only as part of version 3 of the format.
+      RTC_DCHECK_NOTREACHED();
+      break;
     case RtcEvent::Type::RouteChangeEvent:
     case RtcEvent::Type::RemoteEstimateEvent:
     case RtcEvent::Type::GenericPacketReceived:

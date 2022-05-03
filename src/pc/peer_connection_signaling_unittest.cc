@@ -12,20 +12,52 @@
 // machine, as well as tests that check basic, media-agnostic aspects of SDP.
 
 #include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
+#include <set>
+#include <string>
 #include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
+#include "absl/types/optional.h"
+#include "api/audio/audio_mixer.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/create_peerconnection_factory.h"
-#include "api/jsep_session_description.h"
+#include "api/dtls_transport_interface.h"
+#include "api/jsep.h"
+#include "api/media_types.h"
+#include "api/peer_connection_interface.h"
+#include "api/rtc_error.h"
+#include "api/rtp_receiver_interface.h"
+#include "api/rtp_sender_interface.h"
+#include "api/rtp_transceiver_interface.h"
+#include "api/scoped_refptr.h"
+#include "api/set_local_description_observer_interface.h"
+#include "api/set_remote_description_observer_interface.h"
 #include "api/video_codecs/builtin_video_decoder_factory.h"
 #include "api/video_codecs/builtin_video_encoder_factory.h"
+#include "media/base/codec.h"
+#include "modules/audio_device/include/audio_device.h"
+#include "modules/audio_processing/include/audio_processing.h"
+#include "p2p/base/port_allocator.h"
 #include "pc/peer_connection.h"
 #include "pc/peer_connection_proxy.h"
 #include "pc/peer_connection_wrapper.h"
 #include "pc/sdp_utils.h"
-#include "pc/webrtc_sdp.h"
+#include "pc/session_description.h"
+#include "pc/test/mock_peer_connection_observers.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/ref_counted_object.h"
+#include "rtc_base/rtc_certificate.h"
+#include "rtc_base/rtc_certificate_generator.h"
+#include "rtc_base/string_encode.h"
+#include "rtc_base/thread.h"
+#include "test/gtest.h"
 #ifdef WEBRTC_ANDROID
 #include "pc/test/android_test_initializer.h"
 #endif
@@ -33,7 +65,6 @@
 #include "pc/test/fake_rtc_certificate_generator.h"
 #include "rtc_base/gunit.h"
 #include "rtc_base/virtual_socket_server.h"
-#include "test/gmock.h"
 
 namespace webrtc {
 
@@ -659,7 +690,7 @@ TEST_P(PeerConnectionSignalingTest,
   // Process all currently pending messages by waiting for a posted task to run.
   bool checkpoint_reached = false;
   rtc::Thread::Current()->PostTask(
-      RTC_FROM_HERE, [&checkpoint_reached] { checkpoint_reached = true; });
+      [&checkpoint_reached] { checkpoint_reached = true; });
   EXPECT_TRUE_WAIT(checkpoint_reached, kWaitTimeout);
   // If resolving the observer was pending, it must now have been called.
   EXPECT_TRUE(observer->called());
@@ -674,8 +705,9 @@ TEST_P(PeerConnectionSignalingTest, SetRemoteDescriptionExecutesImmediately) {
 
   // By not waiting for the observer's callback we can verify that the operation
   // executed immediately.
-  callee->pc()->SetRemoteDescription(std::move(offer),
-                                     new FakeSetRemoteDescriptionObserver());
+  callee->pc()->SetRemoteDescription(
+      std::move(offer),
+      rtc::make_ref_counted<FakeSetRemoteDescriptionObserver>());
   EXPECT_EQ(2u, callee->pc()->GetReceivers().size());
 }
 
@@ -693,8 +725,9 @@ TEST_P(PeerConnectionSignalingTest, CreateOfferBlocksSetRemoteDescription) {
   // SetRemoteDescription() operation should be chained to be executed
   // asynchronously, when CreateOffer() completes.
   callee->pc()->CreateOffer(offer_observer, RTCOfferAnswerOptions());
-  callee->pc()->SetRemoteDescription(std::move(offer),
-                                     new FakeSetRemoteDescriptionObserver());
+  callee->pc()->SetRemoteDescription(
+      std::move(offer),
+      rtc::make_ref_counted<FakeSetRemoteDescriptionObserver>());
   // CreateOffer() is asynchronous; without message processing this operation
   // should not have completed.
   EXPECT_FALSE(offer_observer->called());
@@ -1113,8 +1146,9 @@ TEST_F(PeerConnectionSignalingUnifiedPlanTest,
   // the new observer should also be invoked synchronously - as is ensured by
   // other tests.)
   RTC_DCHECK(!caller->pc()->GetTransceivers()[0]->mid().has_value());
-  caller->pc()->SetLocalDescription(std::move(offer),
-                                    new FakeSetLocalDescriptionObserver());
+  caller->pc()->SetLocalDescription(
+      std::move(offer),
+      rtc::make_ref_counted<FakeSetLocalDescriptionObserver>());
   EXPECT_TRUE(caller->pc()->GetTransceivers()[0]->mid().has_value());
 }
 
@@ -1132,7 +1166,7 @@ TEST_F(PeerConnectionSignalingUnifiedPlanTest,
             // operation executed immediately.
             RTC_DCHECK(!pc->GetTransceivers()[0]->mid().has_value());
             pc->SetLocalDescription(
-                new rtc::RefCountedObject<MockSetSessionDescriptionObserver>(),
+                rtc::make_ref_counted<MockSetSessionDescriptionObserver>(),
                 desc);
             EXPECT_TRUE(pc->GetTransceivers()[0]->mid().has_value());
           });

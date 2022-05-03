@@ -20,6 +20,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "api/async_resolver_factory.h"
+#include "api/audio/audio_mixer.h"
 #include "api/call/call_factory_interface.h"
 #include "api/fec_controller.h"
 #include "api/function_view.h"
@@ -41,6 +42,7 @@
 #include "api/video_codecs/video_encoder.h"
 #include "api/video_codecs/video_encoder_factory.h"
 #include "media/base/media_constants.h"
+#include "modules/audio_processing/include/audio_processing.h"
 #include "rtc_base/network.h"
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/ssl_certificate.h"
@@ -357,6 +359,10 @@ class PeerConnectionE2EQualityTestFixture {
     // Set a custom NetEqFactory to be used in the call.
     virtual PeerConfigurer* SetNetEqFactory(
         std::unique_ptr<NetEqFactory> neteq_factory) = 0;
+    virtual PeerConfigurer* SetAudioProcessing(
+        rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing) = 0;
+    virtual PeerConfigurer* SetAudioMixer(
+        rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer) = 0;
 
     // The parameters of the following 4 methods will be passed to the
     // PeerConnectionInterface implementation that will be created for this
@@ -371,6 +377,11 @@ class PeerConnectionE2EQualityTestFixture {
         std::unique_ptr<rtc::SSLCertificateVerifier> tls_cert_verifier) = 0;
     virtual PeerConfigurer* SetIceTransportFactory(
         std::unique_ptr<IceTransportFactory> factory) = 0;
+    // Flags to set on `cricket::PortAllocator`. These flags will be added
+    // to the default ones that are presented on the port allocator.
+    // For possible values check p2p/base/port_allocator.h.
+    virtual PeerConfigurer* SetPortAllocatorExtraFlags(
+        uint32_t extra_flags) = 0;
 
     // Add new video stream to the call that will be sent from this peer.
     // Default implementation of video frames generator will be used.
@@ -396,6 +407,22 @@ class PeerConnectionE2EQualityTestFixture {
     // Set the audio stream for the call from this peer. If this method won't
     // be invoked, this peer will send no audio.
     virtual PeerConfigurer* SetAudioConfig(AudioConfig config) = 0;
+
+    // Set if ULP FEC should be used or not. False by default.
+    virtual PeerConfigurer* SetUseUlpFEC(bool value) = 0;
+    // Set if Flex FEC should be used or not. False by default.
+    // Client also must enable `enable_flex_fec_support` in the `RunParams` to
+    // be able to use this feature.
+    virtual PeerConfigurer* SetUseFlexFEC(bool value) = 0;
+    // Specifies how much video encoder target bitrate should be different than
+    // target bitrate, provided by WebRTC stack. Must be greater than 0. Can be
+    // used to emulate overshooting of video encoders. This multiplier will
+    // be applied for all video encoder on both sides for all layers. Bitrate
+    // estimated by WebRTC stack will be multiplied by this multiplier and then
+    // provided into VideoEncoder::SetRates(...). 1.0 by default.
+    virtual PeerConfigurer* SetVideoEncoderBitrateMultiplier(
+        double multiplier) = 0;
+
     // If is set, an RTCEventLog will be saved in that location and it will be
     // available for further analysis.
     virtual PeerConfigurer* SetRtcEventLogPath(std::string path) = 0;
@@ -427,15 +454,9 @@ class PeerConnectionE2EQualityTestFixture {
     // it will be shut downed.
     TimeDelta run_duration;
 
-    bool use_ulp_fec = false;
-    bool use_flex_fec = false;
-    // Specifies how much video encoder target bitrate should be different than
-    // target bitrate, provided by WebRTC stack. Must be greater then 0. Can be
-    // used to emulate overshooting of video encoders. This multiplier will
-    // be applied for all video encoder on both sides for all layers. Bitrate
-    // estimated by WebRTC stack will be multiplied on this multiplier and then
-    // provided into VideoEncoder::SetRates(...).
-    double video_encoder_bitrate_multiplier = 1.0;
+    // If set to true peers will be able to use Flex FEC, otherwise they won't
+    // be able to negotiate it even if it's enabled on per peer level.
+    bool enable_flex_fec_support = false;
     // If true will set conference mode in SDP media section for all video
     // tracks for all peers.
     bool use_conference_mode = false;
