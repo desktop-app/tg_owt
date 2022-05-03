@@ -11,6 +11,9 @@ PRIVATE
 
 nice_target_sources(libsdkmacos ${libsdkmacos_loc}
 PRIVATE
+    api/peerconnection/RTCIceCandidateErrorEvent+Private.h
+    api/peerconnection/RTCIceCandidateErrorEvent.h
+    api/peerconnection/RTCIceCandidateErrorEvent.mm
     api/video_frame_buffer/RTCNativeI420Buffer+Private.h
     api/video_frame_buffer/RTCNativeI420Buffer.h
     api/video_frame_buffer/RTCNativeI420Buffer.mm
