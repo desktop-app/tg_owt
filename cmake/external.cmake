@@ -146,22 +146,6 @@ function(link_libopenh264 target_name)
     endif()
 endfunction()
 
-# libusrsctp
-function(link_libusrsctp target_name)
-    if (TG_OWT_PACKAGED_BUILD)
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(LIBUSRSCTP usrsctp)
-        set(LIBUSRSCTP_FOUND ${LIBUSRSCTP_FOUND} PARENT_SCOPE)
-        if (LIBUSRSCTP_FOUND)
-            target_link_libraries(${target_name} PRIVATE ${LIBUSRSCTP_LINK_LIBRARIES})
-            target_include_directories(${target_name} SYSTEM PRIVATE ${LIBUSRSCTP_INCLUDE_DIRS})
-        endif()
-    endif()
-    if (NOT LIBUSRSCTP_FOUND)
-        target_link_libraries(${target_name} PRIVATE tg_owt::libusrsctp)
-    endif()
-endfunction()
-
 # libvpx
 set(TG_OWT_LIBVPX_INCLUDE_PATH "" CACHE STRING "Include path for libvpx.")
 function(link_libvpx target_name)
