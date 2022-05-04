@@ -22,6 +22,8 @@
 
 namespace webrtc {
 
+bool InitPipewireStubs();
+
 class SharedScreenCastStreamPrivate;
 
 class RTC_EXPORT SharedScreenCastStream
