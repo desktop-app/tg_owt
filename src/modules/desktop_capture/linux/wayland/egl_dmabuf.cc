@@ -145,6 +145,13 @@ typedef void (*gbm_device_destroy_func)(struct gbm_device *gbm);
 gbm_create_device_func Gbm_create_device = nullptr;
 gbm_device_destroy_func Gbm_device_destroy = nullptr;
 
+// libdrm
+typedef int (*drmGetDevices2_func)(uint32_t flags, drmDevicePtr devices[], int max_devices);
+typedef void (*drmFreeDevices_func)(drmDevicePtr devices[], int count);
+
+drmGetDevices2_func DrmGetDevices2 = nullptr;
+drmFreeDevices_func DrmFreeDevices = nullptr;
+
 static const std::string FormatGLError(GLenum err) {
   switch (err) {
     case GL_NO_ERROR:
@@ -255,6 +262,29 @@ static bool LoadGBM() {
     Gbm_create_device = (gbm_create_device_func)dlsym(g_lib_gbm, "gbm_create_device");
     Gbm_device_destroy = (gbm_device_destroy_func)dlsym(g_lib_gbm, "gbm_device_destroy");
     return Gbm_create_device && Gbm_device_destroy;
+  }
+
+  return false;
+}
+
+static void* g_lib_drm = nullptr;
+
+RTC_NO_SANITIZE("cfi-icall")
+static bool OpenDRM() {
+  g_lib_drm = dlopen("libdrm.so.2", RTLD_NOW | RTLD_GLOBAL);
+  if (g_lib_drm) {
+    return true;
+  }
+
+  return false;
+}
+
+RTC_NO_SANITIZE("cfi-icall")
+static bool LoadDRM() {
+  if (OpenDRM()) {
+    DrmGetDevices2 = (drmGetDevices2_func)dlsym(g_lib_drm, "drmGetDevices2");
+    DrmFreeDevices = (drmFreeDevices_func)dlsym(g_lib_drm, "drmFreeDevices");
+    return DrmGetDevices2 && DrmFreeDevices;
   }
 
   return false;
@@ -398,6 +428,11 @@ EglDmaBuf::EglDmaBuf() {
     RTC_LOG(LS_ERROR) << "Failed to obtain default EGL display: "
                       << FormatEGLError(EglGetError()) << "\n"
                       << "Defaulting to using first available render node";
+    if (!LoadDRM()) {
+      RTC_LOG(LS_ERROR) << "Unable to load libdrm library.";
+      return;
+    }
+
     absl::optional<std::string> render_node = GetRenderNode();
     if (!render_node) {
       return;
@@ -413,6 +448,7 @@ EglDmaBuf::EglDmaBuf() {
 
     if (!LoadGBM()) {
       RTC_LOG(LS_ERROR) << "Unable to load GBM library.";
+      close(drm_fd_);
       return;
     }
 
@@ -759,7 +795,7 @@ std::vector<uint64_t> EglDmaBuf::QueryDmaBufModifiers(uint32_t format) {
 }
 
 absl::optional<std::string> EglDmaBuf::GetRenderNode() {
-  int max_devices = drmGetDevices2(0, nullptr, 0);
+  int max_devices = DrmGetDevices2(0, nullptr, 0);
   if (max_devices <= 0) {
     RTC_LOG(LS_ERROR) << "drmGetDevices2() has not found any devices (errno="
                       << -max_devices << ")";
@@ -767,7 +803,7 @@ absl::optional<std::string> EglDmaBuf::GetRenderNode() {
   }
 
   std::vector<drmDevicePtr> devices(max_devices);
-  int ret = drmGetDevices2(0, devices.data(), max_devices);
+  int ret = DrmGetDevices2(0, devices.data(), max_devices);
   if (ret < 0) {
     RTC_LOG(LS_ERROR) << "drmGetDevices2() returned an error " << ret;
     return absl::nullopt;
@@ -782,7 +818,7 @@ absl::optional<std::string> EglDmaBuf::GetRenderNode() {
     }
   }
 
-  drmFreeDevices(devices.data(), ret);
+  DrmFreeDevices(devices.data(), ret);
   return render_node;
 }
 
