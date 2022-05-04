@@ -160,6 +160,13 @@ glCheckFramebufferStatus_func GlCheckFramebufferStatus = nullptr;
 glTexParameteri_func GlTexParameteri = nullptr;
 glXGetProcAddressARB_func GlXGetProcAddressARB = nullptr;
 
+// GBM
+typedef struct gbm_device *(*gbm_create_device_func)(int fd);
+typedef void (*gbm_device_destroy_func)(struct gbm_device *gbm);
+
+gbm_create_device_func Gbm_create_device = nullptr;
+gbm_device_destroy_func Gbm_device_destroy = nullptr;
+
 static const std::string FormatGLError(GLenum err) {
   switch (err) {
     case GL_NO_ERROR:
@@ -270,6 +277,29 @@ static bool OpenEGL() {
     EglGetProcAddress =
         (eglGetProcAddress_func)dlsym(g_lib_egl, "eglGetProcAddress");
     return EglGetProcAddress;
+  }
+
+  return false;
+}
+
+static void* g_lib_gbm = nullptr;
+
+RTC_NO_SANITIZE("cfi-icall")
+static bool OpenGBM() {
+  g_lib_gbm = dlopen("libgbm.so.1", RTLD_NOW | RTLD_GLOBAL);
+  if (g_lib_gbm) {
+    return true;
+  }
+
+  return false;
+}
+
+RTC_NO_SANITIZE("cfi-icall")
+static bool LoadGBM() {
+  if (OpenGBM()) {
+    Gbm_create_device = (gbm_create_device_func)dlsym(g_lib_gbm, "gbm_create_device");
+    Gbm_device_destroy = (gbm_device_destroy_func)dlsym(g_lib_gbm, "gbm_device_destroy");
+    return Gbm_create_device && Gbm_device_destroy;
   }
 
   return false;
@@ -393,6 +423,13 @@ EglDrmDevice::~EglDrmDevice() {
 }
 
 RTC_NO_SANITIZE("cfi-icall")
+void EglDrmDevice::GbmDeviceDeleter::operator()(gbm_device* device) const {
+  if (device) {
+    Gbm_device_destroy(device);
+  }
+}
+
+RTC_NO_SANITIZE("cfi-icall")
 bool EglDrmDevice::EnsureInitialized() {
   if (initialized_) {
     return true;
@@ -407,7 +444,14 @@ bool EglDrmDevice::EnsureInitialized() {
       return false;
     }
 
-    gbm_device_.reset(gbm_create_device(drm_fd_));
+    if (!LoadGBM()) {
+      RTC_LOG(LS_ERROR) << "Unable to load GBM library.";
+      close(drm_fd_);
+      drm_fd_ = -1;
+      return false;
+    }
+
+    gbm_device_.reset(Gbm_create_device(drm_fd_));
     if (!gbm_device_) {
       RTC_LOG(LS_ERROR) << "Cannot create GBM device: " << strerror(errno);
       close(drm_fd_);

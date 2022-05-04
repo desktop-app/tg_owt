@@ -79,11 +79,7 @@ class EglDrmDevice {
   dev_t device_id_ = DEVICE_ID_INVALID;
 
   struct GbmDeviceDeleter {
-    void operator()(gbm_device* device) const {
-      if (device) {
-        gbm_device_destroy(device);
-      }
-    }
+    void operator()(gbm_device* device) const;
   };
   std::unique_ptr<gbm_device, GbmDeviceDeleter> gbm_device_;
   int32_t drm_fd_ = -1;
