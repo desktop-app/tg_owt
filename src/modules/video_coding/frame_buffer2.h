@@ -118,7 +118,7 @@ class FrameBuffer {
   // Check that the references of `frame` are valid.
   bool ValidReferences(const EncodedFrame& frame) const;
 
-  int64_t FindNextFrame(int64_t now_ms) RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  int64_t FindNextFrame(Timestamp now) RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   std::unique_ptr<EncodedFrame> GetNextFrame()
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
@@ -146,9 +146,6 @@ class FrameBuffer {
   void UpdateTimingFrameInfo() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   void ClearFramesAndHistory() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-  bool HasBadRenderTiming(const EncodedFrame& frame, int64_t now_ms)
-      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // The cleaner solution would be to have the NextFrame function return a
   // vector of frames, but until the decoding pipeline can support decoding

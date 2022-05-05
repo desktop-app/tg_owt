@@ -28,6 +28,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/base/attributes.h"
@@ -36,12 +37,14 @@
 #include "api/async_dns_resolver.h"
 #include "api/async_resolver_factory.h"
 #include "api/candidate.h"
+#include "api/ice_transport_interface.h"
 #include "api/rtc_error.h"
 #include "api/sequence_checker.h"
 #include "api/transport/enums.h"
 #include "api/transport/stun.h"
 #include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.h"
 #include "logging/rtc_event_log/ice_logger.h"
+#include "p2p/base/basic_async_resolver_factory.h"
 #include "p2p/base/candidate_pair_interface.h"
 #include "p2p/base/connection.h"
 #include "p2p/base/ice_controller_factory_interface.h"
@@ -56,7 +59,6 @@
 #include "p2p/base/transport_description.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/dscp.h"
 #include "rtc_base/network/sent_packet.h"
 #include "rtc_base/network_route.h"
@@ -105,15 +107,30 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
   static std::unique_ptr<P2PTransportChannel> Create(
       const std::string& transport_name,
       int component,
+      webrtc::IceTransportInit init);
+
+  // TODO(jonaso): This is deprecated and will be removed.
+  static std::unique_ptr<P2PTransportChannel> Create(
+      const std::string& transport_name,
+      int component,
       PortAllocator* allocator,
       webrtc::AsyncDnsResolverFactoryInterface* async_dns_resolver_factory,
       webrtc::RtcEventLog* event_log = nullptr,
-      IceControllerFactoryInterface* ice_controller_factory = nullptr);
+      IceControllerFactoryInterface* ice_controller_factory = nullptr) {
+    webrtc::IceTransportInit init;
+    init.set_port_allocator(allocator);
+    init.set_async_dns_resolver_factory(async_dns_resolver_factory);
+    init.set_event_log(event_log);
+    init.set_ice_controller_factory(ice_controller_factory);
+    return Create(transport_name, component, std::move(init));
+  }
+
   // For testing only.
   // TODO(zstein): Remove once AsyncDnsResolverFactory is required.
   P2PTransportChannel(const std::string& transport_name,
                       int component,
                       PortAllocator* allocator);
+
   ABSL_DEPRECATED("bugs.webrtc.org/12598")
   P2PTransportChannel(
       const std::string& transport_name,
@@ -121,8 +138,21 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
       PortAllocator* allocator,
       webrtc::AsyncResolverFactory* async_resolver_factory,
       webrtc::RtcEventLog* event_log = nullptr,
-      IceControllerFactoryInterface* ice_controller_factory = nullptr);
+      IceControllerFactoryInterface* ice_controller_factory = nullptr)
+      : P2PTransportChannel(
+            transport_name,
+            component,
+            allocator,
+            nullptr,
+            std::make_unique<webrtc::WrappingAsyncDnsResolverFactory>(
+                async_resolver_factory),
+            event_log,
+            ice_controller_factory) {}
+
   ~P2PTransportChannel() override;
+
+  P2PTransportChannel(const P2PTransportChannel&) = delete;
+  P2PTransportChannel& operator=(const P2PTransportChannel&) = delete;
 
   // From TransportChannelImpl:
   IceTransportState GetState() const override;
@@ -210,6 +240,7 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
 
   // Public for unit tests.
   rtc::ArrayView<Connection*> connections() const;
+  void RemoveConnectionForTest(Connection* connection);
 
   // Public for unit tests.
   PortAllocatorSession* allocator_session() const {
@@ -270,6 +301,7 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
   void UpdateState();
   void HandleAllTimedOut();
   void MaybeStopPortAllocatorSessions();
+  void OnSelectedConnectionDestroyed() RTC_RUN_ON(network_thread_);
 
   // ComputeIceTransportState computes the RTCIceTransportState as described in
   // https://w3c.github.io/webrtc-pc/#dom-rtcicetransportstate. ComputeState
@@ -486,6 +518,12 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
       Candidate candidate,
       const webrtc::AsyncDnsResolverResult& result);
 
+  // Bytes/packets sent/received on this channel.
+  uint64_t bytes_sent_ = 0;
+  uint64_t bytes_received_ = 0;
+  uint64_t packets_sent_ = 0;
+  uint64_t packets_received_ = 0;
+
   // Number of times the selected_connection_ has been modified.
   uint32_t selected_candidate_pair_changes_ = 0;
 
@@ -494,8 +532,6 @@ class RTC_EXPORT P2PTransportChannel : public IceTransportInternal {
   int64_t last_data_received_ms_ = 0;
 
   IceFieldTrials field_trials_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(P2PTransportChannel);
 };
 
 }  // namespace cricket

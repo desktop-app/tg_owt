@@ -149,6 +149,8 @@ if (is_ios || is_mac) {
       "../rtc_base:checks",
     ]
 
+    absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
+
     frameworks = [
       "AVFoundation.framework",
       "CoreMedia.framework",
@@ -180,6 +182,7 @@ if (is_ios || is_mac) {
 
       deps = [
         ":base_objc",
+        ":helpers_objc",
         "../rtc_base",
         "../rtc_base:checks",
         "../rtc_base:logging",
@@ -189,6 +192,8 @@ if (is_ios || is_mac) {
         "..:common_objc",
         ":used_from_extension",
       ]
+
+      absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
     }
 
     rtc_library("file_logger_objc") {
@@ -730,7 +735,7 @@ if (is_ios || is_mac) {
         ":wrapped_native_codec_objc",
         "../media:rtc_media_base",
         "../modules/video_coding/codecs/av1:libaom_av1_decoder",
-        "../modules/video_coding/codecs/av1:libaom_av1_encoder",
+        "../modules/video_coding/codecs/av1:libaom_av1_encoder_if_supported",
       ]
     }
 
@@ -890,6 +895,9 @@ if (is_ios || is_mac) {
         "objc/api/peerconnection/RTCIceCandidate+Private.h",
         "objc/api/peerconnection/RTCIceCandidate.h",
         "objc/api/peerconnection/RTCIceCandidate.mm",
+        "objc/api/peerconnection/RTCIceCandidateErrorEvent+Private.h",
+        "objc/api/peerconnection/RTCIceCandidateErrorEvent.h",
+        "objc/api/peerconnection/RTCIceCandidateErrorEvent.mm",
         "objc/api/peerconnection/RTCIceServer+Private.h",
         "objc/api/peerconnection/RTCIceServer.h",
         "objc/api/peerconnection/RTCIceServer.mm",
@@ -1261,6 +1269,7 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCDataChannelConfiguration.h",
           "objc/api/peerconnection/RTCFieldTrials.h",
           "objc/api/peerconnection/RTCIceCandidate.h",
+          "objc/api/peerconnection/RTCIceCandidateErrorEvent.h",
           "objc/api/peerconnection/RTCIceServer.h",
           "objc/api/peerconnection/RTCLegacyStatsReport.h",
           "objc/api/peerconnection/RTCMediaConstraints.h",
@@ -1320,6 +1329,7 @@ if (is_ios || is_mac) {
           ":audio_objc",
           ":base_objc",
           ":default_codec_factory_objc",
+          ":metal_objc",
           ":native_api",
           ":native_video",
           ":peerconnectionfactory_base_objc",
@@ -1375,6 +1385,7 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCDtmfSender.h",
           "objc/api/peerconnection/RTCFieldTrials.h",
           "objc/api/peerconnection/RTCIceCandidate.h",
+          "objc/api/peerconnection/RTCIceCandidateErrorEvent.h",
           "objc/api/peerconnection/RTCIceServer.h",
           "objc/api/peerconnection/RTCLegacyStatsReport.h",
           "objc/api/peerconnection/RTCMediaConstraints.h",

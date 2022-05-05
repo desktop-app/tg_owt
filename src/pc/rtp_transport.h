@@ -18,6 +18,7 @@
 
 #include "absl/types/optional.h"
 #include "call/rtp_demuxer.h"
+#include "call/video_receive_stream.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "p2p/base/packet_transport_internal.h"
 #include "pc/rtp_transport_internal.h"
@@ -86,6 +87,8 @@ class RtpTransport : public RtpTransportInternal {
                               RtpPacketSinkInterface* sink) override;
 
   bool UnregisterRtpDemuxerSink(RtpPacketSinkInterface* sink) override;
+    
+  virtual void ProcessRtpPacket(webrtc::RtpPacketReceived const &packet, bool isUnresolved) {}
 
  protected:
   // These methods will be used in the subclasses.

@@ -237,11 +237,13 @@ function(link_x11 target_name)
 endfunction()
 
 # PipeWire
-function(link_pipewire target_name)
+function(link_pipewire target_name only_include_dirs)
     find_package(PkgConfig REQUIRED)
-    pkg_search_module(PIPEWIRE REQUIRED libpipewire-0.3 libpipewire-0.2)
+    pkg_check_modules(PIPEWIRE REQUIRED libpipewire-0.3)
     target_include_directories(${target_name} SYSTEM PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
-    target_link_libraries(${target_name} PRIVATE ${PIPEWIRE_LINK_LIBRARIES})
+    if (NOT only_include_dirs)
+        target_link_libraries(${target_name} PRIVATE ${PIPEWIRE_LINK_LIBRARIES})
+    endif()
 endfunction()
 
 # Alsa

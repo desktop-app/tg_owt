@@ -11,11 +11,13 @@
 #include "pc/rtp_transport.h"
 
 #include <errno.h>
-#include <string>
+
+#include <cstdint>
 #include <utility>
 
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
+#include "api/units/timestamp.h"
 #include "media/base/rtp_utils.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/checks.h"
@@ -181,8 +183,6 @@ bool RtpTransport::UnregisterRtpDemuxerSink(RtpPacketSinkInterface* sink) {
 
 void RtpTransport::DemuxPacket(rtc::CopyOnWriteBuffer packet,
                                int64_t packet_time_us) {
-  rtc::CopyOnWriteBuffer packetData = packet;
-    
   webrtc::RtpPacketReceived parsed_packet(
       &header_extension_map_, packet_time_us == -1
                                   ? Timestamp::MinusInfinity()
@@ -192,15 +192,15 @@ void RtpTransport::DemuxPacket(rtc::CopyOnWriteBuffer packet,
         << "Failed to parse the incoming RTP packet before demuxing. Drop it.";
     return;
   }
-
-  bool isUnresolved = false;
+    
+  bool isUnresolved = true;
   if (!rtp_demuxer_.OnRtpPacket(parsed_packet)) {
     isUnresolved = true;
     RTC_LOG(LS_WARNING) << "Failed to demux RTP packet: "
                         << RtpDemuxer::DescribePacket(parsed_packet);
   }
     
-  SignalRtpPacketReceived(&packetData, packet_time_us, isUnresolved);
+  ProcessRtpPacket(parsed_packet, isUnresolved);
 }
 
 bool RtpTransport::IsTransportWritable() {
