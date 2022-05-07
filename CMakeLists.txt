@@ -2372,10 +2372,20 @@ endif()
 
 if (NOT TG_OWT_USE_PIPEWIRE)
     remove_target_sources(tg_owt ${webrtc_loc}
-        modules/desktop_capture/linux/base_capturer_pipewire.cc
-        modules/desktop_capture/linux/base_capturer_pipewire.h
-        modules/desktop_capture/linux/egl_dmabuf.cc
-        modules/desktop_capture/linux/egl_dmabuf.h
+        modules/desktop_capture/linux/wayland/base_capturer_pipewire.cc
+        modules/desktop_capture/linux/wayland/base_capturer_pipewire.h
+        modules/desktop_capture/linux/wayland/drm.sigs
+        modules/desktop_capture/linux/wayland/egl_dmabuf.cc
+        modules/desktop_capture/linux/wayland/egl_dmabuf.h
+        modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.cc
+        modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.h
+        modules/desktop_capture/linux/wayland/pipewire_stub_header.fragment
+        modules/desktop_capture/linux/wayland/scoped_glib.cc
+        modules/desktop_capture/linux/wayland/scoped_glib.h
+        modules/desktop_capture/linux/wayland/screencast_portal.cc
+        modules/desktop_capture/linux/wayland/screencast_portal.h
+        modules/desktop_capture/linux/wayland/shared_screencast_stream.cc
+        modules/desktop_capture/linux/wayland/shared_screencast_stream.h
     )
 endif()
 
