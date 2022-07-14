@@ -25,7 +25,7 @@ option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture on non-Apple Unix."
 option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire 0.3 for desktop capture on non-Apple Unix." ${not_packaged_build})
 option(TG_OWT_BUILD_AUDIO_BACKENDS "Build webrtc audio backends." OFF)
 
-if (NOT UNIX OR APPLE)
+if (NOT UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
     set(TG_OWT_USE_PIPEWIRE OFF)
 endif()
 
