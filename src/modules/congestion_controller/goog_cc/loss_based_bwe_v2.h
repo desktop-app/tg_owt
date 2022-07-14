@@ -86,6 +86,7 @@ class LossBasedBweV2 {
   };
 
   struct Config {
+    Config() {};
     double bandwidth_rampup_upper_bound_factor = 0.0;
     double bandwidth_rampup_upper_bound_factor_in_hold = 0;
     double bandwidth_rampup_hold_threshold = 0;
