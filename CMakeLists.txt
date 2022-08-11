@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0076 NEW)
 cmake_policy(SET CMP0091 NEW)
+include(CMakeDependentOption)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -8,7 +9,9 @@ set(TG_OWT_SPECIAL_TARGET "" CACHE STRING "Use special platform target, like 'ma
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.11 CACHE STRING "Minimum OS X deployment version" FORCE)
 
-if (NOT TG_OWT_SPECIAL_TARGET STREQUAL "")
+get_filename_component(parent_dir .. REALPATH)
+get_filename_component(parent_dir ${parent_dir} NAME)
+if (parent_dir STREQUAL "Libraries")
     set(TG_OWT_PACKAGED_BUILD 0)
 else()
     set(TG_OWT_PACKAGED_BUILD 1)
@@ -21,13 +24,9 @@ endif()
 
 option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." OFF)
 option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
-option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture on non-Apple Unix." ON)
-option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire 0.3 for desktop capture on non-Apple Unix." ${not_packaged_build})
+cmake_dependent_option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture." ON "UNIX; NOT APPLE" OFF)
+cmake_dependent_option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire for desktop capture." ${not_packaged_build} TG_OWT_USE_PIPEWIRE OFF)
 option(TG_OWT_BUILD_AUDIO_BACKENDS "Build webrtc audio backends." OFF)
-
-if (NOT UNIX OR APPLE)
-    set(TG_OWT_USE_PIPEWIRE OFF)
-endif()
 
 if (BUILD_SHARED_LIBS)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
