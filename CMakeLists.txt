@@ -24,6 +24,7 @@ endif()
 
 option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." OFF)
 option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
+cmake_dependent_option(TG_OWT_USE_X11 "Use X11 for desktop capture." ON "UNIX; NOT APPLE" OFF)
 cmake_dependent_option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture." ON "UNIX; NOT APPLE" OFF)
 cmake_dependent_option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire for desktop capture." ${not_packaged_build} TG_OWT_USE_PIPEWIRE OFF)
 option(TG_OWT_BUILD_AUDIO_BACKENDS "Build webrtc audio backends." OFF)
@@ -188,7 +189,7 @@ endif()
 include(cmake/libwebrtcbuild.cmake)
 target_link_libraries(tg_owt PUBLIC tg_owt::libwebrtcbuild)
 
-if (UNIX AND NOT APPLE)
+if (TG_OWT_USE_X11)
     link_x11(tg_owt)
 endif()
 
@@ -2366,6 +2367,39 @@ if (NOT TG_OWT_USE_PROTOBUF)
     remove_target_sources(tg_owt ${webrtc_loc}
         logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.cc
         logging/rtc_event_log/encoder/rtc_event_log_encoder_new_format.cc
+    )
+endif()
+
+if (NOT TG_OWT_USE_X11)
+    remove_target_sources(tg_owt ${webrtc_loc}
+        # src/modules/desktop_capture/BUILD.gn (rtc_use_x11_extensions)
+        modules/desktop_capture/linux/x11/mouse_cursor_monitor_x11.cc
+        modules/desktop_capture/linux/x11/mouse_cursor_monitor_x11.h
+        modules/desktop_capture/linux/x11/screen_capturer_x11.cc
+        modules/desktop_capture/linux/x11/screen_capturer_x11.h
+        modules/desktop_capture/linux/x11/shared_x_display.cc
+        modules/desktop_capture/linux/x11/shared_x_display.h
+        modules/desktop_capture/linux/x11/window_capturer_x11.cc
+        modules/desktop_capture/linux/x11/window_capturer_x11.h
+        modules/desktop_capture/linux/x11/window_finder_x11.cc
+        modules/desktop_capture/linux/x11/window_finder_x11.h
+        modules/desktop_capture/linux/x11/window_list_utils.cc
+        modules/desktop_capture/linux/x11/window_list_utils.h
+        modules/desktop_capture/linux/x11/x_atom_cache.cc
+        modules/desktop_capture/linux/x11/x_atom_cache.h
+        modules/desktop_capture/linux/x11/x_error_trap.cc
+        modules/desktop_capture/linux/x11/x_error_trap.h
+        modules/desktop_capture/linux/x11/x_server_pixel_buffer.cc
+        modules/desktop_capture/linux/x11/x_server_pixel_buffer.h
+        modules/desktop_capture/linux/x11/x_window_property.cc
+        modules/desktop_capture/linux/x11/x_window_property.h
+
+        # screen_drawer_linux.cc depends on x11, rest are revdeps
+        modules/desktop_capture/screen_drawer.cc
+        modules/desktop_capture/screen_drawer.h
+        modules/desktop_capture/screen_drawer_linux.cc
+        modules/desktop_capture/screen_drawer_lock_posix.cc
+        modules/desktop_capture/screen_drawer_lock_posix.h
     )
 endif()
 

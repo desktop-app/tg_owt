@@ -29,6 +29,13 @@ INTERFACE
     BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=0
 )
 
+if (TG_OWT_USE_X11)
+    target_compile_definitions(libwebrtcbuild
+    INTERFACE
+        WEBRTC_USE_X11
+    )
+endif()
+
 if (TG_OWT_USE_PIPEWIRE)
     target_compile_definitions(libwebrtcbuild
     INTERFACE
@@ -64,11 +71,6 @@ else()
         target_compile_definitions(libwebrtcbuild
         INTERFACE
             WEBRTC_MAC
-        )
-    else()
-        target_compile_definitions(libwebrtcbuild
-        INTERFACE
-            WEBRTC_USE_X11
         )
     endif()
 
