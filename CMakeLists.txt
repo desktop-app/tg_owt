@@ -139,7 +139,6 @@ set_target_properties(tg_owt PROPERTIES SOVERSION 0 VERSION 0.0.0)
 
 target_link_libraries(tg_owt
 PRIVATE
-    tg_owt::libcrc32c
     tg_owt::libpffft
     tg_owt::librnnoise
     tg_owt::libsrtp
@@ -177,6 +176,7 @@ link_opus(tg_owt)
 link_libabsl(tg_owt)
 link_libopenh264(tg_owt)
 link_libvpx(tg_owt)
+link_crc32c(tg_owt)
 
 if (TG_OWT_BUILD_AUDIO_BACKENDS AND (UNIX AND NOT APPLE))
     link_libalsa(tg_owt)
@@ -2627,7 +2627,6 @@ endif()
 
 set(export_targets
     ${tg_owt_export}
-    libcrc32c
     libpffft
     librnnoise
     libsrtp
@@ -2644,6 +2643,9 @@ if (NOT absl_FOUND)
 endif()
 if (NOT LIBOPENH264_FOUND)
     list(APPEND export_targets libopenh264)
+endif()
+if (NOT Crc32c_FOUND)
+    list(APPEND export_targets libcrc32c)
 endif()
 
 export(
