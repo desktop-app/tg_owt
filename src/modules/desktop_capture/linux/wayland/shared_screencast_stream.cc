@@ -43,6 +43,23 @@ const int kBytesPerPixel = 4;
 const char kPipeWireLib[] = "libpipewire-0.3.so.0";
 #endif
 
+bool InitPipewireStubs() {
+#if defined(WEBRTC_DLOPEN_PIPEWIRE)
+  StubPathMap paths;
+
+  // Check if the PipeWire and DRM libraries are available.
+  paths[kModulePipewire].push_back(kPipeWireLib);
+
+  if (!InitializeStubs(paths)) {
+    RTC_LOG(LS_ERROR)
+        << "One of following libraries is missing on your system:\n"
+        << " - PipeWire (" << kPipeWireLib << ")";
+    return false;
+  }
+#endif  // defined(WEBRTC_DLOPEN_PIPEWIRE)
+  return true;
+}
+
 constexpr int kCursorBpp = 4;
 constexpr int CursorMetaSize(int w, int h) {
   return (sizeof(struct spa_meta_cursor) + sizeof(struct spa_meta_bitmap) +
@@ -375,19 +392,9 @@ bool SharedScreenCastStreamPrivate::StartScreenCastStream(
     uint32_t height) {
   width_ = width;
   height_ = height;
-#if defined(WEBRTC_DLOPEN_PIPEWIRE)
-  StubPathMap paths;
-
-  // Check if the PipeWire and DRM libraries are available.
-  paths[kModulePipewire].push_back(kPipeWireLib);
-
-  if (!InitializeStubs(paths)) {
-    RTC_LOG(LS_ERROR)
-        << "One of following libraries is missing on your system:\n"
-        << " - PipeWire (" << kPipeWireLib << ")";
+  if (!InitPipewireStubs()) {
     return false;
   }
-#endif  // defined(WEBRTC_DLOPEN_PIPEWIRE)
   egl_dmabuf_ = std::make_unique<EglDmaBuf>();
 
   pw_stream_node_id_ = stream_node_id;
