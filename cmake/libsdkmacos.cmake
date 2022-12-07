@@ -21,14 +21,10 @@ PRIVATE
     api/video_frame_buffer/RTCNativeMutableI420Buffer.mm
     api/video_codec/RTCVideoCodecConstants.h
     api/video_codec/RTCVideoCodecConstants.mm
-    api/video_codec/RTCVideoDecoderAV1.h
-    api/video_codec/RTCVideoDecoderAV1.mm
     api/video_codec/RTCVideoDecoderVP8.h
     api/video_codec/RTCVideoDecoderVP8.mm
     api/video_codec/RTCVideoDecoderVP9.h
     api/video_codec/RTCVideoDecoderVP9.mm
-    api/video_codec/RTCVideoEncoderAV1.h
-    api/video_codec/RTCVideoEncoderAV1.mm
     api/video_codec/RTCVideoEncoderVP8.h
     api/video_codec/RTCVideoEncoderVP8.mm
     api/video_codec/RTCVideoEncoderVP9.h
@@ -37,6 +33,8 @@ PRIVATE
     api/video_codec/RTCWrappedNativeVideoDecoder.mm
     api/video_codec/RTCWrappedNativeVideoEncoder.h
     api/video_codec/RTCWrappedNativeVideoEncoder.mm
+    base/RTCSSLCertificateVerifier.h
+    components/audio/RTCAudioDevice.h
     components/video_frame_buffer/RTCCVPixelBuffer.h
     components/video_frame_buffer/RTCCVPixelBuffer.mm
     components/video_codec/RTCCodecSpecificInfoH264+Private.h
@@ -114,6 +112,10 @@ PRIVATE
     helpers/scoped_cftyperef.h
     native/api/network_monitor_factory.h
     native/api/network_monitor_factory.mm
+    native/api/objc_audio_device_module.h
+    native/api/objc_audio_device_module.mm
+    native/api/ssl_certificate_verifier.h
+    native/api/ssl_certificate_verifier.mm
     native/api/video_capturer.h
     native/api/video_capturer.mm
     native/api/video_decoder_factory.h
@@ -126,6 +128,10 @@ PRIVATE
     native/api/video_frame_buffer.mm
     native/api/video_renderer.h
     native/api/video_renderer.mm
+    native/src/objc_audio_device.h
+    native/src/objc_audio_device.mm
+    native/src/objc_audio_device_delegate.h
+    native/src/objc_audio_device_delegate.mm
     native/src/objc_frame_buffer.h
     native/src/objc_frame_buffer.mm
     native/src/objc_video_decoder_factory.h
