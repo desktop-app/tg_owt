@@ -27,10 +27,10 @@ import android.graphics.SurfaceTexture;
 import android.media.MediaCodecInfo.CodecCapabilities;
 import android.media.MediaFormat;
 import android.os.Handler;
+import androidx.test.runner.AndroidJUnit4;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -46,7 +46,7 @@ import org.webrtc.VideoDecoder.DecodeInfo;
 import org.webrtc.VideoFrame.I420Buffer;
 import org.webrtc.VideoFrame.TextureBuffer.Type;
 
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(AndroidJUnit4.class)
 @Config(manifest = Config.NONE)
 public class AndroidVideoDecoderTest {
   private static final VideoDecoder.Settings TEST_DECODER_SETTINGS =
@@ -283,7 +283,7 @@ public class AndroidVideoDecoderTest {
             /* presentationTimeUs= */ anyLong(),
             /* flags= */ eq(0));
 
-    ByteBuffer inputBuffer = fakeMediaCodecWrapper.getInputBuffers()[indexCaptor.getValue()];
+    ByteBuffer inputBuffer = fakeMediaCodecWrapper.getInputBuffer(indexCaptor.getValue());
     CodecTestHelper.assertEqualContents(
         ENCODED_TEST_DATA, inputBuffer, offsetCaptor.getValue(), sizeCaptor.getValue());
   }

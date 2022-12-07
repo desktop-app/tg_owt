@@ -34,7 +34,6 @@
 #include "media/base/media_channel.h"
 #include "media/base/video_broadcaster.h"
 #include "pc/video_track_source.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/thread.h"
 
 namespace webrtc {
@@ -46,15 +45,6 @@ class RtpReceiverInternal : public RtpReceiverInterface {
   // embedded source object should enter a stopped/ended state and the track's
   // state set to `kEnded`, a final state that cannot be reversed.
   virtual void Stop() = 0;
-
-  // Call on the signaling thread to set the source's state to `ended` before
-  // clearing the media channel (`SetMediaChannel(nullptr)`) on the worker
-  // thread.
-  // The difference between `Stop()` and `SetSourceEnded()` is that the latter
-  // does not change the state of the associated track.
-  // NOTE: Calling this function should be followed with a call to
-  // `SetMediaChannel(nullptr)` on the worker thread, to complete the operation.
-  virtual void SetSourceEnded() = 0;
 
   // Sets the underlying MediaEngine channel associated with this RtpSender.
   // A VoiceMediaChannel should be used for audio RtpSenders and

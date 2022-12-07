@@ -11,71 +11,45 @@
 #ifndef PC_CHANNEL_H_
 #define PC_CHANNEL_H_
 
-#include <stddef.h>
 #include <stdint.h>
 
 #include <functional>
-#include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
-#include "api/call/audio_sink.h"
 #include "api/crypto/crypto_options.h"
-#include "api/function_view.h"
 #include "api/jsep.h"
 #include "api/media_types.h"
 #include "api/rtp_parameters.h"
-#include "api/rtp_receiver_interface.h"
 #include "api/rtp_transceiver_direction.h"
 #include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
-#include "api/video/video_sink_interface.h"
-#include "api/video/video_source_interface.h"
+#include "api/task_queue/pending_task_safety_flag.h"
 #include "call/rtp_demuxer.h"
 #include "call/rtp_packet_sink_interface.h"
 #include "media/base/media_channel.h"
-#include "media/base/media_engine.h"
 #include "media/base/stream_params.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
-#include "p2p/base/dtls_transport_internal.h"
-#include "p2p/base/packet_transport_internal.h"
 #include "pc/channel_interface.h"
-#include "pc/dtls_srtp_transport.h"
-#include "pc/media_session.h"
-#include "pc/rtp_transport.h"
 #include "pc/rtp_transport_internal.h"
 #include "pc/session_description.h"
-#include "pc/srtp_filter.h"
-#include "pc/srtp_transport.h"
 #include "rtc_base/async_packet_socket.h"
-#include "rtc_base/async_udp_socket.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/containers/flat_set.h"
 #include "rtc_base/copy_on_write_buffer.h"
-#include "rtc_base/location.h"
-#include "rtc_base/network.h"
 #include "rtc_base/network/sent_packet.h"
 #include "rtc_base/network_route.h"
 #include "rtc_base/socket.h"
-#include "rtc_base/task_utils/pending_task_safety_flag.h"
 #include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
-#include "rtc_base/thread_message.h"
 #include "rtc_base/unique_id_generator.h"
 
-namespace webrtc {
-class AudioSinkInterface;
-}  // namespace webrtc
-
 namespace cricket {
-
-struct CryptoParams;
 
 // BaseChannel contains logic common to voice and video, including enable,
 // marshaling calls to a worker and network threads, and connection and media
@@ -109,7 +83,7 @@ class BaseChannel : public ChannelInterface,
               rtc::Thread* network_thread,
               rtc::Thread* signaling_thread,
               std::unique_ptr<MediaChannel> media_channel,
-              const std::string& mid,
+              absl::string_view mid,
               bool srtp_required,
               webrtc::CryptoOptions crypto_options,
               rtc::UniqueRandomIdGenerator* ssrc_generator);
@@ -183,6 +157,14 @@ class BaseChannel : public ChannelInterface,
 
   MediaChannel* media_channel() const override {
     return media_channel_.get();
+  }
+  VideoMediaChannel* video_media_channel() const override {
+    RTC_CHECK(false) << "Attempt to fetch video channel from non-video";
+    return nullptr;
+  }
+  VoiceMediaChannel* voice_media_channel() const override {
+    RTC_CHECK(false) << "Attempt to fetch voice channel from non-voice";
+    return nullptr;
   }
 
  protected:
@@ -379,7 +361,7 @@ class VoiceChannel : public BaseChannel {
                rtc::Thread* network_thread,
                rtc::Thread* signaling_thread,
                std::unique_ptr<VoiceMediaChannel> channel,
-               const std::string& mid,
+               absl::string_view mid,
                bool srtp_required,
                webrtc::CryptoOptions crypto_options,
                rtc::UniqueRandomIdGenerator* ssrc_generator);
@@ -388,6 +370,10 @@ class VoiceChannel : public BaseChannel {
   // downcasts a MediaChannel
   VoiceMediaChannel* media_channel() const override {
     return static_cast<VoiceMediaChannel*>(BaseChannel::media_channel());
+  }
+
+  VoiceMediaChannel* voice_media_channel() const override {
+    return static_cast<VoiceMediaChannel*>(media_channel());
   }
 
   cricket::MediaType media_type() const override {
@@ -421,7 +407,7 @@ class VideoChannel : public BaseChannel {
                rtc::Thread* network_thread,
                rtc::Thread* signaling_thread,
                std::unique_ptr<VideoMediaChannel> media_channel,
-               const std::string& mid,
+               absl::string_view mid,
                bool srtp_required,
                webrtc::CryptoOptions crypto_options,
                rtc::UniqueRandomIdGenerator* ssrc_generator);
@@ -432,11 +418,13 @@ class VideoChannel : public BaseChannel {
     return static_cast<VideoMediaChannel*>(BaseChannel::media_channel());
   }
 
+  VideoMediaChannel* video_media_channel() const override {
+    return static_cast<cricket::VideoMediaChannel*>(media_channel());
+  }
+
   cricket::MediaType media_type() const override {
     return cricket::MEDIA_TYPE_VIDEO;
   }
-
-  void FillBitrateInfo(BandwidthEstimationInfo* bwe_info);
 
  private:
   // overrides from BaseChannel

@@ -16,11 +16,11 @@
 #include "api/units/timestamp.h"
 #include "modules/video_coding/frame_buffer.h"
 #include "modules/video_coding/include/video_coding.h"
-#include "modules/video_coding/inter_frame_delay.h"
 #include "modules/video_coding/internal_defines.h"
 #include "modules/video_coding/jitter_buffer_common.h"
-#include "modules/video_coding/jitter_estimator.h"
 #include "modules/video_coding/packet.h"
+#include "modules/video_coding/timing/inter_frame_delay.h"
+#include "modules/video_coding/timing/jitter_estimator.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "system_wrappers/include/clock.h"
@@ -109,7 +109,8 @@ void FrameList::Reset(UnorderedFrameList* free_frames) {
 }
 
 VCMJitterBuffer::VCMJitterBuffer(Clock* clock,
-                                 std::unique_ptr<EventWrapper> event)
+                                 std::unique_ptr<EventWrapper> event,
+                                 const FieldTrialsView& field_trials)
     : clock_(clock),
       running_(false),
       frame_event_(std::move(event)),
@@ -122,7 +123,7 @@ VCMJitterBuffer::VCMJitterBuffer(Clock* clock,
       num_consecutive_old_packets_(0),
       num_packets_(0),
       num_duplicated_packets_(0),
-      jitter_estimate_(clock),
+      jitter_estimate_(clock, field_trials),
       missing_sequence_numbers_(SequenceNumberLessThan()),
       latest_received_sequence_number_(0),
       max_nack_list_size_(0),
@@ -868,7 +869,7 @@ void VCMJitterBuffer::UpdateJitterEstimate(const VCMFrameBuffer& frame,
 void VCMJitterBuffer::UpdateJitterEstimate(int64_t latest_packet_time_ms,
                                            uint32_t timestamp,
                                            unsigned int frame_size,
-                                           bool incomplete_frame) {
+                                           bool /*incomplete_frame*/) {
   if (latest_packet_time_ms == -1) {
     return;
   }
@@ -879,8 +880,7 @@ void VCMJitterBuffer::UpdateJitterEstimate(int64_t latest_packet_time_ms,
   // Filter out frames which have been reordered in time by the network
   if (not_reordered) {
     // Update the jitter estimate with the new samples
-    jitter_estimate_.UpdateEstimate(*frame_delay, DataSize::Bytes(frame_size),
-                                    incomplete_frame);
+    jitter_estimate_.UpdateEstimate(*frame_delay, DataSize::Bytes(frame_size));
   }
 }
 

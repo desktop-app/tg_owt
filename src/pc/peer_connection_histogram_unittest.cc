@@ -43,7 +43,6 @@
 #include "rtc_base/fake_network.h"
 #include "rtc_base/gunit.h"
 #include "rtc_base/mdns_responder_interface.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/virtual_socket_server.h"
@@ -75,10 +74,10 @@ int MakeUsageFingerprint(std::set<UsageEvent> events) {
 }
 
 class PeerConnectionFactoryForUsageHistogramTest
-    : public rtc::RefCountedObject<PeerConnectionFactory> {
+    : public PeerConnectionFactory {
  public:
   PeerConnectionFactoryForUsageHistogramTest()
-      : rtc::RefCountedObject<PeerConnectionFactory>([] {
+      : PeerConnectionFactory([] {
           PeerConnectionFactoryDependencies dependencies;
           dependencies.network_thread = rtc::Thread::Current();
           dependencies.worker_thread = rtc::Thread::Current();
@@ -107,7 +106,7 @@ class ObserverForUsageHistogramTest : public MockPeerConnectionObserver {
     candidate_target_ = other;
   }
 
-  bool HaveDataChannel() { return last_datachannel_; }
+  bool HaveDataChannel() { return last_datachannel_ != nullptr; }
 
   absl::optional<int> interesting_usage_detected() {
     return interesting_usage_detected_;
@@ -270,7 +269,9 @@ class PeerConnectionUsageHistogramTest : public ::testing::Test {
     fake_network->AddInterface(NextLocalAddress());
 
     std::unique_ptr<cricket::BasicPortAllocator> port_allocator(
-        new cricket::BasicPortAllocator(fake_network));
+        new cricket::BasicPortAllocator(
+            fake_network,
+            std::make_unique<rtc::BasicPacketSocketFactory>(vss_.get())));
 
     deps.async_resolver_factory = std::move(resolver_factory);
     deps.allocator = std::move(port_allocator);
@@ -292,8 +293,9 @@ class PeerConnectionUsageHistogramTest : public ::testing::Test {
     fake_network->AddInterface(NextLocalAddress());
     fake_network->AddInterface(kPrivateLocalAddress);
 
-    auto port_allocator =
-        std::make_unique<cricket::BasicPortAllocator>(fake_network);
+    auto port_allocator = std::make_unique<cricket::BasicPortAllocator>(
+        fake_network,
+        std::make_unique<rtc::BasicPacketSocketFactory>(vss_.get()));
     RTCConfiguration config;
     config.sdp_semantics = SdpSemantics::kUnifiedPlan;
     return CreatePeerConnection(config,
@@ -306,8 +308,9 @@ class PeerConnectionUsageHistogramTest : public ::testing::Test {
     fake_network->AddInterface(NextLocalAddress());
     fake_network->AddInterface(kPrivateIpv6LocalAddress);
 
-    auto port_allocator =
-        std::make_unique<cricket::BasicPortAllocator>(fake_network);
+    auto port_allocator = std::make_unique<cricket::BasicPortAllocator>(
+        fake_network,
+        std::make_unique<rtc::BasicPacketSocketFactory>(vss_.get()));
 
     RTCConfiguration config;
     config.sdp_semantics = SdpSemantics::kUnifiedPlan;
@@ -330,8 +333,8 @@ class PeerConnectionUsageHistogramTest : public ::testing::Test {
       const RTCConfiguration& config,
       const PeerConnectionFactoryInterface::Options factory_options,
       PeerConnectionDependencies deps) {
-    rtc::scoped_refptr<PeerConnectionFactoryForUsageHistogramTest> pc_factory(
-        new PeerConnectionFactoryForUsageHistogramTest());
+    auto pc_factory =
+        rtc::make_ref_counted<PeerConnectionFactoryForUsageHistogramTest>();
     pc_factory->SetOptions(factory_options);
 
     // If no allocator is provided, one will be created using a network manager
@@ -339,21 +342,23 @@ class PeerConnectionUsageHistogramTest : public ::testing::Test {
     if (!deps.allocator) {
       auto fake_network = NewFakeNetwork();
       fake_network->AddInterface(NextLocalAddress());
-      deps.allocator =
-          std::make_unique<cricket::BasicPortAllocator>(fake_network);
+      deps.allocator = std::make_unique<cricket::BasicPortAllocator>(
+          fake_network,
+          std::make_unique<rtc::BasicPacketSocketFactory>(vss_.get()));
     }
 
     auto observer = std::make_unique<ObserverForUsageHistogramTest>();
     deps.observer = observer.get();
 
-    auto pc = pc_factory->CreatePeerConnection(config, std::move(deps));
-    if (!pc) {
+    auto result =
+        pc_factory->CreatePeerConnectionOrError(config, std::move(deps));
+    if (!result.ok()) {
       return nullptr;
     }
 
-    observer->SetPeerConnectionInterface(pc.get());
+    observer->SetPeerConnectionInterface(result.value().get());
     auto wrapper = std::make_unique<PeerConnectionWrapperForUsageHistogramTest>(
-        pc_factory, pc, std::move(observer));
+        pc_factory, result.MoveValue(), std::move(observer));
     return wrapper;
   }
 

@@ -11,10 +11,6 @@
 #ifndef PC_DATA_CHANNEL_CONTROLLER_H_
 #define PC_DATA_CHANNEL_CONTROLLER_H_
 
-#include <stdint.h>
-
-#include <map>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -24,9 +20,6 @@
 #include "api/sequence_checker.h"
 #include "api/transport/data_channel_transport_interface.h"
 #include "media/base/media_channel.h"
-#include "media/base/media_engine.h"
-#include "media/base/stream_params.h"
-#include "pc/channel.h"
 #include "pc/data_channel_utils.h"
 #include "pc/sctp_data_channel.h"
 #include "rtc_base/checks.h"
@@ -41,10 +34,11 @@ namespace webrtc {
 
 class PeerConnectionInternal;
 
-class DataChannelController : public SctpDataChannelProviderInterface,
+class DataChannelController : public SctpDataChannelControllerInterface,
                               public DataChannelSink {
  public:
   explicit DataChannelController(PeerConnectionInternal* pc) : pc_(pc) {}
+  ~DataChannelController();
 
   // Not copyable or movable.
   DataChannelController(DataChannelController&) = delete;
@@ -93,8 +87,6 @@ class DataChannelController : public SctpDataChannelProviderInterface,
       const InternalDataChannelInit*
           config) /* RTC_RUN_ON(signaling_thread()) */;
   void AllocateSctpSids(rtc::SSLRole role);
-
-  SctpDataChannel* FindDataChannelBySid(int sid) const;
 
   // Checks if any data channel has been added.
   bool HasDataChannels() const;

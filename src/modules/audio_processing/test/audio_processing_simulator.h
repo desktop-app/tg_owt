@@ -119,6 +119,7 @@ struct SimulationSettings {
   absl::optional<float> analog_mic_gain_emulation_initial_level;
   absl::optional<int> ns_level;
   absl::optional<bool> ns_analysis_on_linear_aec_output;
+  absl::optional<bool> override_key_pressed;
   absl::optional<int> maximum_internal_processing_rate;
   int initial_mic_level;
   bool simulate_mic_gain = false;
@@ -218,7 +219,7 @@ class AudioProcessingSimulator {
   Int16Frame rev_frame_;
   Int16Frame fwd_frame_;
   bool bitexact_output_ = true;
-  int aec_dump_mic_level_ = 0;
+  absl::optional<int> aec_dump_applied_input_level_ = 0;
 
  protected:
   size_t output_reset_counter_ = 0;
@@ -234,7 +235,7 @@ class AudioProcessingSimulator {
   std::unique_ptr<WavWriter> linear_aec_output_file_writer_;
   ApiCallStatistics api_call_statistics_;
   std::ofstream residual_echo_likelihood_graph_writer_;
-  int analog_mic_level_;
+  int applied_input_volume_;
   FakeRecordingDevice fake_recording_device_;
 
   TaskQueueForTest worker_queue_;

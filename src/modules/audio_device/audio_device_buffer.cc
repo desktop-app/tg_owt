@@ -20,6 +20,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/time_utils.h"
+#include "rtc_base/trace_event.h"
 #include "system_wrappers/include/metrics.h"
 
 namespace webrtc {
@@ -297,6 +298,9 @@ int32_t AudioDeviceBuffer::DeliverRecordedData() {
 }
 
 int32_t AudioDeviceBuffer::RequestPlayoutData(size_t samples_per_channel) {
+  TRACE_EVENT1("webrtc", "AudioDeviceBuffer::RequestPlayoutData",
+               "samples_per_channel", samples_per_channel);
+
   // The consumer can change the requested size on the fly and we therefore
   // resize the buffer accordingly. Also takes place at the first call to this
   // method.
@@ -473,14 +477,12 @@ void AudioDeviceBuffer::LogStats(LogState state) {
   last_stats_ = stats;
 
   int64_t time_to_wait_ms = next_callback_time - rtc::TimeMillis();
-  if (time_to_wait_ms <= 0) {
-      time_to_wait_ms = 1;
-  }
+  RTC_DCHECK_GT(time_to_wait_ms, 0) << "Invalid timer interval";
 
   // Keep posting new (delayed) tasks until state is changed to kLogStop.
   task_queue_.PostDelayedTask(
       [this] { AudioDeviceBuffer::LogStats(AudioDeviceBuffer::LOG_ACTIVE); },
-      time_to_wait_ms);
+      TimeDelta::Millis(time_to_wait_ms));
 }
 
 void AudioDeviceBuffer::ResetRecStats() {

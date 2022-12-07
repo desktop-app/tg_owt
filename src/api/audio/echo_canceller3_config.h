@@ -59,6 +59,7 @@ struct RTC_EXPORT EchoCanceller3Config {
     };
     AlignmentMixing render_alignment_mixing = {false, true, 10000.f, true};
     AlignmentMixing capture_alignment_mixing = {false, true, 10000.f, false};
+    bool detect_pre_echo = false;
   } delay;
 
   struct Filter {
@@ -236,6 +237,13 @@ struct RTC_EXPORT EchoCanceller3Config {
     float floor_first_increase = 0.00001f;
     bool conservative_hf_suppression = false;
   } suppressor;
+
+  struct MultiChannel {
+    bool detect_stereo_content = true;
+    float stereo_detection_threshold = 0.0f;
+    int stereo_detection_timeout_threshold_seconds = 300;
+    float stereo_detection_hysteresis_seconds = 2.0f;
+  } multi_channel;
 };
 }  // namespace webrtc
 

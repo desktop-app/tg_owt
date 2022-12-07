@@ -46,10 +46,10 @@
 #include "pc/sdp_utils.h"
 #include "pc/session_description.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/internal/default_socket_server.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/net_helper.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/thread.h"
@@ -158,8 +158,9 @@ class PeerConnectionIceBaseTest : public ::testing::Test {
 
   WrapperPtr CreatePeerConnection(const RTCConfiguration& config) {
     auto* fake_network = NewFakeNetwork();
-    auto port_allocator =
-        std::make_unique<cricket::BasicPortAllocator>(fake_network);
+    auto port_allocator = std::make_unique<cricket::BasicPortAllocator>(
+        fake_network,
+        std::make_unique<rtc::BasicPacketSocketFactory>(vss_.get()));
     port_allocator->set_flags(cricket::PORTALLOCATOR_DISABLE_TCP |
                               cricket::PORTALLOCATOR_DISABLE_RELAY);
     port_allocator->set_step_delay(cricket::kMinimumStepDelay);
@@ -167,15 +168,17 @@ class PeerConnectionIceBaseTest : public ::testing::Test {
     modified_config.sdp_semantics = sdp_semantics_;
     auto observer = std::make_unique<MockPeerConnectionObserver>();
     auto port_allocator_copy = port_allocator.get();
-    auto pc = pc_factory_->CreatePeerConnection(
-        modified_config, std::move(port_allocator), nullptr, observer.get());
-    if (!pc) {
+    PeerConnectionDependencies pc_dependencies(observer.get());
+    pc_dependencies.allocator = std::move(port_allocator);
+    auto result = pc_factory_->CreatePeerConnectionOrError(
+        modified_config, std::move(pc_dependencies));
+    if (!result.ok()) {
       return nullptr;
     }
 
-    observer->SetPeerConnectionInterface(pc.get());
+    observer->SetPeerConnectionInterface(result.value().get());
     auto wrapper = std::make_unique<PeerConnectionWrapperForIceTest>(
-        pc_factory_, pc, std::move(observer));
+        pc_factory_, result.MoveValue(), std::move(observer));
     wrapper->set_network(fake_network);
     wrapper->port_allocator_ = port_allocator_copy;
     return wrapper;
@@ -807,7 +810,7 @@ TEST_P(PeerConnectionIceTest,
   // Chain an operation that will block AddIceCandidate() from executing.
   auto answer_observer =
       rtc::make_ref_counted<MockCreateSessionDescriptionObserver>();
-  callee->pc()->CreateAnswer(answer_observer, RTCOfferAnswerOptions());
+  callee->pc()->CreateAnswer(answer_observer.get(), RTCOfferAnswerOptions());
 
   auto jsep_candidate =
       callee->CreateJsepCandidateForFirstTransport(&candidate);
@@ -855,7 +858,7 @@ TEST_P(PeerConnectionIceTest,
   // Chain an operation that will block AddIceCandidate() from executing.
   auto answer_observer =
       rtc::make_ref_counted<MockCreateSessionDescriptionObserver>();
-  callee->pc()->CreateAnswer(answer_observer, RTCOfferAnswerOptions());
+  callee->pc()->CreateAnswer(answer_observer.get(), RTCOfferAnswerOptions());
 
   auto jsep_candidate =
       callee->CreateJsepCandidateForFirstTransport(&candidate);
@@ -1202,7 +1205,7 @@ TEST_F(PeerConnectionIceTestUnifiedPlan,
 class PeerConnectionIceTestPlanB : public PeerConnectionIceBaseTest {
  protected:
   PeerConnectionIceTestPlanB()
-      : PeerConnectionIceBaseTest(SdpSemantics::kPlanB) {}
+      : PeerConnectionIceBaseTest(SdpSemantics::kPlanB_DEPRECATED) {}
 };
 
 TEST_F(PeerConnectionIceTestPlanB,
@@ -1301,7 +1304,7 @@ TEST_P(PeerConnectionIceUfragPwdAnswerTest, TestIncludedInAnswer) {
 INSTANTIATE_TEST_SUITE_P(
     PeerConnectionIceTest,
     PeerConnectionIceUfragPwdAnswerTest,
-    Combine(Values(SdpSemantics::kPlanB, SdpSemantics::kUnifiedPlan),
+    Combine(Values(SdpSemantics::kPlanB_DEPRECATED, SdpSemantics::kUnifiedPlan),
             Values(std::make_pair(true, true),      // Both changed.
                    std::make_pair(true, false),     // Only ufrag changed.
                    std::make_pair(false, true))));  // Only pwd changed.
@@ -1398,10 +1401,15 @@ TEST_P(PeerConnectionIceTest,
 
 INSTANTIATE_TEST_SUITE_P(PeerConnectionIceTest,
                          PeerConnectionIceTest,
-                         Values(SdpSemantics::kPlanB,
+                         Values(SdpSemantics::kPlanB_DEPRECATED,
                                 SdpSemantics::kUnifiedPlan));
 
 class PeerConnectionIceConfigTest : public ::testing::Test {
+ public:
+  PeerConnectionIceConfigTest()
+      : socket_server_(rtc::CreateDefaultSocketServer()),
+        main_thread_(socket_server_.get()) {}
+
  protected:
   void SetUp() override {
     pc_factory_ = CreatePeerConnectionFactory(
@@ -1412,19 +1420,25 @@ class PeerConnectionIceConfigTest : public ::testing::Test {
         nullptr /* audio_processing */);
   }
   void CreatePeerConnection(const RTCConfiguration& config) {
+    packet_socket_factory_.reset(
+        new rtc::BasicPacketSocketFactory(socket_server_.get()));
     std::unique_ptr<cricket::FakePortAllocator> port_allocator(
-        new cricket::FakePortAllocator(rtc::Thread::Current(), nullptr));
+        new cricket::FakePortAllocator(rtc::Thread::Current(),
+                                       packet_socket_factory_.get()));
     port_allocator_ = port_allocator.get();
-    rtc::scoped_refptr<PeerConnectionInterface> pc(
-        pc_factory_->CreatePeerConnection(config, std::move(port_allocator),
-                                          nullptr /* cert_generator */,
-                                          &observer_));
-    EXPECT_TRUE(pc.get());
-    pc_ = std::move(pc);
+    PeerConnectionDependencies pc_dependencies(&observer_);
+    pc_dependencies.allocator = std::move(port_allocator);
+    auto result = pc_factory_->CreatePeerConnectionOrError(
+        config, std::move(pc_dependencies));
+    EXPECT_TRUE(result.ok());
+    pc_ = result.MoveValue();
   }
 
+  std::unique_ptr<rtc::SocketServer> socket_server_;
+  rtc::AutoSocketServerThread main_thread_;
   rtc::scoped_refptr<PeerConnectionFactoryInterface> pc_factory_ = nullptr;
   rtc::scoped_refptr<PeerConnectionInterface> pc_ = nullptr;
+  std::unique_ptr<rtc::PacketSocketFactory> packet_socket_factory_;
   cricket::FakePortAllocator* port_allocator_ = nullptr;
 
   MockPeerConnectionObserver observer_;

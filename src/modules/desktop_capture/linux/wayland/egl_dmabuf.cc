@@ -10,6 +10,7 @@
 
 #include "modules/desktop_capture/linux/wayland/egl_dmabuf.h"
 
+#include <asm/ioctl.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <libdrm/drm_fourcc.h>
@@ -121,20 +122,6 @@ glGetTexImage_func GlGetTexImage = nullptr;
 glTexParameteri_func GlTexParameteri = nullptr;
 glXGetProcAddressARB_func GlXGetProcAddressARB = nullptr;
 
-// GBM
-typedef struct gbm_device *(*gbm_create_device_func)(int fd);
-typedef void (*gbm_device_destroy_func)(struct gbm_device *gbm);
-
-gbm_create_device_func Gbm_create_device = nullptr;
-gbm_device_destroy_func Gbm_device_destroy = nullptr;
-
-// libdrm
-typedef int (*drmGetDevices2_func)(uint32_t flags, drmDevicePtr devices[], int max_devices);
-typedef void (*drmFreeDevices_func)(drmDevicePtr devices[], int count);
-
-drmGetDevices2_func DrmGetDevices2 = nullptr;
-drmFreeDevices_func DrmFreeDevices = nullptr;
-
 static const std::string FormatGLError(GLenum err) {
   switch (err) {
     case GL_NO_ERROR:
@@ -222,52 +209,6 @@ static bool OpenEGL() {
     EglGetProcAddress =
         (eglGetProcAddress_func)dlsym(g_lib_egl, "eglGetProcAddress");
     return EglGetProcAddress;
-  }
-
-  return false;
-}
-
-static void* g_lib_gbm = nullptr;
-
-RTC_NO_SANITIZE("cfi-icall")
-static bool OpenGBM() {
-  g_lib_gbm = dlopen("libgbm.so.1", RTLD_NOW | RTLD_GLOBAL);
-  if (g_lib_gbm) {
-    return true;
-  }
-
-  return false;
-}
-
-RTC_NO_SANITIZE("cfi-icall")
-static bool LoadGBM() {
-  if (OpenGBM()) {
-    Gbm_create_device = (gbm_create_device_func)dlsym(g_lib_gbm, "gbm_create_device");
-    Gbm_device_destroy = (gbm_device_destroy_func)dlsym(g_lib_gbm, "gbm_device_destroy");
-    return Gbm_create_device && Gbm_device_destroy;
-  }
-
-  return false;
-}
-
-static void* g_lib_drm = nullptr;
-
-RTC_NO_SANITIZE("cfi-icall")
-static bool OpenDRM() {
-  g_lib_drm = dlopen("libdrm.so.2", RTLD_NOW | RTLD_GLOBAL);
-  if (g_lib_drm) {
-    return true;
-  }
-
-  return false;
-}
-
-RTC_NO_SANITIZE("cfi-icall")
-static bool LoadDRM() {
-  if (OpenDRM()) {
-    DrmGetDevices2 = (drmGetDevices2_func)dlsym(g_lib_drm, "drmGetDevices2");
-    DrmFreeDevices = (drmFreeDevices_func)dlsym(g_lib_drm, "drmFreeDevices");
-    return DrmGetDevices2 && DrmFreeDevices;
   }
 
   return false;
@@ -397,11 +338,6 @@ EglDmaBuf::EglDmaBuf() {
     RTC_LOG(LS_ERROR) << "Failed to obtain default EGL display: "
                       << FormatEGLError(EglGetError()) << "\n"
                       << "Defaulting to using first available render node";
-    if (!LoadDRM()) {
-      RTC_LOG(LS_ERROR) << "Unable to load libdrm library.";
-      return;
-    }
-
     absl::optional<std::string> render_node = GetRenderNode();
     if (!render_node) {
       return;
@@ -415,13 +351,7 @@ EglDmaBuf::EglDmaBuf() {
       return;
     }
 
-    if (!LoadGBM()) {
-      RTC_LOG(LS_ERROR) << "Unable to load GBM library.";
-      close(drm_fd_);
-      return;
-    }
-
-    gbm_device_ = Gbm_create_device(drm_fd_);
+    gbm_device_ = gbm_create_device(drm_fd_);
 
     if (!gbm_device_) {
       RTC_LOG(LS_ERROR) << "Cannot create GBM device: " << strerror(errno);
@@ -493,7 +423,7 @@ EglDmaBuf::EglDmaBuf() {
 RTC_NO_SANITIZE("cfi-icall")
 EglDmaBuf::~EglDmaBuf() {
   if (gbm_device_) {
-    Gbm_device_destroy(gbm_device_);
+    gbm_device_destroy(gbm_device_);
     close(drm_fd_);
   }
 
@@ -705,7 +635,7 @@ std::vector<uint64_t> EglDmaBuf::QueryDmaBufModifiers(uint32_t format) {
       EglQueryDmaBufFormatsEXT(egl_.display, 0, nullptr, &count);
 
   if (!success || !count) {
-    RTC_LOG(LS_ERROR) << "Failed to query DMA-BUF formats.";
+    RTC_LOG(LS_WARNING) << "Cannot query the number of formats.";
     return {DRM_FORMAT_MOD_INVALID};
   }
 
@@ -713,13 +643,13 @@ std::vector<uint64_t> EglDmaBuf::QueryDmaBufModifiers(uint32_t format) {
   if (!EglQueryDmaBufFormatsEXT(egl_.display, count,
                                 reinterpret_cast<EGLint*>(formats.data()),
                                 &count)) {
-    RTC_LOG(LS_ERROR) << "Failed to query DMA-BUF formats.";
+    RTC_LOG(LS_WARNING) << "Cannot query a list of formats.";
     return {DRM_FORMAT_MOD_INVALID};
   }
 
   if (std::find(formats.begin(), formats.end(), drm_format) == formats.end()) {
-    RTC_LOG(LS_ERROR) << "Format " << drm_format
-                      << " not supported for modifiers.";
+    RTC_LOG(LS_WARNING) << "Format " << drm_format
+                        << " not supported for modifiers.";
     return {DRM_FORMAT_MOD_INVALID};
   }
 
@@ -727,14 +657,14 @@ std::vector<uint64_t> EglDmaBuf::QueryDmaBufModifiers(uint32_t format) {
                                        nullptr, &count);
 
   if (!success || !count) {
-    RTC_LOG(LS_ERROR) << "Failed to query DMA-BUF modifiers.";
+    RTC_LOG(LS_WARNING) << "Cannot query the number of modifiers.";
     return {DRM_FORMAT_MOD_INVALID};
   }
 
   std::vector<uint64_t> modifiers(count);
   if (!EglQueryDmaBufModifiersEXT(egl_.display, drm_format, count,
                                   modifiers.data(), nullptr, &count)) {
-    RTC_LOG(LS_ERROR) << "Failed to query DMA-BUF modifiers.";
+    RTC_LOG(LS_WARNING) << "Cannot query a list of modifiers.";
   }
 
   // Support modifier-less buffers
@@ -743,7 +673,7 @@ std::vector<uint64_t> EglDmaBuf::QueryDmaBufModifiers(uint32_t format) {
 }
 
 absl::optional<std::string> EglDmaBuf::GetRenderNode() {
-  int max_devices = DrmGetDevices2(0, nullptr, 0);
+  int max_devices = drmGetDevices2(0, nullptr, 0);
   if (max_devices <= 0) {
     RTC_LOG(LS_ERROR) << "drmGetDevices2() has not found any devices (errno="
                       << -max_devices << ")";
@@ -751,7 +681,7 @@ absl::optional<std::string> EglDmaBuf::GetRenderNode() {
   }
 
   std::vector<drmDevicePtr> devices(max_devices);
-  int ret = DrmGetDevices2(0, devices.data(), max_devices);
+  int ret = drmGetDevices2(0, devices.data(), max_devices);
   if (ret < 0) {
     RTC_LOG(LS_ERROR) << "drmGetDevices2() returned an error " << ret;
     return absl::nullopt;
@@ -766,7 +696,7 @@ absl::optional<std::string> EglDmaBuf::GetRenderNode() {
     }
   }
 
-  DrmFreeDevices(devices.data(), ret);
+  drmFreeDevices(devices.data(), ret);
   return render_node;
 }
 

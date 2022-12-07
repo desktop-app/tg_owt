@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "absl/algorithm/container.h"
+#include "absl/memory/memory.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/async_tcp_socket.h"
 #include "rtc_base/socket.h"
@@ -45,7 +46,8 @@ class TestEchoServer : public sigslot::has_slots<> {
     if (raw_socket) {
       AsyncTCPSocket* packet_socket = new AsyncTCPSocket(raw_socket);
       packet_socket->SignalReadPacket.connect(this, &TestEchoServer::OnPacket);
-      packet_socket->SignalClose.connect(this, &TestEchoServer::OnClose);
+      packet_socket->SubscribeClose(
+          this, [this](AsyncPacketSocket* s, int err) { OnClose(s, err); });
       client_sockets_.push_back(packet_socket);
     }
   }
@@ -60,7 +62,9 @@ class TestEchoServer : public sigslot::has_slots<> {
   void OnClose(AsyncPacketSocket* socket, int err) {
     ClientList::iterator it = absl::c_find(client_sockets_, socket);
     client_sockets_.erase(it);
-    Thread::Current()->Dispose(socket);
+    // `OnClose` is triggered by socket Close callback, deleting `socket` while
+    // processing that callback might be unsafe.
+    Thread::Current()->PostTask([socket = absl::WrapUnique(socket)] {});
   }
 
   typedef std::list<AsyncTCPSocket*> ClientList;

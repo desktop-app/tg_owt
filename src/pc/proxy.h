@@ -10,7 +10,6 @@
 
 // This file contains Macros for creating proxies for webrtc MediaStream and
 // PeerConnection classes.
-// TODO(deadbeef): Move this to pc/; this is part of the implementation.
 
 // The proxied objects are initialized with either one or two thread
 // objects that operations can be proxied to: The primary and secondary
@@ -53,8 +52,6 @@
 // The variant defined with BEGIN_PRIMARY_PROXY_MAP is unaware of
 // the secondary thread, and invokes all methods on the primary thread.
 //
-// The variant defined with BEGIN_OWNED_PROXY_MAP does not use
-// refcounting, and instead just takes ownership of the object being proxied.
 
 #ifndef PC_PROXY_H_
 #define PC_PROXY_H_
@@ -68,12 +65,8 @@
 #include <utility>
 
 #include "api/scoped_refptr.h"
-#include "api/task_queue/queued_task.h"
 #include "api/task_queue/task_queue_base.h"
 #include "rtc_base/event.h"
-#include "rtc_base/location.h"
-#include "rtc_base/message_handler.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/string_utils.h"
 #include "rtc_base/system/rtc_export.h"
 #include "rtc_base/thread.h"
@@ -81,10 +74,6 @@
 #if !defined(RTC_DISABLE_PROXY_TRACE_EVENTS) && !defined(WEBRTC_CHROMIUM_BUILD)
 #define RTC_DISABLE_PROXY_TRACE_EVENTS
 #endif
-
-namespace rtc {
-class Location;
-}
 
 namespace webrtc {
 namespace proxy_internal {
@@ -96,7 +85,7 @@ class ScopedTrace {
   ~ScopedTrace();
 
  private:
-  const char* const class_and_method_name_;
+  [[maybe_unused]] const char* const class_and_method_name_;
 };
 }  // namespace proxy_internal
 
@@ -126,7 +115,7 @@ class ReturnType<void> {
 };
 
 template <typename C, typename R, typename... Args>
-class MethodCall : public QueuedTask {
+class MethodCall {
  public:
   typedef R (C::*Method)(Args...);
   MethodCall(C* c, Method m, Args&&... args)
@@ -134,23 +123,20 @@ class MethodCall : public QueuedTask {
         m_(m),
         args_(std::forward_as_tuple(std::forward<Args>(args)...)) {}
 
-  R Marshal(const rtc::Location& posted_from, rtc::Thread* t) {
+  R Marshal(rtc::Thread* t) {
     if (t->IsCurrent()) {
       Invoke(std::index_sequence_for<Args...>());
     } else {
-      t->PostTask(std::unique_ptr<QueuedTask>(this));
+      t->PostTask([this] {
+        Invoke(std::index_sequence_for<Args...>());
+        event_.Set();
+      });
       event_.Wait(rtc::Event::kForever);
     }
     return r_.moved_result();
   }
 
  private:
-  bool Run() override {
-    Invoke(std::index_sequence_for<Args...>());
-    event_.Set();
-    return false;
-  }
-
   template <size_t... Is>
   void Invoke(std::index_sequence<Is...>) {
     r_.Invoke(c_, m_, std::move(std::get<Is>(args_))...);
@@ -164,7 +150,7 @@ class MethodCall : public QueuedTask {
 };
 
 template <typename C, typename R, typename... Args>
-class ConstMethodCall : public QueuedTask {
+class ConstMethodCall {
  public:
   typedef R (C::*Method)(Args...) const;
   ConstMethodCall(const C* c, Method m, Args&&... args)
@@ -172,23 +158,20 @@ class ConstMethodCall : public QueuedTask {
         m_(m),
         args_(std::forward_as_tuple(std::forward<Args>(args)...)) {}
 
-  R Marshal(const rtc::Location& posted_from, rtc::Thread* t) {
+  R Marshal(rtc::Thread* t) {
     if (t->IsCurrent()) {
       Invoke(std::index_sequence_for<Args...>());
     } else {
-      t->PostTask(std::unique_ptr<QueuedTask>(this));
+      t->PostTask([this] {
+        Invoke(std::index_sequence_for<Args...>());
+        event_.Set();
+      });
       event_.Wait(rtc::Event::kForever);
     }
     return r_.moved_result();
   }
 
  private:
-  bool Run() override {
-    Invoke(std::index_sequence_for<Args...>());
-    event_.Set();
-    return false;
-  }
-
   template <size_t... Is>
   void Invoke(std::index_sequence<Is...>) {
     r_.Invoke(c_, m_, std::move(std::get<Is>(args_))...);
@@ -229,26 +212,26 @@ class ConstMethodCall : public QueuedTask {
   constexpr char class_name##ProxyWithInternal<INTERNAL_CLASS>::proxy_name_[];
 // clang-format on
 
-#define PRIMARY_PROXY_MAP_BOILERPLATE(class_name)            \
- protected:                                                  \
-  class_name##ProxyWithInternal(rtc::Thread* primary_thread, \
-                                INTERNAL_CLASS* c)           \
-      : primary_thread_(primary_thread), c_(c) {}            \
-                                                             \
- private:                                                    \
+#define PRIMARY_PROXY_MAP_BOILERPLATE(class_name)                     \
+ protected:                                                           \
+  class_name##ProxyWithInternal(rtc::Thread* primary_thread,          \
+                                rtc::scoped_refptr<INTERNAL_CLASS> c) \
+      : primary_thread_(primary_thread), c_(std::move(c)) {}          \
+                                                                      \
+ private:                                                             \
   mutable rtc::Thread* primary_thread_;
 
-#define SECONDARY_PROXY_MAP_BOILERPLATE(class_name)            \
- protected:                                                    \
-  class_name##ProxyWithInternal(rtc::Thread* primary_thread,   \
-                                rtc::Thread* secondary_thread, \
-                                INTERNAL_CLASS* c)             \
-      : primary_thread_(primary_thread),                       \
-        secondary_thread_(secondary_thread),                   \
-        c_(c) {}                                               \
-                                                               \
- private:                                                      \
-  mutable rtc::Thread* primary_thread_;                        \
+#define SECONDARY_PROXY_MAP_BOILERPLATE(class_name)                   \
+ protected:                                                           \
+  class_name##ProxyWithInternal(rtc::Thread* primary_thread,          \
+                                rtc::Thread* secondary_thread,        \
+                                rtc::scoped_refptr<INTERNAL_CLASS> c) \
+      : primary_thread_(primary_thread),                              \
+        secondary_thread_(secondary_thread),                          \
+        c_(std::move(c)) {}                                           \
+                                                                      \
+ private:                                                             \
+  mutable rtc::Thread* primary_thread_;                               \
   mutable rtc::Thread* secondary_thread_;
 
 // Note that the destructor is protected so that the proxy can only be
@@ -258,7 +241,7 @@ class ConstMethodCall : public QueuedTask {
   ~class_name##ProxyWithInternal() {                            \
     MethodCall<class_name##ProxyWithInternal, void> call(       \
         this, &class_name##ProxyWithInternal::DestroyInternal); \
-    call.Marshal(RTC_FROM_HERE, destructor_thread());           \
+    call.Marshal(destructor_thread());                          \
   }                                                             \
                                                                 \
  private:                                                       \
@@ -277,7 +260,7 @@ class ConstMethodCall : public QueuedTask {
   ~class_name##ProxyWithInternal() {                            \
     MethodCall<class_name##ProxyWithInternal, void> call(       \
         this, &class_name##ProxyWithInternal::DestroyInternal); \
-    call.Marshal(RTC_FROM_HERE, destructor_thread());           \
+    call.Marshal(destructor_thread());                          \
   }                                                             \
                                                                 \
  private:                                                       \
@@ -286,15 +269,15 @@ class ConstMethodCall : public QueuedTask {
   void DestroyInternal() { delete c_; }                         \
   INTERNAL_CLASS* c_;
 
-#define BEGIN_PRIMARY_PROXY_MAP(class_name)                        \
-  PROXY_MAP_BOILERPLATE(class_name)                                \
-  PRIMARY_PROXY_MAP_BOILERPLATE(class_name)                        \
-  REFCOUNTED_PROXY_MAP_BOILERPLATE(class_name)                     \
- public:                                                           \
-  static rtc::scoped_refptr<class_name##ProxyWithInternal> Create( \
-      rtc::Thread* primary_thread, INTERNAL_CLASS* c) {            \
-    return rtc::make_ref_counted<class_name##ProxyWithInternal>(   \
-        primary_thread, c);                                        \
+#define BEGIN_PRIMARY_PROXY_MAP(class_name)                                \
+  PROXY_MAP_BOILERPLATE(class_name)                                        \
+  PRIMARY_PROXY_MAP_BOILERPLATE(class_name)                                \
+  REFCOUNTED_PROXY_MAP_BOILERPLATE(class_name)                             \
+ public:                                                                   \
+  static rtc::scoped_refptr<class_name##ProxyWithInternal> Create(         \
+      rtc::Thread* primary_thread, rtc::scoped_refptr<INTERNAL_CLASS> c) { \
+    return rtc::make_ref_counted<class_name##ProxyWithInternal>(           \
+        primary_thread, std::move(c));                                     \
   }
 
 #define BEGIN_PROXY_MAP(class_name)                                \
@@ -304,22 +287,9 @@ class ConstMethodCall : public QueuedTask {
  public:                                                           \
   static rtc::scoped_refptr<class_name##ProxyWithInternal> Create( \
       rtc::Thread* primary_thread, rtc::Thread* secondary_thread,  \
-      INTERNAL_CLASS* c) {                                         \
+      rtc::scoped_refptr<INTERNAL_CLASS> c) {                      \
     return rtc::make_ref_counted<class_name##ProxyWithInternal>(   \
-        primary_thread, secondary_thread, c);                      \
-  }
-
-#define BEGIN_OWNED_PROXY_MAP(class_name)                                   \
-  PROXY_MAP_BOILERPLATE(class_name)                                         \
-  SECONDARY_PROXY_MAP_BOILERPLATE(class_name)                               \
-  OWNED_PROXY_MAP_BOILERPLATE(class_name)                                   \
- public:                                                                    \
-  static std::unique_ptr<class_name##Interface> Create(                     \
-      rtc::Thread* primary_thread, rtc::Thread* secondary_thread,           \
-      std::unique_ptr<INTERNAL_CLASS> c) {                                  \
-    return std::unique_ptr<class_name##Interface>(                          \
-        new class_name##ProxyWithInternal(primary_thread, secondary_thread, \
-                                          c.release()));                    \
+        primary_thread, secondary_thread, std::move(c));           \
   }
 
 #define PROXY_PRIMARY_THREAD_DESTRUCTOR()                            \
@@ -348,32 +318,32 @@ class ConstMethodCall : public QueuedTask {
 
 #endif  // if defined(RTC_DISABLE_PROXY_TRACE_EVENTS)
 
-#define PROXY_METHOD0(r, method)                         \
-  r method() override {                                  \
-    TRACE_BOILERPLATE(method);                           \
-    MethodCall<C, r> call(c(), &C::method);              \
-    return call.Marshal(RTC_FROM_HERE, primary_thread_); \
+#define PROXY_METHOD0(r, method)            \
+  r method() override {                     \
+    TRACE_BOILERPLATE(method);              \
+    MethodCall<C, r> call(c(), &C::method); \
+    return call.Marshal(primary_thread_);   \
   }
 
-#define PROXY_CONSTMETHOD0(r, method)                    \
-  r method() const override {                            \
-    TRACE_BOILERPLATE(method);                           \
-    ConstMethodCall<C, r> call(c(), &C::method);         \
-    return call.Marshal(RTC_FROM_HERE, primary_thread_); \
+#define PROXY_CONSTMETHOD0(r, method)            \
+  r method() const override {                    \
+    TRACE_BOILERPLATE(method);                   \
+    ConstMethodCall<C, r> call(c(), &C::method); \
+    return call.Marshal(primary_thread_);        \
   }
 
 #define PROXY_METHOD1(r, method, t1)                           \
   r method(t1 a1) override {                                   \
     TRACE_BOILERPLATE(method);                                 \
     MethodCall<C, r, t1> call(c(), &C::method, std::move(a1)); \
-    return call.Marshal(RTC_FROM_HERE, primary_thread_);       \
+    return call.Marshal(primary_thread_);                      \
   }
 
 #define PROXY_CONSTMETHOD1(r, method, t1)                           \
   r method(t1 a1) const override {                                  \
     TRACE_BOILERPLATE(method);                                      \
     ConstMethodCall<C, r, t1> call(c(), &C::method, std::move(a1)); \
-    return call.Marshal(RTC_FROM_HERE, primary_thread_);            \
+    return call.Marshal(primary_thread_);                           \
   }
 
 #define PROXY_METHOD2(r, method, t1, t2)                          \
@@ -381,7 +351,7 @@ class ConstMethodCall : public QueuedTask {
     TRACE_BOILERPLATE(method);                                    \
     MethodCall<C, r, t1, t2> call(c(), &C::method, std::move(a1), \
                                   std::move(a2));                 \
-    return call.Marshal(RTC_FROM_HERE, primary_thread_);          \
+    return call.Marshal(primary_thread_);                         \
   }
 
 #define PROXY_METHOD3(r, method, t1, t2, t3)                          \
@@ -389,7 +359,7 @@ class ConstMethodCall : public QueuedTask {
     TRACE_BOILERPLATE(method);                                        \
     MethodCall<C, r, t1, t2, t3> call(c(), &C::method, std::move(a1), \
                                       std::move(a2), std::move(a3));  \
-    return call.Marshal(RTC_FROM_HERE, primary_thread_);              \
+    return call.Marshal(primary_thread_);                             \
   }
 
 #define PROXY_METHOD4(r, method, t1, t2, t3, t4)                          \
@@ -398,7 +368,7 @@ class ConstMethodCall : public QueuedTask {
     MethodCall<C, r, t1, t2, t3, t4> call(c(), &C::method, std::move(a1), \
                                           std::move(a2), std::move(a3),   \
                                           std::move(a4));                 \
-    return call.Marshal(RTC_FROM_HERE, primary_thread_);                  \
+    return call.Marshal(primary_thread_);                                 \
   }
 
 #define PROXY_METHOD5(r, method, t1, t2, t3, t4, t5)                          \
@@ -407,36 +377,36 @@ class ConstMethodCall : public QueuedTask {
     MethodCall<C, r, t1, t2, t3, t4, t5> call(c(), &C::method, std::move(a1), \
                                               std::move(a2), std::move(a3),   \
                                               std::move(a4), std::move(a5));  \
-    return call.Marshal(RTC_FROM_HERE, primary_thread_);                      \
+    return call.Marshal(primary_thread_);                                     \
   }
 
 // Define methods which should be invoked on the secondary thread.
-#define PROXY_SECONDARY_METHOD0(r, method)                 \
-  r method() override {                                    \
-    TRACE_BOILERPLATE(method);                             \
-    MethodCall<C, r> call(c(), &C::method);                \
-    return call.Marshal(RTC_FROM_HERE, secondary_thread_); \
+#define PROXY_SECONDARY_METHOD0(r, method)  \
+  r method() override {                     \
+    TRACE_BOILERPLATE(method);              \
+    MethodCall<C, r> call(c(), &C::method); \
+    return call.Marshal(secondary_thread_); \
   }
 
-#define PROXY_SECONDARY_CONSTMETHOD0(r, method)            \
-  r method() const override {                              \
-    TRACE_BOILERPLATE(method);                             \
-    ConstMethodCall<C, r> call(c(), &C::method);           \
-    return call.Marshal(RTC_FROM_HERE, secondary_thread_); \
+#define PROXY_SECONDARY_CONSTMETHOD0(r, method)  \
+  r method() const override {                    \
+    TRACE_BOILERPLATE(method);                   \
+    ConstMethodCall<C, r> call(c(), &C::method); \
+    return call.Marshal(secondary_thread_);      \
   }
 
 #define PROXY_SECONDARY_METHOD1(r, method, t1)                 \
   r method(t1 a1) override {                                   \
     TRACE_BOILERPLATE(method);                                 \
     MethodCall<C, r, t1> call(c(), &C::method, std::move(a1)); \
-    return call.Marshal(RTC_FROM_HERE, secondary_thread_);     \
+    return call.Marshal(secondary_thread_);                    \
   }
 
 #define PROXY_SECONDARY_CONSTMETHOD1(r, method, t1)                 \
   r method(t1 a1) const override {                                  \
     TRACE_BOILERPLATE(method);                                      \
     ConstMethodCall<C, r, t1> call(c(), &C::method, std::move(a1)); \
-    return call.Marshal(RTC_FROM_HERE, secondary_thread_);          \
+    return call.Marshal(secondary_thread_);                         \
   }
 
 #define PROXY_SECONDARY_METHOD2(r, method, t1, t2)                \
@@ -444,7 +414,7 @@ class ConstMethodCall : public QueuedTask {
     TRACE_BOILERPLATE(method);                                    \
     MethodCall<C, r, t1, t2> call(c(), &C::method, std::move(a1), \
                                   std::move(a2));                 \
-    return call.Marshal(RTC_FROM_HERE, secondary_thread_);        \
+    return call.Marshal(secondary_thread_);                       \
   }
 
 #define PROXY_SECONDARY_CONSTMETHOD2(r, method, t1, t2)                \
@@ -452,7 +422,7 @@ class ConstMethodCall : public QueuedTask {
     TRACE_BOILERPLATE(method);                                         \
     ConstMethodCall<C, r, t1, t2> call(c(), &C::method, std::move(a1), \
                                        std::move(a2));                 \
-    return call.Marshal(RTC_FROM_HERE, secondary_thread_);             \
+    return call.Marshal(secondary_thread_);                            \
   }
 
 #define PROXY_SECONDARY_METHOD3(r, method, t1, t2, t3)                \
@@ -460,7 +430,7 @@ class ConstMethodCall : public QueuedTask {
     TRACE_BOILERPLATE(method);                                        \
     MethodCall<C, r, t1, t2, t3> call(c(), &C::method, std::move(a1), \
                                       std::move(a2), std::move(a3));  \
-    return call.Marshal(RTC_FROM_HERE, secondary_thread_);            \
+    return call.Marshal(secondary_thread_);                           \
   }
 
 #define PROXY_SECONDARY_CONSTMETHOD3(r, method, t1, t2)                    \
@@ -468,7 +438,7 @@ class ConstMethodCall : public QueuedTask {
     TRACE_BOILERPLATE(method);                                             \
     ConstMethodCall<C, r, t1, t2, t3> call(c(), &C::method, std::move(a1), \
                                            std::move(a2), std::move(a3));  \
-    return call.Marshal(RTC_FROM_HERE, secondary_thread_);                 \
+    return call.Marshal(secondary_thread_);                                \
   }
 
 // For use when returning purely const state (set during construction).

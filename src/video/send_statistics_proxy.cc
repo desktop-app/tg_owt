@@ -46,7 +46,8 @@ enum HistogramCodecType {
   kVideoVp8 = 1,
   kVideoVp9 = 2,
   kVideoH264 = 3,
-  kVideoH265 = 4,
+  kVideoAv1 = 4,
+  kVideoH265 = 5,
   kVideoMax = 64,
 };
 
@@ -74,6 +75,8 @@ HistogramCodecType PayloadNameToHistogramCodecType(
       return kVideoVp9;
     case kVideoCodecH264:
       return kVideoH264;
+    case kVideoCodecAV1:
+      return kVideoAv1;
     case kVideoCodecH265:
       return kVideoH265;
     default:
@@ -113,7 +116,7 @@ absl::optional<int> GetFallbackMaxPixels(const std::string& group) {
 }
 
 absl::optional<int> GetFallbackMaxPixelsIfFieldTrialEnabled(
-    const webrtc::WebRtcKeyValueConfig& field_trials) {
+    const webrtc::FieldTrialsView& field_trials) {
   std::string group = field_trials.Lookup(kVp8ForcedFallbackEncoderFieldTrial);
   return (absl::StartsWith(group, "Enabled"))
              ? GetFallbackMaxPixels(group.substr(7))
@@ -121,7 +124,7 @@ absl::optional<int> GetFallbackMaxPixelsIfFieldTrialEnabled(
 }
 
 absl::optional<int> GetFallbackMaxPixelsIfFieldTrialDisabled(
-    const webrtc::WebRtcKeyValueConfig& field_trials) {
+    const webrtc::FieldTrialsView& field_trials) {
   std::string group = field_trials.Lookup(kVp8ForcedFallbackEncoderFieldTrial);
   return (absl::StartsWith(group, "Disabled"))
              ? GetFallbackMaxPixels(group.substr(8))
@@ -135,7 +138,7 @@ SendStatisticsProxy::SendStatisticsProxy(
     Clock* clock,
     const VideoSendStream::Config& config,
     VideoEncoderConfig::ContentType content_type,
-    const WebRtcKeyValueConfig& field_trials)
+    const FieldTrialsView& field_trials)
     : clock_(clock),
       payload_name_(config.rtp.payload_name),
       rtp_config_(config.rtp),
@@ -1385,7 +1388,6 @@ void SendStatisticsProxy::FrameCountUpdated(const FrameCounts& frame_counts,
 
 void SendStatisticsProxy::SendSideDelayUpdated(int avg_delay_ms,
                                                int max_delay_ms,
-                                               uint64_t total_delay_ms,
                                                uint32_t ssrc) {
   MutexLock lock(&mutex_);
   VideoSendStream::StreamStats* stats = GetStatsEntry(ssrc);
@@ -1393,7 +1395,6 @@ void SendStatisticsProxy::SendSideDelayUpdated(int avg_delay_ms,
     return;
   stats->avg_delay_ms = avg_delay_ms;
   stats->max_delay_ms = max_delay_ms;
-  stats->total_packet_send_delay_ms = total_delay_ms;
 
   uma_container_->delay_counter_.Add(avg_delay_ms);
   uma_container_->max_delay_counter_.Add(max_delay_ms);

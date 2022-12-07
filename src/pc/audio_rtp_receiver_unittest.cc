@@ -14,10 +14,10 @@
 
 #include "pc/test/mock_voice_media_channel.h"
 #include "rtc_base/gunit.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/thread.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 
 using ::testing::_;
 using ::testing::InvokeWithoutArgs;
@@ -49,6 +49,7 @@ class AudioRtpReceiverTest : public ::testing::Test {
     receiver_->SetMediaChannel(nullptr);
   }
 
+  rtc::AutoThread main_thread_;
   rtc::Thread* worker_;
   rtc::scoped_refptr<AudioRtpReceiver> receiver_;
   cricket::MockVoiceMediaChannel media_channel_;
@@ -93,4 +94,34 @@ TEST_F(AudioRtpReceiverTest, VolumesSetBeforeStartingAreRespected) {
 
   receiver_->SetupMediaChannel(kSsrc);
 }
+
+// Tests that OnChanged notifications are processed correctly on the worker
+// thread when a media channel pointer is passed to the receiver via the
+// constructor.
+TEST(AudioRtpReceiver, OnChangedNotificationsAfterConstruction) {
+  webrtc::test::RunLoop loop;
+  auto* thread = rtc::Thread::Current();  // Points to loop's thread.
+  cricket::MockVoiceMediaChannel media_channel(thread);
+  auto receiver = rtc::make_ref_counted<AudioRtpReceiver>(
+      thread, std::string(), std::vector<std::string>(), true, &media_channel);
+
+  EXPECT_CALL(media_channel, SetDefaultRawAudioSink(_)).Times(1);
+  EXPECT_CALL(media_channel, SetDefaultOutputVolume(kDefaultVolume)).Times(1);
+  receiver->SetupUnsignaledMediaChannel();
+  loop.Flush();
+
+  // Mark the track as disabled.
+  receiver->track()->set_enabled(false);
+
+  // When the track was marked as disabled, an async notification was queued
+  // for the worker thread. This notification should trigger the volume
+  // of the media channel to be set to kVolumeMuted.
+  // Flush the worker thread, but set the expectation first for the call.
+  EXPECT_CALL(media_channel, SetDefaultOutputVolume(kVolumeMuted)).Times(1);
+  loop.Flush();
+
+  EXPECT_CALL(media_channel, SetDefaultOutputVolume(kVolumeMuted)).Times(1);
+  receiver->SetMediaChannel(nullptr);
+}
+
 }  // namespace webrtc

@@ -36,6 +36,7 @@
 #include "pc/peer_connection_wrapper.h"
 #include "pc/session_description.h"
 #include "pc/test/mock_peer_connection_observers.h"
+#include "rtc_base/internal/default_socket_server.h"
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/thread.h"
@@ -55,7 +56,9 @@ class PeerConnectionHeaderExtensionTest
           std::tuple<cricket::MediaType, SdpSemantics>> {
  protected:
   PeerConnectionHeaderExtensionTest()
-      : extensions_(
+      : socket_server_(rtc::CreateDefaultSocketServer()),
+        main_thread_(socket_server_.get()),
+        extensions_(
             {RtpHeaderExtensionCapability("uri1",
                                           1,
                                           RtpTransceiverDirection::kStopped),
@@ -96,18 +99,24 @@ class PeerConnectionHeaderExtensionTest
         CreateModularPeerConnectionFactory(std::move(factory_dependencies));
 
     auto fake_port_allocator = std::make_unique<cricket::FakePortAllocator>(
-        rtc::Thread::Current(), nullptr);
+        rtc::Thread::Current(),
+        std::make_unique<rtc::BasicPacketSocketFactory>(socket_server_.get()));
     auto observer = std::make_unique<MockPeerConnectionObserver>();
     PeerConnectionInterface::RTCConfiguration config;
     if (semantics)
       config.sdp_semantics = *semantics;
-    auto pc = pc_factory->CreatePeerConnection(
-        config, std::move(fake_port_allocator), nullptr, observer.get());
-    observer->SetPeerConnectionInterface(pc.get());
-    return std::make_unique<PeerConnectionWrapper>(pc_factory, pc,
-                                                   std::move(observer));
+    PeerConnectionDependencies pc_dependencies(observer.get());
+    pc_dependencies.allocator = std::move(fake_port_allocator);
+    auto result = pc_factory->CreatePeerConnectionOrError(
+        config, std::move(pc_dependencies));
+    EXPECT_TRUE(result.ok());
+    observer->SetPeerConnectionInterface(result.value().get());
+    return std::make_unique<PeerConnectionWrapper>(
+        pc_factory, result.MoveValue(), std::move(observer));
   }
 
+  std::unique_ptr<rtc::SocketServer> socket_server_;
+  rtc::AutoSocketServerThread main_thread_;
   std::vector<RtpHeaderExtensionCapability> extensions_;
 };
 
@@ -220,7 +229,7 @@ TEST_P(PeerConnectionHeaderExtensionTest, NegotiatedExtensionsAreAccessible) {
 INSTANTIATE_TEST_SUITE_P(
     ,
     PeerConnectionHeaderExtensionTest,
-    Combine(Values(SdpSemantics::kPlanB, SdpSemantics::kUnifiedPlan),
+    Combine(Values(SdpSemantics::kPlanB_DEPRECATED, SdpSemantics::kUnifiedPlan),
             Values(cricket::MediaType::MEDIA_TYPE_AUDIO,
                    cricket::MediaType::MEDIA_TYPE_VIDEO)),
     [](const testing::TestParamInfo<
@@ -229,7 +238,8 @@ INSTANTIATE_TEST_SUITE_P(
       SdpSemantics semantics;
       std::tie(media_type, semantics) = info.param;
       return (rtc::StringBuilder("With")
-              << (semantics == SdpSemantics::kPlanB ? "PlanB" : "UnifiedPlan")
+              << (semantics == SdpSemantics::kPlanB_DEPRECATED ? "PlanB"
+                                                               : "UnifiedPlan")
               << "And"
               << (media_type == cricket::MediaType::MEDIA_TYPE_AUDIO ? "Voice"
                                                                      : "Video")

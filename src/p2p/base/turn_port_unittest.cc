@@ -9,6 +9,8 @@
  */
 #if defined(WEBRTC_POSIX)
 #include <dirent.h>
+
+#include "absl/strings/string_view.h"
 #endif
 
 #include <list>
@@ -33,16 +35,14 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/fake_clock.h"
 #include "rtc_base/gunit.h"
-#include "rtc_base/location.h"
-#include "rtc_base/message_handler.h"
 #include "rtc_base/net_helper.h"
 #include "rtc_base/socket.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/time_utils.h"
 #include "rtc_base/virtual_socket_server.h"
-#include "test/field_trial.h"
 #include "test/gtest.h"
+#include "test/scoped_key_value_config.h"
 
 using rtc::SocketAddress;
 
@@ -116,8 +116,6 @@ static const cricket::ProtocolAddress kTurnPortHostnameProtoAddr(
     kTurnInvalidAddr,
     cricket::PROTO_UDP);
 
-static const unsigned int MSG_TESTFINISH = 0;
-
 #if defined(WEBRTC_LINUX) && !defined(WEBRTC_ANDROID)
 static int GetFDCount() {
   struct dirent* dp;
@@ -174,32 +172,18 @@ class TestConnectionWrapper : public sigslot::has_slots<> {
 // Note: This test uses a fake clock with a simulated network round trip
 // (between local port and TURN server) of kSimulatedRtt.
 class TurnPortTest : public ::testing::Test,
-                     public sigslot::has_slots<>,
-                     public rtc::MessageHandlerAutoCleanup {
+                     public TurnPort::CallbacksForTest,
+                     public sigslot::has_slots<> {
  public:
   TurnPortTest()
       : ss_(new TurnPortTestVirtualSocketServer()),
         main_(ss_.get()),
         socket_factory_(ss_.get()),
-        turn_server_(&main_, ss_.get(), kTurnUdpIntAddr, kTurnUdpExtAddr),
-        turn_ready_(false),
-        turn_error_(false),
-        turn_unknown_address_(false),
-        turn_create_permission_success_(false),
-        turn_port_closed_(false),
-        turn_port_destroyed_(false),
-        udp_ready_(false),
-        test_finish_(false) {
+        turn_server_(&main_, ss_.get(), kTurnUdpIntAddr, kTurnUdpExtAddr) {
     // Some code uses "last received time == 0" to represent "nothing received
     // so far", so we need to start the fake clock at a nonzero time...
     // TODO(deadbeef): Fix this.
     fake_clock_.AdvanceTime(webrtc::TimeDelta::Seconds(1));
-  }
-
-  virtual void OnMessage(rtc::Message* msg) {
-    RTC_CHECK(msg->message_id == MSG_TESTFINISH);
-    if (msg->message_id == MSG_TESTFINISH)
-      test_finish_ = true;
   }
 
   void OnTurnPortComplete(Port* port) { turn_ready_ = true; }
@@ -215,16 +199,6 @@ class TurnPortTest : public ::testing::Test,
                             const std::string& rf,
                             bool /*port_muxed*/) {
     turn_unknown_address_ = true;
-  }
-  void OnTurnCreatePermissionResult(TurnPort* port,
-                                    const SocketAddress& addr,
-                                    int code) {
-    // Ignoring the address.
-    turn_create_permission_success_ = (code == 0);
-  }
-
-  void OnTurnRefreshResult(TurnPort* port, int code) {
-    turn_refresh_success_ = (code == 0);
   }
   void OnTurnReadPacket(Connection* conn,
                         const char* data,
@@ -247,8 +221,16 @@ class TurnPortTest : public ::testing::Test,
     turn_port_->HandleIncomingPacket(socket, data, size, remote_addr,
                                      packet_time_us);
   }
-  void OnTurnPortClosed(TurnPort* port) { turn_port_closed_ = true; }
   void OnTurnPortDestroyed(PortInterface* port) { turn_port_destroyed_ = true; }
+
+  // TurnPort::TestCallbacks
+  void OnTurnCreatePermissionResult(int code) override {
+    turn_create_permission_success_ = (code == 0);
+  }
+  void OnTurnRefreshResult(int code) override {
+    turn_refresh_success_ = (code == 0);
+  }
+  void OnTurnPortClosed() override { turn_port_closed_ = true; }
 
   rtc::Socket* CreateServerSocket(const SocketAddress addr) {
     rtc::Socket* socket = ss_->CreateSocket(AF_INET, SOCK_STREAM);
@@ -263,23 +245,23 @@ class TurnPortTest : public ::testing::Test,
     return &networks_.back();
   }
 
-  bool CreateTurnPort(const std::string& username,
-                      const std::string& password,
+  bool CreateTurnPort(absl::string_view username,
+                      absl::string_view password,
                       const ProtocolAddress& server_address) {
     return CreateTurnPortWithAllParams(MakeNetwork(kLocalAddr1), username,
                                        password, server_address);
   }
   bool CreateTurnPort(const rtc::SocketAddress& local_address,
-                      const std::string& username,
-                      const std::string& password,
+                      absl::string_view username,
+                      absl::string_view password,
                       const ProtocolAddress& server_address) {
     return CreateTurnPortWithAllParams(MakeNetwork(local_address), username,
                                        password, server_address);
   }
 
-  bool CreateTurnPortWithNetwork(rtc::Network* network,
-                                 const std::string& username,
-                                 const std::string& password,
+  bool CreateTurnPortWithNetwork(const rtc::Network* network,
+                                 absl::string_view username,
+                                 absl::string_view password,
                                  const ProtocolAddress& server_address) {
     return CreateTurnPortWithAllParams(network, username, password,
                                        server_address);
@@ -288,14 +270,24 @@ class TurnPortTest : public ::testing::Test,
   // Version of CreateTurnPort that takes all possible parameters; all other
   // helper methods call this, such that "SetIceRole" and "ConnectSignals" (and
   // possibly other things in the future) only happen in one place.
-  bool CreateTurnPortWithAllParams(rtc::Network* network,
-                                   const std::string& username,
-                                   const std::string& password,
+  bool CreateTurnPortWithAllParams(const rtc::Network* network,
+                                   absl::string_view username,
+                                   absl::string_view password,
                                    const ProtocolAddress& server_address) {
-    RelayCredentials credentials(username, password);
-    turn_port_ = TurnPort::Create(
-        &main_, &socket_factory_, network, 0, 0, kIceUfrag1, kIcePwd1,
-        server_address, credentials, 0, {}, {}, turn_customizer_.get());
+    RelayServerConfig config;
+    config.credentials = RelayCredentials(username, password);
+    CreateRelayPortArgs args;
+    args.network_thread = &main_;
+    args.socket_factory = &socket_factory_;
+    args.network = network;
+    args.username = kIceUfrag1;
+    args.password = kIcePwd1;
+    args.server_address = &server_address;
+    args.config = &config;
+    args.turn_customizer = turn_customizer_.get();
+    args.field_trials = &field_trials_;
+
+    turn_port_ = TurnPort::Create(args, 0, 0);
     if (!turn_port_) {
       return false;
     }
@@ -313,8 +305,8 @@ class TurnPortTest : public ::testing::Test,
     return true;
   }
 
-  void CreateSharedTurnPort(const std::string& username,
-                            const std::string& password,
+  void CreateSharedTurnPort(absl::string_view username,
+                            absl::string_view password,
                             const ProtocolAddress& server_address) {
     RTC_CHECK(server_address.proto == PROTO_UDP);
 
@@ -326,10 +318,19 @@ class TurnPortTest : public ::testing::Test,
                                         &TurnPortTest::OnSocketReadPacket);
     }
 
-    RelayCredentials credentials(username, password);
-    turn_port_ = TurnPort::Create(
-        &main_, &socket_factory_, MakeNetwork(kLocalAddr1), socket_.get(),
-        kIceUfrag1, kIcePwd1, server_address, credentials, 0, nullptr);
+    RelayServerConfig config;
+    config.credentials = RelayCredentials(username, password);
+    CreateRelayPortArgs args;
+    args.network_thread = &main_;
+    args.socket_factory = &socket_factory_;
+    args.network = MakeNetwork(kLocalAddr1);
+    args.username = kIceUfrag1;
+    args.password = kIcePwd1;
+    args.server_address = &server_address;
+    args.config = &config;
+    args.turn_customizer = turn_customizer_.get();
+    args.field_trials = &field_trials_;
+    turn_port_ = TurnPort::Create(args, socket_.get());
     // This TURN port will be the controlling.
     turn_port_->SetIceRole(ICEROLE_CONTROLLING);
     ConnectSignals();
@@ -343,22 +344,17 @@ class TurnPortTest : public ::testing::Test,
                                              &TurnPortTest::OnCandidateError);
     turn_port_->SignalUnknownAddress.connect(
         this, &TurnPortTest::OnTurnUnknownAddress);
-    turn_port_->SignalCreatePermissionResult.connect(
-        this, &TurnPortTest::OnTurnCreatePermissionResult);
-    turn_port_->SignalTurnRefreshResult.connect(
-        this, &TurnPortTest::OnTurnRefreshResult);
-    turn_port_->SignalTurnPortClosed.connect(this,
-                                             &TurnPortTest::OnTurnPortClosed);
     turn_port_->SubscribePortDestroyed(
         [this](PortInterface* port) { OnTurnPortDestroyed(port); });
+    turn_port_->SetCallbacksForTest(this);
   }
 
   void CreateUdpPort() { CreateUdpPort(kLocalAddr2); }
 
   void CreateUdpPort(const SocketAddress& address) {
-    udp_port_ =
-        UDPPort::Create(&main_, &socket_factory_, MakeNetwork(address), 0, 0,
-                        kIceUfrag2, kIcePwd2, false, absl::nullopt);
+    udp_port_ = UDPPort::Create(&main_, &socket_factory_, MakeNetwork(address),
+                                0, 0, kIceUfrag2, kIcePwd2, false,
+                                absl::nullopt, &field_trials_);
     // UDP port will be controlled.
     udp_port_->SetIceRole(ICEROLE_CONTROLLED);
     udp_port_->SignalPortComplete.connect(this,
@@ -436,7 +432,7 @@ class TurnPortTest : public ::testing::Test,
   }
 
   void TestReconstructedServerUrl(ProtocolType protocol_type,
-                                  const char* expected_url) {
+                                  absl::string_view expected_url) {
     turn_port_->PrepareAddress();
     ASSERT_TRUE_SIMULATED_WAIT(
         turn_ready_, TimeToGetTurnCandidate(protocol_type), fake_clock_);
@@ -645,7 +641,8 @@ class TurnPortTest : public ::testing::Test,
 
     // Destroy the connection on the TURN port. The TurnEntry still exists, so
     // the TURN port should still process a ping from an unknown address.
-    conn2->Destroy();
+    turn_port_->DestroyConnection(conn2);
+
     conn1->Ping(0);
     EXPECT_TRUE_SIMULATED_WAIT(turn_unknown_address_, kSimulatedRtt,
                                fake_clock_);
@@ -760,6 +757,7 @@ class TurnPortTest : public ::testing::Test,
   }
 
  protected:
+  webrtc::test::ScopedKeyValueConfig field_trials_;
   rtc::ScopedFakeClock fake_clock_;
   // When a "create port" helper method is called with an IP, we create a
   // Network with that IP and add it to this list. Using a list instead of a
@@ -772,14 +770,14 @@ class TurnPortTest : public ::testing::Test,
   TestTurnServer turn_server_;
   std::unique_ptr<TurnPort> turn_port_;
   std::unique_ptr<UDPPort> udp_port_;
-  bool turn_ready_;
-  bool turn_error_;
-  bool turn_unknown_address_;
-  bool turn_create_permission_success_;
-  bool turn_port_closed_;
-  bool turn_port_destroyed_;
-  bool udp_ready_;
-  bool test_finish_;
+  bool turn_ready_ = false;
+  bool turn_error_ = false;
+  bool turn_unknown_address_ = false;
+  bool turn_create_permission_success_ = false;
+  bool turn_port_closed_ = false;
+  bool turn_port_destroyed_ = false;
+  bool udp_ready_ = false;
+  bool test_finish_ = false;
   bool turn_refresh_success_ = false;
   std::vector<rtc::Buffer> turn_packets_;
   std::vector<rtc::Buffer> udp_packets_;
@@ -856,7 +854,7 @@ class TurnLoggingIdValidator : public StunMessageObserver {
           msg->GetByteString(cricket::STUN_ATTR_TURN_LOGGING_ID);
       if (expect_val_) {
         ASSERT_NE(nullptr, attr);
-        ASSERT_EQ(expect_val_, attr->GetString());
+        ASSERT_EQ(expect_val_, attr->string_view());
       } else {
         EXPECT_EQ(nullptr, attr);
       }
@@ -1221,10 +1219,10 @@ TEST_F(TurnPortTest, TestRefreshRequestGetsErrorResponse) {
   // This sends out the first RefreshRequest with correct credentials.
   // When this succeeds, it will schedule a new RefreshRequest with the bad
   // credential.
-  turn_port_->FlushRequests(TURN_REFRESH_REQUEST);
+  turn_port_->request_manager().FlushForTest(TURN_REFRESH_REQUEST);
   EXPECT_TRUE_SIMULATED_WAIT(turn_refresh_success_, kSimulatedRtt, fake_clock_);
   // Flush it again, it will receive a bad response.
-  turn_port_->FlushRequests(TURN_REFRESH_REQUEST);
+  turn_port_->request_manager().FlushForTest(TURN_REFRESH_REQUEST);
   EXPECT_TRUE_SIMULATED_WAIT(!turn_refresh_success_, kSimulatedRtt,
                              fake_clock_);
   EXPECT_FALSE(turn_port_->connected());
@@ -1248,7 +1246,7 @@ TEST_F(TurnPortTest, TestStopProcessingPacketsAfterClosed) {
   EXPECT_EQ_SIMULATED_WAIT(Connection::STATE_WRITABLE, conn2->write_state(),
                            kSimulatedRtt * 2, fake_clock_);
 
-  turn_port_->Close();
+  turn_port_->CloseForTest();
   SIMULATED_WAIT(false, kSimulatedRtt, fake_clock_);
   turn_unknown_address_ = false;
   conn2->Ping(0);
@@ -1285,7 +1283,7 @@ TEST_F(TurnPortTest, TestSocketCloseWillDestroyConnection) {
                                                   Port::ORIGIN_MESSAGE);
   EXPECT_NE(nullptr, conn);
   EXPECT_TRUE(!turn_port_->connections().empty());
-  turn_port_->socket()->SignalClose(turn_port_->socket(), 1);
+  turn_port_->socket()->NotifyClosedForTest(1);
   EXPECT_TRUE_SIMULATED_WAIT(turn_port_->connections().empty(),
                              kConnectionDestructionDelay, fake_clock_);
 }
@@ -1438,11 +1436,11 @@ TEST_F(TurnPortTest, TestRefreshCreatePermissionRequest) {
   // another request with bad_ufrag and bad_pwd.
   RelayCredentials bad_credentials("bad_user", "bad_pwd");
   turn_port_->set_credentials(bad_credentials);
-  turn_port_->FlushRequests(kAllRequests);
+  turn_port_->request_manager().FlushForTest(kAllRequestsForTest);
   EXPECT_TRUE_SIMULATED_WAIT(turn_create_permission_success_, kSimulatedRtt,
                              fake_clock_);
   // Flush the requests again; the create-permission-request will fail.
-  turn_port_->FlushRequests(kAllRequests);
+  turn_port_->request_manager().FlushForTest(kAllRequestsForTest);
   EXPECT_TRUE_SIMULATED_WAIT(!turn_create_permission_success_, kSimulatedRtt,
                              fake_clock_);
   EXPECT_TRUE(CheckConnectionFailedAndPruned(conn));
@@ -1651,7 +1649,7 @@ TEST_F(TurnPortTest, TestResolverShutdown) {
   ASSERT_TRUE_WAIT(turn_error_, kResolverTimeout);
   EXPECT_TRUE(turn_port_->Candidates().empty());
   turn_port_.reset();
-  rtc::Thread::Current()->Post(RTC_FROM_HERE, this, MSG_TESTFINISH);
+  rtc::Thread::Current()->PostTask([this] { test_finish_ = true; });
   // Waiting for above message to be processed.
   ASSERT_TRUE_SIMULATED_WAIT(test_finish_, 1, fake_clock_);
   EXPECT_EQ(last_fd_count, GetFDCount());
@@ -1852,8 +1850,8 @@ TEST_F(TurnPortTest, TestTurnDangerousAlternateServer) {
 }
 
 TEST_F(TurnPortTest, TestTurnDangerousServerAllowedWithFieldTrial) {
-  webrtc::test::ScopedFieldTrials override_field_trials(
-      "WebRTC-Turn-AllowSystemPorts/Enabled/");
+  webrtc::test::ScopedKeyValueConfig override_field_trials(
+      field_trials_, "WebRTC-Turn-AllowSystemPorts/Enabled/");
   CreateTurnPort(kTurnUsername, kTurnPassword, kTurnDangerousProtoAddr);
   ASSERT_TRUE(turn_port_);
 }

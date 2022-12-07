@@ -36,7 +36,6 @@
 #include "pc/rtp_receiver.h"
 #include "pc/video_rtp_track_source.h"
 #include "pc/video_track.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
@@ -88,7 +87,6 @@ class VideoRtpReceiver : public RtpReceiverInternal {
 
   // RtpReceiverInternal implementation.
   void Stop() override;
-  void SetSourceEnded() override;
   void SetupMediaChannel(uint32_t ssrc) override;
   void SetupUnsignaledMediaChannel() override;
   uint32_t ssrc() const override;

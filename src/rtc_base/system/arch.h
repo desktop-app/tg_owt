@@ -73,6 +73,16 @@
 #elif defined(__riscv) && __riscv_xlen == 32
 #define WEBRTC_ARCH_32_BITS
 #define WEBRTC_ARCH_LITTLE_ENDIAN
+#elif defined(__loongarch32)
+#define WEBRTC_ARCH_LOONG_FAMILY
+#define WEBRTC_ARCH_LOONG32
+#define WEBRTC_ARCH_32_BITS
+#define WEBRTC_ARCH_LITTLE_ENDIAN
+#elif defined(__loongarch64)
+#define WEBRTC_ARCH_LOONG_FAMILY
+#define WEBRTC_ARCH_LOONG64
+#define WEBRTC_ARCH_64_BITS
+#define WEBRTC_ARCH_LITTLE_ENDIAN
 #elif defined(__pnacl__)
 #define WEBRTC_ARCH_32_BITS
 #define WEBRTC_ARCH_LITTLE_ENDIAN
@@ -80,19 +90,7 @@
 #define WEBRTC_ARCH_32_BITS
 #define WEBRTC_ARCH_LITTLE_ENDIAN
 #else
-/* instead of failing, use typical gcc defines... */
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#define WEBRTC_ARCH_LITTLE_ENDIAN
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-#define WEBRTC_ARCH_BIG_ENDIAN
-#else
-#error __BYTE_ORDER__ is not defined!
-#endif
-#if defined(__LP64__)
-#define WEBRTC_ARCH_64_BITS
-#else
-#define WEBRTC_ARCH_32_BITS
-#endif
+#error Please add support for your architecture in rtc_base/system/arch.h
 #endif
 
 #if !(defined(WEBRTC_ARCH_LITTLE_ENDIAN) ^ defined(WEBRTC_ARCH_BIG_ENDIAN))

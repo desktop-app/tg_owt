@@ -49,7 +49,6 @@
 #include "modules/rtp_rtcp/source/rtcp_packet/app.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/common_header.h"
-#include "modules/rtp_rtcp/source/rtcp_packet/extended_jitter_report.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/extended_reports.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/psfb.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
@@ -67,7 +66,7 @@ RTC_PUSH_IGNORING_WUNDEF()
 #ifdef WEBRTC_ANDROID_PLATFORM_BUILD
 #include "external/webrtc/webrtc/logging/rtc_event_log/rtc_event_log2.pb.h"
 #else
-#include <rtc_event_log2.pb.h>
+#include "logging/rtc_event_log/rtc_event_log2.pb.h"
 #endif
 RTC_POP_IGNORING_WUNDEF()
 
@@ -306,15 +305,13 @@ size_t RemoveNonAllowlistedRtcpBlocks(const rtc::Buffer& packet,
     size_t block_size = next_block - block_begin;
     switch (header.type()) {
       case rtcp::Bye::kPacketType:
-      case rtcp::ExtendedJitterReport::kPacketType:
       case rtcp::ExtendedReports::kPacketType:
       case rtcp::Psfb::kPacketType:
       case rtcp::ReceiverReport::kPacketType:
       case rtcp::Rtpfb::kPacketType:
       case rtcp::SenderReport::kPacketType:
-        // We log sender reports, receiver reports, bye messages
-        // inter-arrival jitter, third-party loss reports, payload-specific
-        // feedback and extended reports.
+        // We log sender reports, receiver reports, bye messages, third-party
+        // loss reports, payload-specific feedback and extended reports.
         // TODO(terelius): As an optimization, don't copy anything if all blocks
         // in the packet are allowlisted types.
         memcpy(buffer + buffer_length, block_begin, block_size);

@@ -111,8 +111,7 @@ ABSL_FLAG(int,
 ABSL_FLAG(int,
           ts,
           kParameterNotSpecifiedValue,
-          "Activate (1), deactivate (0) or activate the transient suppressor "
-          "with continuous key events (2)");
+          "Activate (1) or deactivate (0) the transient suppressor");
 ABSL_FLAG(int,
           analog_agc,
           kParameterNotSpecifiedValue,
@@ -218,6 +217,12 @@ ABSL_FLAG(int,
           simulated_mic_kind,
           kParameterNotSpecifiedValue,
           "Specify which microphone kind to use for microphone simulation");
+ABSL_FLAG(int,
+          override_key_pressed,
+          kParameterNotSpecifiedValue,
+          "Always set to true (1) or to false (0) the key press state. If "
+          "unspecified, false is set with Wav files or, with AEC dumps, the "
+          "recorded event is used.");
 ABSL_FLAG(int,
           frame_for_sending_capture_output_used_false,
           kParameterNotSpecifiedValue,
@@ -329,10 +334,10 @@ const char kUsageDescription[] =
     "processing module, either based on wav files or "
     "protobuf debug dump recordings.\n";
 
-void SetSettingIfSpecified(const std::string& value,
+void SetSettingIfSpecified(absl::string_view value,
                            absl::optional<std::string>* parameter) {
   if (value.compare("") != 0) {
-    *parameter = value;
+    *parameter = std::string(value);
   }
 }
 
@@ -459,6 +464,8 @@ SimulationSettings CreateSettings() {
   settings.simulate_mic_gain = absl::GetFlag(FLAGS_simulate_mic_gain);
   SetSettingIfSpecified(absl::GetFlag(FLAGS_simulated_mic_kind),
                         &settings.simulated_mic_kind);
+  SetSettingIfFlagSet(absl::GetFlag(FLAGS_override_key_pressed),
+                      &settings.override_key_pressed);
   SetSettingIfSpecified(
       absl::GetFlag(FLAGS_frame_for_sending_capture_output_used_false),
       &settings.frame_for_sending_capture_output_used_false);
@@ -514,7 +521,7 @@ SimulationSettings CreateSettings() {
   return settings;
 }
 
-void ReportConditionalErrorAndExit(bool condition, const std::string& message) {
+void ReportConditionalErrorAndExit(bool condition, absl::string_view message) {
   if (condition) {
     std::cerr << message << std::endl;
     exit(1);
@@ -633,7 +640,13 @@ void PerformBasicParameterSanityChecks(
       "Error: --simulated_mic_kind must be specified when mic simulation is "
       "enabled\n");
 
-  auto valid_wav_name = [](const std::string& wav_file_name) {
+  // TODO(bugs.webrtc.org/7494): Document how the two settings below differ.
+  ReportConditionalErrorAndExit(
+      settings.simulate_mic_gain && settings.use_analog_mic_gain_emulation,
+      "Error: --simulate_mic_gain and --use_analog_mic_gain_emulation cannot "
+      "be enabled at the same time\n");
+
+  auto valid_wav_name = [](absl::string_view wav_file_name) {
     if (wav_file_name.size() < 5) {
       return false;
     }

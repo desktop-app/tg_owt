@@ -16,12 +16,12 @@
 #include <vector>
 
 #include "api/sequence_checker.h"
+#include "api/task_queue/pending_task_safety_flag.h"
 #include "rtc_base/byte_buffer.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/network.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/system/rtc_export.h"
-#include "rtc_base/task_utils/pending_task_safety_flag.h"
 #include "rtc_base/thread.h"
 
 namespace rtc {
@@ -97,7 +97,7 @@ class RTC_EXPORT StunProber : public sigslot::has_slots<> {
 
   StunProber(rtc::PacketSocketFactory* socket_factory,
              rtc::Thread* thread,
-             const rtc::NetworkManager::NetworkList& networks);
+             std::vector<const rtc::Network*> networks);
   ~StunProber() override;
 
   StunProber(const StunProber&) = delete;
@@ -240,7 +240,7 @@ class RTC_EXPORT StunProber : public sigslot::has_slots<> {
   // AsyncCallback.
   ObserverAdapter observer_adapter_;
 
-  rtc::NetworkManager::NetworkList networks_;
+  const std::vector<const rtc::Network*> networks_;
 
   webrtc::ScopedTaskSafety task_safety_;
 };
