@@ -15,6 +15,41 @@
 
 namespace webrtc {
 namespace aec3 {
+namespace {
+
+template <int Index, typename T>
+constexpr float VecGet(T &value) {
+  static_assert(Index >= 0);
+  static_assert(Index * sizeof(float) < sizeof(value));
+
+  if constexpr (!std::is_union_v<T>) {
+    return value[Index];
+  } else if constexpr (sizeof(T) * 8 == 128) {
+    return value.m128_f32[Index];
+  } else if constexpr (sizeof(T) * 8 == 256) {
+    return value.m256_f32[Index];
+  } else {
+    bad_type(T());
+  }
+}
+
+template <int Index, typename T>
+constexpr void VecSet(T &value, float element) {
+  static_assert(Index >= 0);
+  static_assert(Index * sizeof(float) < sizeof(value));
+
+  if constexpr (!std::is_union_v<T>) {
+    value[Index] = element;
+  } else if constexpr (sizeof(T) * 8 == 128) {
+    value.m128_f32[Index] = element;
+  } else if constexpr (sizeof(T) * 8 == 256) {
+    value.m256_f32[Index] = element;
+  } else {
+    bad_type(T());
+  }
+}
+
+} // namespace
 
 // Let ha denote the horizontal of a, and hb the horizontal sum of b
 // returns [ha, hb, ha, hb]
@@ -81,14 +116,14 @@ void MatchedFilterCore_AccumulatedError_AVX2(
       s_inst_256_8 = _mm256_mul_ps(h_k_8, x_k_8);
       s_inst_hadd_256 = _mm256_hadd_ps(s_inst_256, s_inst_256_8);
       s_inst_hadd_256 = _mm256_hadd_ps(s_inst_hadd_256, s_inst_hadd_256);
-      s_acum += s_inst_hadd_256[0];
-      e_128[0] = s_acum - y[i];
-      s_acum += s_inst_hadd_256[4];
-      e_128[1] = s_acum - y[i];
-      s_acum += s_inst_hadd_256[1];
-      e_128[2] = s_acum - y[i];
-      s_acum += s_inst_hadd_256[5];
-      e_128[3] = s_acum - y[i];
+      s_acum += VecGet<0>(s_inst_hadd_256);
+      VecSet<0>(e_128, s_acum - y[i]);
+      s_acum += VecGet<4>(s_inst_hadd_256);
+      VecSet<1>(e_128, s_acum - y[i]);
+      s_acum += VecGet<1>(s_inst_hadd_256);
+      VecSet<2>(e_128, s_acum - y[i]);
+      s_acum += VecGet<5>(s_inst_hadd_256);
+      VecSet<3>(e_128, s_acum - y[i]);
 
       __m128 accumulated_error = _mm_load_ps(a_p);
       accumulated_error = _mm_fmadd_ps(e_128, e_128, accumulated_error);
@@ -209,8 +244,8 @@ void MatchedFilterCore_AVX2(size_t x_start_index,
     x2_sum_256 = _mm256_add_ps(x2_sum_256, x2_sum_256_8);
     s_256 = _mm256_add_ps(s_256, s_256_8);
     __m128 sum = hsum_ab(x2_sum_256, s_256);
-    x2_sum += sum[0];
-    s += sum[1];
+    x2_sum += VecGet<0>(sum);
+    s += VecGet<1>(sum);
 
     // Compute the matched filter error.
     float e = y[i] - s;
