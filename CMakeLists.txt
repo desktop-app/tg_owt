@@ -9,9 +9,7 @@ set(TG_OWT_SPECIAL_TARGET "" CACHE STRING "Use special platform target, like 'ma
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.11 CACHE STRING "Minimum OS X deployment version" FORCE)
 
-get_filename_component(parent_dir .. REALPATH)
-get_filename_component(parent_dir ${parent_dir} NAME)
-if (parent_dir STREQUAL "Libraries")
+if (NOT TG_OWT_SPECIAL_TARGET STREQUAL "")
     set(TG_OWT_PACKAGED_BUILD 0)
 else()
     set(TG_OWT_PACKAGED_BUILD 1)
