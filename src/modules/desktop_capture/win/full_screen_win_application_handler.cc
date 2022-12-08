@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <cwctype>
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
