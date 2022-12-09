@@ -7,7 +7,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(TG_OWT_SPECIAL_TARGET "" CACHE STRING "Use special platform target, like 'macstore' for Mac App Store.")
 
-set(CMAKE_OSX_DEPLOYMENT_TARGET 10.11 CACHE STRING "Minimum OS X deployment version" FORCE)
+set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "Minimum OS X deployment version" FORCE)
 
 if (NOT TG_OWT_SPECIAL_TARGET STREQUAL "")
     set(TG_OWT_PACKAGED_BUILD 0)
