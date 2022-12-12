@@ -2443,12 +2443,22 @@ if (NOT TG_OWT_USE_PIPEWIRE)
         modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.cc
         modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.h
         modules/desktop_capture/linux/wayland/pipewire_stub_header.fragment
+        modules/desktop_capture/linux/wayland/portal_request_response.h
+        modules/desktop_capture/linux/wayland/restore_token_manager.cc
+        modules/desktop_capture/linux/wayland/restore_token_manager.h
         modules/desktop_capture/linux/wayland/scoped_glib.cc
         modules/desktop_capture/linux/wayland/scoped_glib.h
+        modules/desktop_capture/linux/wayland/screen_capture_portal_interface.cc
+        modules/desktop_capture/linux/wayland/screen_capture_portal_interface.h
         modules/desktop_capture/linux/wayland/screencast_portal.cc
         modules/desktop_capture/linux/wayland/screencast_portal.h
+        modules/desktop_capture/linux/wayland/screencast_stream_utils.cc
+        modules/desktop_capture/linux/wayland/screencast_stream_utils.h
         modules/desktop_capture/linux/wayland/shared_screencast_stream.cc
         modules/desktop_capture/linux/wayland/shared_screencast_stream.h
+        modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc
+        modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.h
+        modules/desktop_capture/linux/wayland/xdg_session_details.h
     )
 endif()
 
