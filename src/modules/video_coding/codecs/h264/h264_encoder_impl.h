@@ -40,7 +40,7 @@
 #include "modules/video_coding/codecs/h264/include/h264_globals.h"
 #include "modules/video_coding/svc/scalable_video_controller.h"
 #include "modules/video_coding/utility/frame_sampler.h"
-#include "third_party/openh264/src/codec/api/wels/codec_app_def.h"
+#include <wels/codec_app_def.h>
 
 class ISVCEncoder;
 
