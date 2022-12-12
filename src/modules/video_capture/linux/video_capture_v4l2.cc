@@ -11,7 +11,11 @@
 #include "modules/video_capture/linux/video_capture_v4l2.h"
 
 #include <fcntl.h>
+#if defined(__OpenBSD__)
+#include <sys/videoio.h>
+#else
 #include <linux/videodev2.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/select.h>
