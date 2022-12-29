@@ -96,9 +96,7 @@ function(link_libjpeg target_name)
 endfunction()
 
 # libabsl
-# HINT: System abseil should be built with
-# * -DCMAKE_CXX_STANDARD=17 on Linux
-# * -DCMAKE_CXX_STANDARD=14 on macOS
+# HINT: System abseil should be built with -DCMAKE_CXX_STANDARD=20
 function(link_libabsl target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(absl)
