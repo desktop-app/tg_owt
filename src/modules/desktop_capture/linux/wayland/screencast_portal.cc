@@ -38,7 +38,7 @@ ScreenCastPortal::CaptureSourceType ScreenCastPortal::ToCaptureSourceType(
     CaptureType type) {
   switch (type) {
     case CaptureType::kScreen:
-      return ScreenCastPortal::CaptureSourceType::kScreen;
+      return ScreenCastPortal::CaptureSourceType::kAnyScreenContent;
     case CaptureType::kWindow:
       return ScreenCastPortal::CaptureSourceType::kWindow;
   }
