@@ -103,7 +103,7 @@ function(link_libabsl target_name)
         set(absl_FOUND ${absl_FOUND} PARENT_SCOPE)
         if (absl_FOUND)
             target_link_libraries(${target_name}
-            INTERFACE
+            PRIVATE
                 absl::algorithm_container
                 absl::bind_front
                 absl::config
@@ -170,7 +170,7 @@ function(link_crc32c target_name)
         find_package(Crc32c)
         set(Crc32c_FOUND ${Crc32c_FOUND} PARENT_SCOPE)
         if (Crc32c_FOUND)
-            target_link_libraries(${target_name} INTERFACE Crc32c::crc32c)
+            target_link_libraries(${target_name} PRIVATE Crc32c::crc32c)
         endif()
     endif()
     if (NOT Crc32c_FOUND)
