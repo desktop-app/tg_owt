@@ -10,6 +10,7 @@
 
 #include "modules/audio_processing/transient/file_utils.h"
 
+#include <cstdint>
 #include <memory>
 
 #include "rtc_base/system/file_wrapper.h"
