@@ -103,7 +103,7 @@ function(link_libabsl target_name)
         set(absl_FOUND ${absl_FOUND} PARENT_SCOPE)
         if (absl_FOUND)
             target_link_libraries(${target_name}
-            PRIVATE
+            PUBLIC
                 absl::algorithm_container
                 absl::bind_front
                 absl::config
