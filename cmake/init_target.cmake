@@ -37,8 +37,10 @@ function(init_target target_name) # init_target(my_target folder_name)
         target_compile_definitions(${target_name}
         PRIVATE
             WIN32_LEAN_AND_MEAN
-            HAVE_WINSOCK2_H
             NOMINMAX
+            HAVE_WINSOCK2_H
+            HAVE_WINDOWS_H
+            HAVE_X86
             HAVE_SSE2
         )
 
