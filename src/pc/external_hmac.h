@@ -30,9 +30,12 @@
 
 #include <stdint.h>
 
-#include "third_party/libsrtp/crypto/include/crypto_types.h"
-#include "third_party/libsrtp/include/srtp.h"
-#include "third_party/libsrtp/include/srtp_priv.h"
+#ifdef HAVE_LIBSRTP
+# include <srtp2/auth.h>
+# include <srtp2/srtp.h>
+#else
+# include "srtp_priv.h"
+#endif
 
 #define EXTERNAL_HMAC_SHA1 SRTP_HMAC_SHA1 + 1
 #define HMAC_KEY_LENGTH 20
