@@ -84,6 +84,9 @@ PRIVATE
     source/rotate_mmi.cc
     source/row_mmi.cc
     source/scale_mmi.cc
+
+    # RISC-V RVV
+    source/row_rvv.cc
 )
 
 remove_target_sources(libyuv ${libyuv_loc}
@@ -122,6 +125,23 @@ else()
         source/row_neon64.cc
         source/scale_neon.cc
         source/scale_neon64.cc
+    )
+endif()
+
+if (riscv_use_rvv)
+    target_compile_definitions(libyuv
+    PRIVATE
+        USE_RVV
+    )
+else()
+    target_compile_definitions(libyuv
+    PRIVATE
+        LIBYUV_DISABLE_RVV
+    )
+    remove_target_sources(libyuv ${libyuv_loc}
+
+        # RISC-V RVV
+        source/row_rvv.cc
     )
 endif()
 

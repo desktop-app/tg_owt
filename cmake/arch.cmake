@@ -8,6 +8,8 @@ set(is_arm  0)
 set(is_arm8 0)
 set(is_arm7 0)
 set(arm_use_neon 0)
+set(is_riscv64 0)
+set(riscv_use_rvv 0)
 
 option(TG_OWT_ARCH_ARMV7_USE_NEON "Use NEON SIMD instructions when building for ARMv7" ON)
 
@@ -108,11 +110,29 @@ if ((HAVE_ARM_DEF1 OR HAVE_ARM_DEF2) OR HAVE_ARM_DEF3)
 
     endif() #armv7
     endif() #armv8
+else()
+
+
+# Check for 64-bit RISC-V:
+check_symbol_exists(__riscv  "stddef.h" HAVE_RISCV64_DEF)
+
+if (HAVE_RISCV64_DEF)
+    message(STATUS "Processor architecture is 64-bit RISC-V.")
+    set(is_riscv64 1)
+
+    check_symbol_exists(__riscv_vector  "stddef.h" HAVE_RVV_DEF)
+    if (HAVE_RVV_DEF)
+        message(STATUS "RISC-V Vector extension is supported.")
+        set(riscv_use_rvv 1)
+    else()
+        message(STATUS "RISC-V Vector extension is not supported.")
+    endif()
 
 # TODO: Add support for other architectures.
 else()
     message(WARNING "Unsupported CPU architecture.")
 
+endif() # riscv64
 endif() # arm32
 endif() # aarch64
 endif() # x86
