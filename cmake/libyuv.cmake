@@ -11,11 +11,14 @@ PRIVATE
     include/libyuv.h
     include/libyuv/basic_types.h
     include/libyuv/compare.h
+    include/libyuv/compare_row.h
     include/libyuv/convert.h
     include/libyuv/convert_argb.h
     include/libyuv/convert_from.h
     include/libyuv/convert_from_argb.h
     include/libyuv/cpu_id.h
+    include/libyuv/loongson_intrinsics.h
+    include/libyuv/macros_msa.h
     include/libyuv/mjpeg_decoder.h
     include/libyuv/planar_functions.h
     include/libyuv/rotate.h
@@ -24,7 +27,9 @@ PRIVATE
     include/libyuv/row.h
     include/libyuv/scale.h
     include/libyuv/scale_argb.h
+    include/libyuv/scale_rgb.h
     include/libyuv/scale_row.h
+    include/libyuv/scale_uv.h
     include/libyuv/version.h
     include/libyuv/video_common.h
 
@@ -63,6 +68,12 @@ PRIVATE
     source/scale_win.cc
     source/video_common.cc
 
+    # LSX
+    source/rotate_lsx.cc
+    source/row_lasx.cc
+    source/row_lsx.cc
+    source/scale_lsx.cc
+
     # ARM neon
     source/compare_neon.cc
     source/compare_neon64.cc
@@ -79,14 +90,9 @@ PRIVATE
     source/row_msa.cc
     source/scale_msa.cc
 
-    # MMI Source Files
-    source/compare_mmi.cc
-    source/rotate_mmi.cc
-    source/row_mmi.cc
-    source/scale_mmi.cc
-
     # RISC-V RVV
     source/row_rvv.cc
+    source/scale_rvv.cc
 )
 
 remove_target_sources(libyuv ${libyuv_loc}
@@ -96,12 +102,6 @@ remove_target_sources(libyuv ${libyuv_loc}
     source/rotate_msa.cc
     source/row_msa.cc
     source/scale_msa.cc
-
-    # MMI Source Files
-    source/compare_mmi.cc
-    source/rotate_mmi.cc
-    source/row_mmi.cc
-    source/scale_mmi.cc
 )
 
 if (arm_use_neon)
@@ -142,6 +142,7 @@ else()
 
         # RISC-V RVV
         source/row_rvv.cc
+        source/scale_rvv.cc
     )
 endif()
 
