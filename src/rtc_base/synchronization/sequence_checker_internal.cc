@@ -67,8 +67,8 @@ void SequenceCheckerImpl::Detach() {
   // reset on the next call to IsCurrent().
 }
 
-#if RTC_DCHECK_IS_ON
 std::string SequenceCheckerImpl::ExpectationToString() const {
+#if RTC_DCHECK_IS_ON
   const TaskQueueBase* const current_queue = TaskQueueBase::Current();
   const rtc::PlatformThreadRef current_thread = rtc::CurrentThreadRef();
   const void* const current_system_queue = GetSystemQueueRef();
@@ -101,8 +101,10 @@ std::string SequenceCheckerImpl::ExpectationToString() const {
   }
 
   return message.Release();
-}
+#else // RTC_DCHECK_IS_ON
+  return std::string();
 #endif  // RTC_DCHECK_IS_ON
+}
 
 }  // namespace webrtc_sequence_checker_internal
 }  // namespace webrtc
