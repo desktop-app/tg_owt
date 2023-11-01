@@ -11,6 +11,7 @@ endif()
 
 target_compile_definitions(libwebrtcbuild
 INTERFACE
+    $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
     WEBRTC_ENABLE_PROTOBUF=0
     WEBRTC_APM_DEBUG_DUMP=0
     WEBRTC_USE_BUILTIN_ISAC_FLOAT
