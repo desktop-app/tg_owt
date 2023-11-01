@@ -73,6 +73,10 @@ else()
         INTERFACE
             WEBRTC_MAC
         )
+        target_link_options(libwebrtcbuild
+        INTERFACE
+            -ObjC
+        )
     endif()
 
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
