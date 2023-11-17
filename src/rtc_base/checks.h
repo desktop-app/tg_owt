@@ -224,24 +224,25 @@ ToStringVal MakeVal(const T& x) {
 template <typename... Ts>
 class LogStreamer;
 
+template <typename U>
+using VT = decltype(MakeVal(std::declval<U>()));
+
 // Base case: Before the first << argument.
 template <>
 class LogStreamer<> final {
  public:
   template <typename U,
-            typename V = decltype(MakeVal(std::declval<U>())),
             absl::enable_if_t<std::is_arithmetic<U>::value ||
                               std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<V> operator<<(U arg) const {
-    return LogStreamer<V>(MakeVal(arg), this);
+  RTC_FORCE_INLINE LogStreamer<VT<U>> operator<<(U arg) const {
+    return LogStreamer<VT<U>>(MakeVal(arg), this);
   }
 
   template <typename U,
-            typename V = decltype(MakeVal(std::declval<U>())),
             absl::enable_if_t<!std::is_arithmetic<U>::value &&
                               !std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<V> operator<<(const U& arg) const {
-    return LogStreamer<V>(MakeVal(arg), this);
+  RTC_FORCE_INLINE LogStreamer<VT<U>> operator<<(const U& arg) const {
+    return LogStreamer<VT<U>>(MakeVal(arg), this);
   }
 
 #if RTC_CHECK_MSG_ENABLED
@@ -281,19 +282,17 @@ class LogStreamer<T, Ts...> final {
       : arg_(arg), prior_(prior) {}
 
   template <typename U,
-            typename V = decltype(MakeVal(std::declval<U>())),
             absl::enable_if_t<std::is_arithmetic<U>::value ||
                               std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<V, T, Ts...> operator<<(U arg) const {
-    return LogStreamer<V, T, Ts...>(MakeVal(arg), this);
+  RTC_FORCE_INLINE LogStreamer<VT<U>, T, Ts...> operator<<(U arg) const {
+    return LogStreamer<VT<U>, T, Ts...>(MakeVal(arg), this);
   }
 
   template <typename U,
-            typename V = decltype(MakeVal(std::declval<U>())),
             absl::enable_if_t<!std::is_arithmetic<U>::value &&
                               !std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<V, T, Ts...> operator<<(const U& arg) const {
-    return LogStreamer<V, T, Ts...>(MakeVal(arg), this);
+  RTC_FORCE_INLINE LogStreamer<VT<U>, T, Ts...> operator<<(const U& arg) const {
+    return LogStreamer<VT<U>, T, Ts...>(MakeVal(arg), this);
   }
 
 #if RTC_CHECK_MSG_ENABLED
