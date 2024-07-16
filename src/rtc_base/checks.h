@@ -224,25 +224,24 @@ ToStringVal MakeVal(const T& x) {
 template <typename... Ts>
 class LogStreamer;
 
-template <typename U>
-using VT = decltype(MakeVal(std::declval<U>()));
-
 // Base case: Before the first << argument.
 template <>
 class LogStreamer<> final {
  public:
   template <typename U,
+            typename V = decltype(MakeVal(std::declval<U>())),
             absl::enable_if_t<std::is_arithmetic<U>::value ||
                               std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<VT<U>> operator<<(U arg) const {
-    return LogStreamer<VT<U>>(MakeVal(arg), this);
+  RTC_FORCE_INLINE LogStreamer<V> operator<<(U arg) const {
+    return LogStreamer<V>(MakeVal(arg), this);
   }
 
   template <typename U,
+            typename V = decltype(MakeVal(std::declval<U>())),
             absl::enable_if_t<!std::is_arithmetic<U>::value &&
                               !std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<VT<U>> operator<<(const U& arg) const {
-    return LogStreamer<VT<U>>(MakeVal(arg), this);
+  RTC_FORCE_INLINE LogStreamer<V> operator<<(const U& arg) const {
+    return LogStreamer<V>(MakeVal(arg), this);
   }
 
 #if RTC_CHECK_MSG_ENABLED
@@ -282,17 +281,19 @@ class LogStreamer<T, Ts...> final {
       : arg_(arg), prior_(prior) {}
 
   template <typename U,
+            typename V = decltype(MakeVal(std::declval<U>())),
             absl::enable_if_t<std::is_arithmetic<U>::value ||
                               std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<VT<U>, T, Ts...> operator<<(U arg) const {
-    return LogStreamer<VT<U>, T, Ts...>(MakeVal(arg), this);
+  RTC_FORCE_INLINE LogStreamer<V, T, Ts...> operator<<(U arg) const {
+    return LogStreamer<V, T, Ts...>(MakeVal(arg), this);
   }
 
   template <typename U,
+            typename V = decltype(MakeVal(std::declval<U>())),
             absl::enable_if_t<!std::is_arithmetic<U>::value &&
                               !std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<VT<U>, T, Ts...> operator<<(const U& arg) const {
-    return LogStreamer<VT<U>, T, Ts...>(MakeVal(arg), this);
+  RTC_FORCE_INLINE LogStreamer<V, T, Ts...> operator<<(const U& arg) const {
+    return LogStreamer<V, T, Ts...>(MakeVal(arg), this);
   }
 
 #if RTC_CHECK_MSG_ENABLED
@@ -410,22 +411,20 @@ RTC_NORETURN RTC_EXPORT void UnreachableCodeReached();
             ::rtc::webrtc_checks_impl::LogStreamer<>() << (val1) << (val2)
 #else
 #define RTC_CHECK(condition)                                                  \
-  (condition)                                                                 \
-      ? static_cast<void>(0)                                                  \
-      : true ? ::rtc::webrtc_checks_impl::FatalLogCall<false>(__FILE__,       \
-                                                              __LINE__, "") & \
-                   ::rtc::webrtc_checks_impl::LogStreamer<>()                 \
-             : ::rtc::webrtc_checks_impl::FatalLogCall<false>("", 0, "") &    \
-                   ::rtc::webrtc_checks_impl::LogStreamer<>()
+  (condition) ? static_cast<void>(0)                                          \
+  : true ? ::rtc::webrtc_checks_impl::FatalLogCall<false>(__FILE__, __LINE__, \
+                                                          "") &               \
+               ::rtc::webrtc_checks_impl::LogStreamer<>()                     \
+         : ::rtc::webrtc_checks_impl::FatalLogCall<false>("", 0, "") &        \
+               ::rtc::webrtc_checks_impl::LogStreamer<>()
 
 #define RTC_CHECK_OP(name, op, val1, val2)                                   \
-  ::rtc::Safe##name((val1), (val2))                                          \
-      ? static_cast<void>(0)                                                 \
-      : true ? ::rtc::webrtc_checks_impl::FatalLogCall<true>(__FILE__,       \
-                                                             __LINE__, "") & \
-                   ::rtc::webrtc_checks_impl::LogStreamer<>()                \
-             : ::rtc::webrtc_checks_impl::FatalLogCall<false>("", 0, "") &   \
-                   ::rtc::webrtc_checks_impl::LogStreamer<>()
+  ::rtc::Safe##name((val1), (val2)) ? static_cast<void>(0)                   \
+  : true ? ::rtc::webrtc_checks_impl::FatalLogCall<true>(__FILE__, __LINE__, \
+                                                         "") &               \
+               ::rtc::webrtc_checks_impl::LogStreamer<>()                    \
+         : ::rtc::webrtc_checks_impl::FatalLogCall<false>("", 0, "") &       \
+               ::rtc::webrtc_checks_impl::LogStreamer<>()
 #endif
 
 #define RTC_CHECK_EQ(val1, val2) RTC_CHECK_OP(Eq, ==, val1, val2)

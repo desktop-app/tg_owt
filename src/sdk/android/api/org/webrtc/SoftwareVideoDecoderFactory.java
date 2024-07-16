@@ -11,45 +11,43 @@
 package org.webrtc;
 
 import androidx.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 
 public class SoftwareVideoDecoderFactory implements VideoDecoderFactory {
+  private static final String TAG = "SoftwareVideoDecoderFactory";
+
+  private final long nativeFactory;
+
+  public SoftwareVideoDecoderFactory() {
+    this.nativeFactory = nativeCreateFactory();
+  }
+
   @Nullable
   @Override
-  public VideoDecoder createDecoder(VideoCodecInfo codecInfo) {
-    String codecName = codecInfo.getName();
-
-    if (codecName.equalsIgnoreCase(VideoCodecMimeType.VP8.name())) {
-      return new LibvpxVp8Decoder();
+  public VideoDecoder createDecoder(VideoCodecInfo info) {
+    if (!nativeIsSupported(nativeFactory, info)) {
+      Logging.w(TAG, "Trying to create decoder for unsupported format. " + info);
+      return null;
     }
-    if (codecName.equalsIgnoreCase(VideoCodecMimeType.VP9.name())
-        && LibvpxVp9Decoder.nativeIsSupported()) {
-      return new LibvpxVp9Decoder();
-    }
-    if (codecName.equalsIgnoreCase(VideoCodecMimeType.AV1.name())) {
-      return new Dav1dDecoder();
-    }
-
-    return null;
+    return new WrappedNativeVideoDecoder() {
+      @Override
+      public long createNative(long webrtcEnvRef) {
+        return nativeCreate(nativeFactory, webrtcEnvRef, info);
+      }
+    };
   }
 
   @Override
   public VideoCodecInfo[] getSupportedCodecs() {
-    return supportedCodecs();
+    return nativeGetSupportedCodecs(nativeFactory).toArray(new VideoCodecInfo[0]);
   }
 
-  static VideoCodecInfo[] supportedCodecs() {
-    List<VideoCodecInfo> codecs = new ArrayList<VideoCodecInfo>();
+  private static native long nativeCreateFactory();
 
-    codecs.add(new VideoCodecInfo(VideoCodecMimeType.VP8.name(), new HashMap<>()));
-    if (LibvpxVp9Decoder.nativeIsSupported()) {
-      codecs.add(new VideoCodecInfo(VideoCodecMimeType.VP9.name(), new HashMap<>()));
-    }
+  private static native boolean nativeIsSupported(long factory, VideoCodecInfo info);
 
-    codecs.add(new VideoCodecInfo(VideoCodecMimeType.AV1.name(), new HashMap<>()));
+  private static native long nativeCreate(
+      long factory, long webrtcEnvRef, VideoCodecInfo info);
 
-    return codecs.toArray(new VideoCodecInfo[codecs.size()]);
-  }
+  private static native List<VideoCodecInfo> nativeGetSupportedCodecs(long factory);
 }

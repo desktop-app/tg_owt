@@ -15,6 +15,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "absl/types/optional.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/strings/json.h"
 #include "stats/test/rtc_test_stats.h"
@@ -43,37 +44,40 @@ class RTCChildStats : public RTCStats {
  public:
   WEBRTC_RTCSTATS_DECL();
 
-  RTCChildStats(const std::string& id, int64_t timestamp_us)
-      : RTCStats(id, timestamp_us), child_int("childInt") {}
+  RTCChildStats(const std::string& id, Timestamp timestamp)
+      : RTCStats(id, timestamp) {}
 
-  RTCStatsMember<int32_t> child_int;
+  absl::optional<int32_t> child_int;
 };
 
-WEBRTC_RTCSTATS_IMPL(RTCChildStats, RTCStats, "child-stats", &child_int)
+WEBRTC_RTCSTATS_IMPL(RTCChildStats,
+                     RTCStats,
+                     "child-stats",
+                     AttributeInit("childInt", &child_int))
 
 class RTCGrandChildStats : public RTCChildStats {
  public:
   WEBRTC_RTCSTATS_DECL();
 
-  RTCGrandChildStats(const std::string& id, int64_t timestamp_us)
-      : RTCChildStats(id, timestamp_us), grandchild_int("grandchildInt") {}
+  RTCGrandChildStats(const std::string& id, Timestamp timestamp)
+      : RTCChildStats(id, timestamp) {}
 
-  RTCStatsMember<int32_t> grandchild_int;
+  absl::optional<int32_t> grandchild_int;
 };
 
 WEBRTC_RTCSTATS_IMPL(RTCGrandChildStats,
                      RTCChildStats,
                      "grandchild-stats",
-                     &grandchild_int)
+                     AttributeInit("grandchildInt", &grandchild_int))
 
-TEST(RTCStatsTest, RTCStatsAndMembers) {
-  RTCTestStats stats("testId", 42);
+TEST(RTCStatsTest, RTCStatsAndAttributes) {
+  RTCTestStats stats("testId", Timestamp::Micros(42));
   EXPECT_EQ(stats.id(), "testId");
-  EXPECT_EQ(stats.timestamp_us(), static_cast<int64_t>(42));
-  std::vector<const RTCStatsMemberInterface*> members = stats.Members();
-  EXPECT_EQ(members.size(), static_cast<size_t>(16));
-  for (const RTCStatsMemberInterface* member : members) {
-    EXPECT_FALSE(member->is_defined());
+  EXPECT_EQ(stats.timestamp().us(), static_cast<int64_t>(42));
+  std::vector<Attribute> attributes = stats.Attributes();
+  EXPECT_EQ(attributes.size(), static_cast<size_t>(16));
+  for (const auto& attribute : attributes) {
+    EXPECT_FALSE(attribute.has_value());
   }
   stats.m_bool = true;
   stats.m_int32 = 123;
@@ -104,15 +108,15 @@ TEST(RTCStatsTest, RTCStatsAndMembers) {
   stats.m_sequence_bool = sequence_bool;
   stats.m_sequence_int32 = sequence_int32;
   stats.m_sequence_uint32 = sequence_uint32;
-  EXPECT_FALSE(stats.m_sequence_int64.is_defined());
+  EXPECT_FALSE(stats.m_sequence_int64.has_value());
   stats.m_sequence_int64 = sequence_int64;
   stats.m_sequence_uint64 = sequence_uint64;
   stats.m_sequence_double = sequence_double;
   stats.m_sequence_string = sequence_string;
   stats.m_map_string_uint64 = map_string_uint64;
   stats.m_map_string_double = map_string_double;
-  for (const RTCStatsMemberInterface* member : members) {
-    EXPECT_TRUE(member->is_defined());
+  for (const auto& attribute : attributes) {
+    EXPECT_TRUE(attribute.has_value());
   }
   EXPECT_EQ(*stats.m_bool, true);
   EXPECT_EQ(*stats.m_int32, static_cast<int32_t>(123));
@@ -141,7 +145,7 @@ TEST(RTCStatsTest, RTCStatsAndMembers) {
 }
 
 TEST(RTCStatsTest, EqualityOperator) {
-  RTCTestStats empty_stats("testId", 123);
+  RTCTestStats empty_stats("testId", Timestamp::Micros(123));
   EXPECT_EQ(empty_stats, empty_stats);
 
   RTCTestStats stats_with_all_values = empty_stats;
@@ -163,7 +167,8 @@ TEST(RTCStatsTest, EqualityOperator) {
   stats_with_all_values.m_map_string_double = std::map<std::string, double>();
   EXPECT_NE(stats_with_all_values, empty_stats);
   EXPECT_EQ(stats_with_all_values, stats_with_all_values);
-  EXPECT_NE(stats_with_all_values.m_int32, stats_with_all_values.m_uint32);
+  EXPECT_NE(stats_with_all_values.GetAttribute(stats_with_all_values.m_int32),
+            stats_with_all_values.GetAttribute(stats_with_all_values.m_uint32));
 
   RTCTestStats one_member_different[] = {
       stats_with_all_values, stats_with_all_values, stats_with_all_values,
@@ -195,29 +200,30 @@ TEST(RTCStatsTest, EqualityOperator) {
     EXPECT_NE(stats_with_all_values, one_member_different[i]);
   }
 
-  RTCTestStats empty_stats_different_id("testId2", 123);
+  RTCTestStats empty_stats_different_id("testId2", Timestamp::Micros(123));
   EXPECT_NE(empty_stats, empty_stats_different_id);
-  RTCTestStats empty_stats_different_timestamp("testId", 321);
+  RTCTestStats empty_stats_different_timestamp("testId",
+                                               Timestamp::Micros(321));
   EXPECT_EQ(empty_stats, empty_stats_different_timestamp);
 
-  RTCChildStats child("childId", 42);
-  RTCGrandChildStats grandchild("grandchildId", 42);
+  RTCChildStats child("childId", Timestamp::Micros(42));
+  RTCGrandChildStats grandchild("grandchildId", Timestamp::Micros(42));
   EXPECT_NE(child, grandchild);
 
-  RTCChildStats stats_with_defined_member("leId", 0);
+  RTCChildStats stats_with_defined_member("leId", Timestamp::Micros(0));
   stats_with_defined_member.child_int = 0;
-  RTCChildStats stats_with_undefined_member("leId", 0);
+  RTCChildStats stats_with_undefined_member("leId", Timestamp::Micros(0));
   EXPECT_NE(stats_with_defined_member, stats_with_undefined_member);
   EXPECT_NE(stats_with_undefined_member, stats_with_defined_member);
 }
 
 TEST(RTCStatsTest, RTCStatsGrandChild) {
-  RTCGrandChildStats stats("grandchild", 0.0);
+  RTCGrandChildStats stats("grandchild", Timestamp::Micros(0.0));
   stats.child_int = 1;
   stats.grandchild_int = 2;
   int32_t sum = 0;
-  for (const RTCStatsMemberInterface* member : stats.Members()) {
-    sum += *member->cast_to<const RTCStatsMember<int32_t>>();
+  for (const auto& attribute : stats.Attributes()) {
+    sum += attribute.get<int32_t>();
   }
   EXPECT_EQ(sum, static_cast<int32_t>(3));
 
@@ -254,7 +260,7 @@ TEST(RTCStatsTest, RTCStatsPrintsValidJson) {
   std::map<std::string, double> map_string_double{
       {"three", 123.4567890123456499}, {"thirteen", 123.4567890123456499}};
 
-  RTCTestStats stats(id, timestamp);
+  RTCTestStats stats(id, Timestamp::Micros(timestamp));
   stats.m_bool = m_bool;
   stats.m_int32 = m_int32;
   stats.m_int64 = m_int64;
@@ -312,7 +318,7 @@ TEST(RTCStatsTest, RTCStatsPrintsValidJson) {
   }
 
   EXPECT_EQ(id, stats.id());
-  EXPECT_EQ(timestamp, stats.timestamp_us());
+  EXPECT_EQ(timestamp, stats.timestamp().us());
   EXPECT_EQ(m_bool, *stats.m_bool);
   EXPECT_EQ(m_int32, *stats.m_int32);
   EXPECT_EQ(m_string, *stats.m_string);
@@ -378,153 +384,98 @@ TEST(RTCStatsTest, RTCStatsPrintsValidJson) {
   // "mUint32" should not be part of the generated JSON object.
   int m_uint32;
   int m_uint64;
-  EXPECT_FALSE(stats.m_uint32.is_defined());
-  EXPECT_FALSE(stats.m_uint64.is_defined());
+  EXPECT_FALSE(stats.m_uint32.has_value());
+  EXPECT_FALSE(stats.m_uint64.has_value());
   EXPECT_FALSE(rtc::GetIntFromJsonObject(json_output, "mUint32", &m_uint32));
   EXPECT_FALSE(rtc::GetIntFromJsonObject(json_output, "mUint64", &m_uint64));
 
   std::cout << stats.ToJson() << std::endl;
 }
 
-TEST(RTCStatsTest, IsStandardized) {
-  RTCStatsMember<int32_t> standardized("standardized");
-  RTCNonStandardStatsMember<int32_t> unstandardized("unstandardized");
-  EXPECT_TRUE(standardized.is_standardized());
-  EXPECT_FALSE(unstandardized.is_standardized());
-}
-
 TEST(RTCStatsTest, IsSequence) {
-  RTCTestStats stats("statsId", 42);
-  EXPECT_FALSE(stats.m_bool.is_sequence());
-  EXPECT_FALSE(stats.m_int32.is_sequence());
-  EXPECT_FALSE(stats.m_uint32.is_sequence());
-  EXPECT_FALSE(stats.m_int64.is_sequence());
-  EXPECT_FALSE(stats.m_uint64.is_sequence());
-  EXPECT_FALSE(stats.m_double.is_sequence());
-  EXPECT_FALSE(stats.m_string.is_sequence());
-  EXPECT_TRUE(stats.m_sequence_bool.is_sequence());
-  EXPECT_TRUE(stats.m_sequence_int32.is_sequence());
-  EXPECT_TRUE(stats.m_sequence_uint32.is_sequence());
-  EXPECT_TRUE(stats.m_sequence_int64.is_sequence());
-  EXPECT_TRUE(stats.m_sequence_uint64.is_sequence());
-  EXPECT_TRUE(stats.m_sequence_double.is_sequence());
-  EXPECT_TRUE(stats.m_sequence_string.is_sequence());
-  EXPECT_FALSE(stats.m_map_string_uint64.is_sequence());
-  EXPECT_FALSE(stats.m_map_string_double.is_sequence());
-}
-
-TEST(RTCStatsTest, Type) {
-  RTCTestStats stats("statsId", 42);
-  EXPECT_EQ(RTCStatsMemberInterface::kBool, stats.m_bool.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kInt32, stats.m_int32.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kUint32, stats.m_uint32.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kInt64, stats.m_int64.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kUint64, stats.m_uint64.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kDouble, stats.m_double.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kString, stats.m_string.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kSequenceBool,
-            stats.m_sequence_bool.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kSequenceInt32,
-            stats.m_sequence_int32.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kSequenceUint32,
-            stats.m_sequence_uint32.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kSequenceInt64,
-            stats.m_sequence_int64.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kSequenceUint64,
-            stats.m_sequence_uint64.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kSequenceDouble,
-            stats.m_sequence_double.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kSequenceString,
-            stats.m_sequence_string.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kMapStringUint64,
-            stats.m_map_string_uint64.type());
-  EXPECT_EQ(RTCStatsMemberInterface::kMapStringDouble,
-            stats.m_map_string_double.type());
+  RTCTestStats stats("statsId", Timestamp::Micros(42));
+  EXPECT_FALSE(stats.GetAttribute(stats.m_bool).is_sequence());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_int32).is_sequence());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_uint32).is_sequence());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_int64).is_sequence());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_uint64).is_sequence());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_double).is_sequence());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_string).is_sequence());
+  EXPECT_TRUE(stats.GetAttribute(stats.m_sequence_bool).is_sequence());
+  EXPECT_TRUE(stats.GetAttribute(stats.m_sequence_int32).is_sequence());
+  EXPECT_TRUE(stats.GetAttribute(stats.m_sequence_uint32).is_sequence());
+  EXPECT_TRUE(stats.GetAttribute(stats.m_sequence_int64).is_sequence());
+  EXPECT_TRUE(stats.GetAttribute(stats.m_sequence_uint64).is_sequence());
+  EXPECT_TRUE(stats.GetAttribute(stats.m_sequence_double).is_sequence());
+  EXPECT_TRUE(stats.GetAttribute(stats.m_sequence_string).is_sequence());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_map_string_uint64).is_sequence());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_map_string_double).is_sequence());
 }
 
 TEST(RTCStatsTest, IsString) {
-  RTCTestStats stats("statsId", 42);
-  EXPECT_TRUE(stats.m_string.is_string());
-  EXPECT_FALSE(stats.m_bool.is_string());
-  EXPECT_FALSE(stats.m_int32.is_string());
-  EXPECT_FALSE(stats.m_uint32.is_string());
-  EXPECT_FALSE(stats.m_int64.is_string());
-  EXPECT_FALSE(stats.m_uint64.is_string());
-  EXPECT_FALSE(stats.m_double.is_string());
-  EXPECT_FALSE(stats.m_sequence_bool.is_string());
-  EXPECT_FALSE(stats.m_sequence_int32.is_string());
-  EXPECT_FALSE(stats.m_sequence_uint32.is_string());
-  EXPECT_FALSE(stats.m_sequence_int64.is_string());
-  EXPECT_FALSE(stats.m_sequence_uint64.is_string());
-  EXPECT_FALSE(stats.m_sequence_double.is_string());
-  EXPECT_FALSE(stats.m_sequence_string.is_string());
-  EXPECT_FALSE(stats.m_map_string_uint64.is_string());
-  EXPECT_FALSE(stats.m_map_string_double.is_string());
+  RTCTestStats stats("statsId", Timestamp::Micros(42));
+  EXPECT_TRUE(stats.GetAttribute(stats.m_string).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_bool).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_int32).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_uint32).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_int64).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_uint64).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_double).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_sequence_bool).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_sequence_int32).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_sequence_uint32).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_sequence_int64).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_sequence_uint64).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_sequence_double).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_sequence_string).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_map_string_uint64).is_string());
+  EXPECT_FALSE(stats.GetAttribute(stats.m_map_string_double).is_string());
 }
 
-TEST(RTCStatsTest, ValueToString) {
-  RTCTestStats stats("statsId", 42);
+TEST(RTCStatsTest, AttributeToString) {
+  RTCTestStats stats("statsId", Timestamp::Micros(42));
   stats.m_bool = true;
-  EXPECT_EQ("true", stats.m_bool.ValueToString());
+  EXPECT_EQ("true", stats.GetAttribute(stats.m_bool).ToString());
 
   stats.m_string = "foo";
-  EXPECT_EQ("foo", stats.m_string.ValueToString());
+  EXPECT_EQ("foo", stats.GetAttribute(stats.m_string).ToString());
   stats.m_int32 = -32;
-  EXPECT_EQ("-32", stats.m_int32.ValueToString());
+  EXPECT_EQ("-32", stats.GetAttribute(stats.m_int32).ToString());
   stats.m_uint32 = 32;
-  EXPECT_EQ("32", stats.m_uint32.ValueToString());
+  EXPECT_EQ("32", stats.GetAttribute(stats.m_uint32).ToString());
   stats.m_int64 = -64;
-  EXPECT_EQ("-64", stats.m_int64.ValueToString());
+  EXPECT_EQ("-64", stats.GetAttribute(stats.m_int64).ToString());
   stats.m_uint64 = 64;
-  EXPECT_EQ("64", stats.m_uint64.ValueToString());
+  EXPECT_EQ("64", stats.GetAttribute(stats.m_uint64).ToString());
   stats.m_double = 0.5;
-  EXPECT_EQ("0.5", stats.m_double.ValueToString());
+  EXPECT_EQ("0.5", stats.GetAttribute(stats.m_double).ToString());
   stats.m_sequence_bool = {true, false};
-  EXPECT_EQ("[true,false]", stats.m_sequence_bool.ValueToString());
+  EXPECT_EQ("[true,false]",
+            stats.GetAttribute(stats.m_sequence_bool).ToString());
   stats.m_sequence_int32 = {-32, 32};
-  EXPECT_EQ("[-32,32]", stats.m_sequence_int32.ValueToString());
+  EXPECT_EQ("[-32,32]", stats.GetAttribute(stats.m_sequence_int32).ToString());
   stats.m_sequence_uint32 = {64, 32};
-  EXPECT_EQ("[64,32]", stats.m_sequence_uint32.ValueToString());
+  EXPECT_EQ("[64,32]", stats.GetAttribute(stats.m_sequence_uint32).ToString());
   stats.m_sequence_int64 = {-64, 32};
-  EXPECT_EQ("[-64,32]", stats.m_sequence_int64.ValueToString());
+  EXPECT_EQ("[-64,32]", stats.GetAttribute(stats.m_sequence_int64).ToString());
   stats.m_sequence_uint64 = {16, 32};
-  EXPECT_EQ("[16,32]", stats.m_sequence_uint64.ValueToString());
+  EXPECT_EQ("[16,32]", stats.GetAttribute(stats.m_sequence_uint64).ToString());
   stats.m_sequence_double = {0.5, 0.25};
-  EXPECT_EQ("[0.5,0.25]", stats.m_sequence_double.ValueToString());
+  EXPECT_EQ("[0.5,0.25]",
+            stats.GetAttribute(stats.m_sequence_double).ToString());
   stats.m_sequence_string = {"foo", "bar"};
-  EXPECT_EQ("[\"foo\",\"bar\"]", stats.m_sequence_string.ValueToString());
+  EXPECT_EQ("[\"foo\",\"bar\"]",
+            stats.GetAttribute(stats.m_sequence_string).ToString());
   stats.m_map_string_uint64 = std::map<std::string, uint64_t>();
   stats.m_map_string_uint64->emplace("foo", 32);
   stats.m_map_string_uint64->emplace("bar", 64);
-  EXPECT_EQ("{bar:64,foo:32}", stats.m_map_string_uint64.ValueToString());
+  EXPECT_EQ("{\"bar\":64,\"foo\":32}",
+            stats.GetAttribute(stats.m_map_string_uint64).ToString());
   stats.m_map_string_double = std::map<std::string, double>();
   stats.m_map_string_double->emplace("foo", 0.5);
   stats.m_map_string_double->emplace("bar", 0.25);
-  EXPECT_EQ("{bar:0.25,foo:0.5}", stats.m_map_string_double.ValueToString());
-}
-
-TEST(RTCStatsTest, RestrictedStatsTest) {
-  RTCStatsMember<bool> unrestricted("unrestricted");
-  EXPECT_EQ(unrestricted.exposure_criteria(), StatExposureCriteria::kAlways);
-  RTCRestrictedStatsMember<bool, StatExposureCriteria::kHardwareCapability>
-      restricted("restricted");
-  EXPECT_EQ(restricted.exposure_criteria(),
-            StatExposureCriteria::kHardwareCapability);
-
-  unrestricted = true;
-  restricted = true;
-  EXPECT_NE(unrestricted, restricted)
-      << "These can not be equal as they have different exposure criteria.";
-}
-
-TEST(RTCStatsTest, NonStandardGroupId) {
-  auto group_id = NonStandardGroupId::kGroupIdForTesting;
-  RTCNonStandardStatsMember<int32_t> with_group_id("stat", {group_id});
-  std::vector<NonStandardGroupId> expected_ids({group_id});
-  EXPECT_EQ(expected_ids, with_group_id.group_ids());
-
-  RTCNonStandardStatsMember<int32_t> without_group_id("stat");
-  EXPECT_TRUE(without_group_id.group_ids().empty());
+  EXPECT_EQ("{\"bar\":0.25,\"foo\":0.5}",
+            stats.GetAttribute(stats.m_map_string_double).ToString());
 }
 
 // Death tests.
@@ -533,13 +484,13 @@ TEST(RTCStatsTest, NonStandardGroupId) {
 #if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
 
 TEST(RTCStatsDeathTest, ValueOfUndefinedMember) {
-  RTCTestStats stats("testId", 0.0);
-  EXPECT_FALSE(stats.m_int32.is_defined());
+  RTCTestStats stats("testId", Timestamp::Micros(0));
+  EXPECT_FALSE(stats.m_int32.has_value());
   EXPECT_DEATH(*stats.m_int32, "");
 }
 
 TEST(RTCStatsDeathTest, InvalidCasting) {
-  RTCGrandChildStats stats("grandchild", 0.0);
+  RTCGrandChildStats stats("grandchild", Timestamp::Micros(0.0));
   EXPECT_DEATH(stats.cast_to<RTCChildStats>(), "");
 }
 

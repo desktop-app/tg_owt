@@ -79,6 +79,13 @@ PacketBuffer::InsertResult PacketBuffer::InsertPacket(
       return result;
     }
 
+    if (ForwardDiff<uint16_t>(first_seq_num_, seq_num) >= max_size_) {
+      // Large negative jump in rtp sequence number: clear the buffer and treat
+      // latest packet as the new first packet.
+      Clear();
+      first_packet_received_ = true;
+    }
+
     first_seq_num_ = seq_num;
   }
 
@@ -258,14 +265,15 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
       int64_t frame_timestamp = buffer_[start_index]->timestamp;
 
       // Identify H.264 keyframes by means of SPS, PPS, and IDR.
-      bool is_h264 = buffer_[start_index]->codec() == kVideoCodecH264;
+      bool is_generic = buffer_[start_index]->video_header.generic.has_value();
+      bool is_h264_descriptor =
+          (buffer_[start_index]->codec() == kVideoCodecH264) && !is_generic;
       bool has_h264_sps = false;
       bool has_h264_pps = false;
       bool has_h264_idr = false;
       bool is_h264_keyframe = false;
-        
-      bool is_h265 = false;
-      is_h265 = buffer_[start_index]->codec() == kVideoCodecH265;
+      
+      bool is_h265_descriptor = buffer_[start_index]->codec() == kVideoCodecH265;
       bool has_h265_sps = false;
       bool has_h265_pps = false;
       bool has_h265_idr = false;
@@ -277,7 +285,7 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
       while (true) {
         ++tested_packets;
 
-        if (!is_h264 && !is_h265) {
+        if (!is_h264_descriptor && !is_h265_descriptor) {
           if (buffer_[start_index] == nullptr ||
               buffer_[start_index]->is_first_packet_in_frame()) {
             full_frame_found = buffer_[start_index] != nullptr;
@@ -285,7 +293,7 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
           }
         }
 
-        if (is_h264) {
+        if (is_h264_descriptor) {
           const auto* h264_header = absl::get_if<RTPVideoHeaderH264>(
               &buffer_[start_index]->video_header.video_type_header);
           if (!h264_header || h264_header->nalus_length >= kMaxNalusPerPacket)
@@ -314,10 +322,9 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
               idr_height = buffer_[start_index]->height();
             }
           }
-        }
-        if (is_h265 && !is_h265_keyframe) {
+        } else if (is_h265_descriptor) {
           const auto* h265_header = absl::get_if<RTPVideoHeaderH265>(
-              &buffer_[start_index]->video_header.video_type_header);
+            &buffer_[start_index]->video_header.video_type_header);
           if (!h265_header || h265_header->nalus_length >= kMaxNalusPerPacket)
             return found_frames;
           for (size_t j = 0; j < h265_header->nalus_length; ++j) {
@@ -326,15 +333,15 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
             } else if (h265_header->nalus[j].type == H265::NaluType::kPps) {
               has_h265_pps = true;
             } else if (h265_header->nalus[j].type == H265::NaluType::kIdrWRadl
-                || h265_header->nalus[j].type == H265::NaluType::kIdrNLp
-                || h265_header->nalus[j].type == H265::NaluType::kCra) {
+              || h265_header->nalus[j].type == H265::NaluType::kIdrNLp
+              || h265_header->nalus[j].type == H265::NaluType::kCra) {
               has_h265_idr = true;
             }
           }
           if (has_h265_sps && has_h265_pps && has_h265_idr) {
             is_h265_keyframe = true;
             if (buffer_[start_index]->width() > 0 &&
-                buffer_[start_index]->height() > 0) {
+              buffer_[start_index]->height() > 0) {
               idr_width = buffer_[start_index]->width();
               idr_height = buffer_[start_index]->height();
             }
@@ -352,15 +359,16 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
         // the timestamp of that packet is the same as this one. This may cause
         // the PacketBuffer to hand out incomplete frames.
         // See: https://bugs.chromium.org/p/webrtc/issues/detail?id=7106
-        if ((is_h264 || is_h265) && (buffer_[start_index] == nullptr ||
-            buffer_[start_index]->timestamp != frame_timestamp)) {
+        if ((is_h264_descriptor || is_h265_descriptor) &&
+            (buffer_[start_index] == nullptr ||
+             buffer_[start_index]->timestamp != frame_timestamp)) {
           break;
         }
 
         --start_seq_num;
       }
 
-      if (is_h264) {
+      if (is_h264_descriptor) {
         // Warn if this is an unsafe frame.
         if (has_h264_idr && (!has_h264_sps || !has_h264_pps)) {
           RTC_LOG(LS_WARNING)
@@ -398,23 +406,23 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
         }
       }
         
-      if (is_h265) {
+      if (is_h265_descriptor) {
         // Warn if this is an unsafe frame.
         if (has_h265_idr && (!has_h265_sps || !has_h265_pps)) {
           RTC_LOG(LS_WARNING)
-              << "Received H.265-IDR frame "
-              << "(SPS: " << has_h265_sps << ", PPS: " << has_h265_pps << "). "
-              << "Treating as delta frame since "
-              << "WebRTC-SpsPpsIdrIsH265Keyframe is always enabled.";
+            << "Received H.265-IDR frame "
+            << "(SPS: " << has_h265_sps << ", PPS: " << has_h265_pps << "). "
+            << "Treating as delta frame since "
+            << "WebRTC-SpsPpsIdrIsH265Keyframe is always enabled.";
         }
-            
+          
         // Now that we have decided whether to treat this frame as a key frame
         // or delta frame in the frame buffer, we update the field that
         // determines if the RtpFrameObject is a key frame or delta frame.
         const size_t first_packet_index = start_seq_num % buffer_.size();
         if (is_h265_keyframe) {
           buffer_[first_packet_index]->video_header.frame_type =
-              VideoFrameType::kVideoFrameKey;
+            VideoFrameType::kVideoFrameKey;
           if (idr_width > 0 && idr_height > 0) {
             // IDR frame was finalized and we have the correct resolution for
             // IDR; update first packet to have same resolution as IDR.
@@ -423,18 +431,18 @@ std::vector<std::unique_ptr<PacketBuffer::Packet>> PacketBuffer::FindFrames(
           }
         } else {
           buffer_[first_packet_index]->video_header.frame_type =
-              VideoFrameType::kVideoFrameDelta;
+            VideoFrameType::kVideoFrameDelta;
         }
-        
+      
         // If this is not a key frame, make sure there are no gaps in the
         // packet sequence numbers up until this point.
         if (!is_h265_keyframe && missing_packets_.upper_bound(start_seq_num) !=
-            missing_packets_.begin()) {
+          missing_packets_.begin()) {
           return found_frames;
         }
       }
 
-      if (is_h264 || is_h265 || full_frame_found) {
+      if (is_h264_descriptor || is_h265_descriptor || full_frame_found) {
         const uint16_t end_seq_num = seq_num + 1;
         // Use uint16_t type to handle sequence number wrap around case.
         uint16_t num_packets = end_seq_num - start_seq_num;

@@ -30,7 +30,6 @@
 #include "modules/audio_coding/codecs/cng/audio_encoder_cng.h"
 #include "modules/audio_coding/codecs/g711/audio_decoder_pcm.h"
 #include "modules/audio_coding/codecs/g711/audio_encoder_pcm.h"
-#include "modules/audio_coding/codecs/isac/main/include/audio_encoder_isac.h"
 #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/audio_coding/neteq/tools/audio_checksum.h"
 #include "modules/audio_coding/neteq/tools/audio_loop.h"
@@ -86,8 +85,6 @@ class RtpData {
     rtp_header->markerBit = false;
     rtp_header->ssrc = 0x1234;
     rtp_header->numCSRCs = 0;
-
-    rtp_header->payload_type_frequency = kSampleRateHz;
   }
 
   void Forward(RTPHeader* rtp_header) {
@@ -173,12 +170,11 @@ class AudioCodingModuleTestOldApi : public ::testing::Test {
   void TearDown() {}
 
   void SetUp() {
-    acm_.reset(AudioCodingModule::Create([this] {
-      AudioCodingModule::Config config;
-      config.clock = clock_;
-      config.decoder_factory = CreateBuiltinAudioDecoderFactory();
-      return config;
-    }()));
+    acm_ = AudioCodingModule::Create();
+    acm2::AcmReceiver::Config config;
+    config.clock = *clock_;
+    config.decoder_factory = CreateBuiltinAudioDecoderFactory();
+    acm_receiver_ = std::make_unique<acm2::AcmReceiver>(config);
 
     rtp_utility_->Populate(&rtp_header_);
 
@@ -201,7 +197,7 @@ class AudioCodingModuleTestOldApi : public ::testing::Test {
   }
 
   virtual void RegisterCodec() {
-    acm_->SetReceiveCodecs({{kPayloadType, *audio_format_}});
+    acm_receiver_->SetCodecs({{kPayloadType, *audio_format_}});
     acm_->SetEncoder(CreateBuiltinAudioEncoderFactory()->MakeAudioEncoder(
         kPayloadType, *audio_format_, absl::nullopt));
   }
@@ -213,15 +209,16 @@ class AudioCodingModuleTestOldApi : public ::testing::Test {
 
   virtual void InsertPacket() {
     const uint8_t kPayload[kPayloadSizeBytes] = {0};
-    ASSERT_EQ(0,
-              acm_->IncomingPacket(kPayload, kPayloadSizeBytes, rtp_header_));
+    ASSERT_EQ(0, acm_receiver_->InsertPacket(rtp_header_,
+                                             rtc::ArrayView<const uint8_t>(
+                                                 kPayload, kPayloadSizeBytes)));
     rtp_utility_->Forward(&rtp_header_);
   }
 
   virtual void PullAudio() {
     AudioFrame audio_frame;
     bool muted;
-    ASSERT_EQ(0, acm_->PlayoutData10Ms(-1, &audio_frame, &muted));
+    ASSERT_EQ(0, acm_receiver_->GetAudio(-1, &audio_frame, &muted));
     ASSERT_FALSE(muted);
   }
 
@@ -243,6 +240,7 @@ class AudioCodingModuleTestOldApi : public ::testing::Test {
 
   std::unique_ptr<RtpData> rtp_utility_;
   std::unique_ptr<AudioCodingModule> acm_;
+  std::unique_ptr<acm2::AcmReceiver> acm_receiver_;
   PacketizationCallbackStubOldApi packet_cb_;
   RTPHeader rtp_header_;
   AudioFrame input_frame_;
@@ -256,19 +254,6 @@ class AudioCodingModuleTestOldApi : public ::testing::Test {
 class AudioCodingModuleTestOldApiDeathTest
     : public AudioCodingModuleTestOldApi {};
 
-TEST_F(AudioCodingModuleTestOldApi, VerifyOutputFrame) {
-  AudioFrame audio_frame;
-  const int kSampleRateHz = 32000;
-  bool muted;
-  EXPECT_EQ(0, acm_->PlayoutData10Ms(kSampleRateHz, &audio_frame, &muted));
-  ASSERT_FALSE(muted);
-  EXPECT_EQ(0u, audio_frame.timestamp_);
-  EXPECT_GT(audio_frame.num_channels_, 0u);
-  EXPECT_EQ(static_cast<size_t>(kSampleRateHz / 100),
-            audio_frame.samples_per_channel_);
-  EXPECT_EQ(kSampleRateHz, audio_frame.sample_rate_hz_);
-}
-
 // The below test is temporarily disabled on Windows due to problems
 // with clang debug builds.
 // TODO(tommi): Re-enable when we've figured out what the problem is.
@@ -278,7 +263,7 @@ TEST_F(AudioCodingModuleTestOldApi, VerifyOutputFrame) {
 TEST_F(AudioCodingModuleTestOldApiDeathTest, FailOnZeroDesiredFrequency) {
   AudioFrame audio_frame;
   bool muted;
-  RTC_EXPECT_DEATH(acm_->PlayoutData10Ms(0, &audio_frame, &muted),
+  RTC_EXPECT_DEATH(acm_receiver_->GetAudio(0, &audio_frame, &muted),
                    "dst_sample_rate_hz");
 }
 #endif
@@ -302,44 +287,6 @@ TEST_F(AudioCodingModuleTestOldApi, TransportCallbackIsInvokedForEachPacket) {
   EXPECT_EQ(AudioFrameType::kAudioFrameSpeech, packet_cb_.last_frame_type());
 }
 
-#if defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX)
-// Verifies that the RTP timestamp series is not reset when the codec is
-// changed.
-TEST_F(AudioCodingModuleTestOldApi, TimestampSeriesContinuesWhenCodecChanges) {
-  RegisterCodec();  // This registers the default codec.
-  uint32_t expected_ts = input_frame_.timestamp_;
-  int blocks_per_packet = pac_size_ / (kSampleRateHz / 100);
-  // Encode 5 packets of the first codec type.
-  const int kNumPackets1 = 5;
-  for (int j = 0; j < kNumPackets1; ++j) {
-    for (int i = 0; i < blocks_per_packet; ++i) {
-      EXPECT_EQ(j, packet_cb_.num_calls());
-      InsertAudio();
-    }
-    EXPECT_EQ(j + 1, packet_cb_.num_calls());
-    EXPECT_EQ(expected_ts, packet_cb_.last_timestamp());
-    expected_ts += pac_size_;
-  }
-
-  // Change codec.
-  audio_format_ = SdpAudioFormat("ISAC", kSampleRateHz, 1);
-  pac_size_ = 480;
-  RegisterCodec();
-  blocks_per_packet = pac_size_ / (kSampleRateHz / 100);
-  // Encode another 5 packets.
-  const int kNumPackets2 = 5;
-  for (int j = 0; j < kNumPackets2; ++j) {
-    for (int i = 0; i < blocks_per_packet; ++i) {
-      EXPECT_EQ(kNumPackets1 + j, packet_cb_.num_calls());
-      InsertAudio();
-    }
-    EXPECT_EQ(kNumPackets1 + j + 1, packet_cb_.num_calls());
-    EXPECT_EQ(expected_ts, packet_cb_.last_timestamp());
-    expected_ts += pac_size_;
-  }
-}
-#endif
-
 // Introduce this class to set different expectations on the number of encoded
 // bytes. This class expects all encoded packets to be 9 bytes (matching one
 // CNG SID frame) or 0 bytes. This test depends on `input_frame_` containing
@@ -349,8 +296,8 @@ class AudioCodingModuleTestWithComfortNoiseOldApi
     : public AudioCodingModuleTestOldApi {
  protected:
   void RegisterCngCodec(int rtp_payload_type) {
-    acm_->SetReceiveCodecs({{kPayloadType, *audio_format_},
-                            {rtp_payload_type, {"cn", kSampleRateHz, 1}}});
+    acm_receiver_->SetCodecs({{kPayloadType, *audio_format_},
+                              {rtp_payload_type, {"cn", kSampleRateHz, 1}}});
     acm_->ModifyEncoder([&](std::unique_ptr<AudioEncoder>* enc) {
       AudioEncoderCngConfig config;
       config.speech_encoder = std::move(*enc);
@@ -420,8 +367,7 @@ TEST_F(AudioCodingModuleTestWithComfortNoiseOldApi,
   DoTest(k10MsBlocksPerPacket, kCngPayloadType);
 }
 
-// A multi-threaded test for ACM. This base class is using the PCM16b 16 kHz
-// codec, while the derive class AcmIsacMtTest is using iSAC.
+// A multi-threaded test for ACM that uses the PCM16b 16 kHz codec.
 class AudioCodingModuleMtTestOldApi : public AudioCodingModuleTestOldApi {
  protected:
   static const int kNumPackets = 500;
@@ -559,272 +505,6 @@ class AudioCodingModuleMtTestOldApi : public AudioCodingModuleTestOldApi {
 TEST_F(AudioCodingModuleMtTestOldApi, MAYBE_DoTest) {
   EXPECT_TRUE(RunTest());
 }
-
-// This is a multi-threaded ACM test using iSAC. The test encodes audio
-// from a PCM file. The most recent encoded frame is used as input to the
-// receiving part. Depending on timing, it may happen that the same RTP packet
-// is inserted into the receiver multiple times, but this is a valid use-case,
-// and simplifies the test code a lot.
-class AcmIsacMtTestOldApi : public AudioCodingModuleMtTestOldApi {
- protected:
-  static const int kNumPackets = 500;
-  static const int kNumPullCalls = 500;
-
-  AcmIsacMtTestOldApi()
-      : AudioCodingModuleMtTestOldApi(), last_packet_number_(0) {}
-
-  ~AcmIsacMtTestOldApi() {}
-
-  void SetUp() override {
-    AudioCodingModuleTestOldApi::SetUp();
-    RegisterCodec();  // Must be called before the threads start below.
-
-    // Set up input audio source to read from specified file, loop after 5
-    // seconds, and deliver blocks of 10 ms.
-    const std::string input_file_name =
-        webrtc::test::ResourcePath("audio_coding/speech_mono_16kHz", "pcm");
-    audio_loop_.Init(input_file_name, 5 * kSampleRateHz, kNumSamples10ms);
-
-    // Generate one packet to have something to insert.
-    int loop_counter = 0;
-    while (packet_cb_.last_payload_len_bytes() == 0) {
-      InsertAudio();
-      ASSERT_LT(loop_counter++, 10);
-    }
-    // Set `last_packet_number_` to one less that `num_calls` so that the packet
-    // will be fetched in the next InsertPacket() call.
-    last_packet_number_ = packet_cb_.num_calls() - 1;
-
-    StartThreads();
-  }
-
-  void RegisterCodec() override {
-    static_assert(kSampleRateHz == 16000, "test designed for iSAC 16 kHz");
-    audio_format_ = SdpAudioFormat("isac", kSampleRateHz, 1);
-    pac_size_ = 480;
-
-    // Register iSAC codec in ACM, effectively unregistering the PCM16B codec
-    // registered in AudioCodingModuleTestOldApi::SetUp();
-    acm_->SetReceiveCodecs({{kPayloadType, *audio_format_}});
-    acm_->SetEncoder(CreateBuiltinAudioEncoderFactory()->MakeAudioEncoder(
-        kPayloadType, *audio_format_, absl::nullopt));
-  }
-
-  void InsertPacket() override {
-    int num_calls = packet_cb_.num_calls();  // Store locally for thread safety.
-    if (num_calls > last_packet_number_) {
-      // Get the new payload out from the callback handler.
-      // Note that since we swap buffers here instead of directly inserting
-      // a pointer to the data in `packet_cb_`, we avoid locking the callback
-      // for the duration of the IncomingPacket() call.
-      packet_cb_.SwapBuffers(&last_payload_vec_);
-      ASSERT_GT(last_payload_vec_.size(), 0u);
-      rtp_utility_->Forward(&rtp_header_);
-      last_packet_number_ = num_calls;
-    }
-    ASSERT_GT(last_payload_vec_.size(), 0u);
-    ASSERT_EQ(0, acm_->IncomingPacket(&last_payload_vec_[0],
-                                      last_payload_vec_.size(), rtp_header_));
-  }
-
-  void InsertAudio() override {
-    // TODO(kwiberg): Use std::copy here. Might be complications because AFAICS
-    // this call confuses the number of samples with the number of bytes, and
-    // ends up copying only half of what it should.
-    memcpy(input_frame_.mutable_data(), audio_loop_.GetNextBlock().data(),
-           kNumSamples10ms);
-    AudioCodingModuleTestOldApi::InsertAudio();
-  }
-
-  // Override the verification function with no-op, since iSAC produces variable
-  // payload sizes.
-  void VerifyEncoding() override {}
-
-  // This method is the same as AudioCodingModuleMtTestOldApi::TestDone(), but
-  // here it is using the constants defined in this class (i.e., shorter test
-  // run).
-  bool TestDone() override {
-    if (packet_cb_.num_calls() > kNumPackets) {
-      MutexLock lock(&mutex_);
-      if (pull_audio_count_ > kNumPullCalls) {
-        // Both conditions for completion are met. End the test.
-        return true;
-      }
-    }
-    return false;
-  }
-
-  int last_packet_number_;
-  std::vector<uint8_t> last_payload_vec_;
-  test::AudioLoop audio_loop_;
-};
-
-#if defined(WEBRTC_IOS)
-#define MAYBE_DoTest DISABLED_DoTest
-#else
-#define MAYBE_DoTest DoTest
-#endif
-#if defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX)
-TEST_F(AcmIsacMtTestOldApi, MAYBE_DoTest) {
-  EXPECT_TRUE(RunTest());
-}
-#endif
-
-class AcmReRegisterIsacMtTestOldApi : public AudioCodingModuleTestOldApi {
- protected:
-  static const int kRegisterAfterNumPackets = 5;
-  static const int kNumPackets = 10;
-  static const int kPacketSizeMs = 30;
-  static const int kPacketSizeSamples = kPacketSizeMs * 16;
-
-  AcmReRegisterIsacMtTestOldApi()
-      : AudioCodingModuleTestOldApi(),
-        codec_registered_(false),
-        receive_packet_count_(0),
-        next_insert_packet_time_ms_(0),
-        fake_clock_(new SimulatedClock(0)) {
-    AudioEncoderIsacFloatImpl::Config config;
-    config.payload_type = kPayloadType;
-    isac_encoder_.reset(new AudioEncoderIsacFloatImpl(config));
-    clock_ = fake_clock_.get();
-  }
-
-  void SetUp() override {
-    AudioCodingModuleTestOldApi::SetUp();
-    // Set up input audio source to read from specified file, loop after 5
-    // seconds, and deliver blocks of 10 ms.
-    const std::string input_file_name =
-        webrtc::test::ResourcePath("audio_coding/speech_mono_16kHz", "pcm");
-    audio_loop_.Init(input_file_name, 5 * kSampleRateHz, kNumSamples10ms);
-    RegisterCodec();  // Must be called before the threads start below.
-    StartThreads();
-  }
-
-  void RegisterCodec() override {
-    // Register iSAC codec in ACM, effectively unregistering the PCM16B codec
-    // registered in AudioCodingModuleTestOldApi::SetUp();
-    // Only register the decoder for now. The encoder is registered later.
-    static_assert(kSampleRateHz == 16000, "test designed for iSAC 16 kHz");
-    acm_->SetReceiveCodecs({{kPayloadType, {"ISAC", kSampleRateHz, 1}}});
-  }
-
-  void StartThreads() {
-    quit_.store(false);
-    const auto attributes =
-        rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime);
-    receive_thread_ = rtc::PlatformThread::SpawnJoinable(
-        [this] {
-          while (!quit_.load() && CbReceiveImpl()) {
-          }
-        },
-        "receive", attributes);
-    codec_registration_thread_ = rtc::PlatformThread::SpawnJoinable(
-        [this] {
-          while (!quit_.load()) {
-            CbCodecRegistrationImpl();
-          }
-        },
-        "codec_registration", attributes);
-  }
-
-  void TearDown() override {
-    AudioCodingModuleTestOldApi::TearDown();
-    quit_.store(true);
-    receive_thread_.Finalize();
-    codec_registration_thread_.Finalize();
-  }
-
-  bool RunTest() { return test_complete_.Wait(TimeDelta::Minutes(10)); }
-
-  bool CbReceiveImpl() {
-    SleepMs(1);
-    rtc::Buffer encoded;
-    AudioEncoder::EncodedInfo info;
-    {
-      MutexLock lock(&mutex_);
-      if (clock_->TimeInMilliseconds() < next_insert_packet_time_ms_) {
-        return true;
-      }
-      next_insert_packet_time_ms_ += kPacketSizeMs;
-      ++receive_packet_count_;
-
-      // Encode new frame.
-      uint32_t input_timestamp = rtp_header_.timestamp;
-      while (info.encoded_bytes == 0) {
-        info = isac_encoder_->Encode(input_timestamp,
-                                     audio_loop_.GetNextBlock(), &encoded);
-        input_timestamp += 160;  // 10 ms at 16 kHz.
-      }
-      EXPECT_EQ(rtp_header_.timestamp + kPacketSizeSamples, input_timestamp);
-      EXPECT_EQ(rtp_header_.timestamp, info.encoded_timestamp);
-      EXPECT_EQ(rtp_header_.payloadType, info.payload_type);
-    }
-    // Now we're not holding the crit sect when calling ACM.
-
-    // Insert into ACM.
-    EXPECT_EQ(0, acm_->IncomingPacket(encoded.data(), info.encoded_bytes,
-                                      rtp_header_));
-
-    // Pull audio.
-    for (int i = 0; i < rtc::CheckedDivExact(kPacketSizeMs, 10); ++i) {
-      AudioFrame audio_frame;
-      bool muted;
-      EXPECT_EQ(0, acm_->PlayoutData10Ms(-1 /* default output frequency */,
-                                         &audio_frame, &muted));
-      if (muted) {
-        ADD_FAILURE();
-        return false;
-      }
-      fake_clock_->AdvanceTimeMilliseconds(10);
-    }
-    rtp_utility_->Forward(&rtp_header_);
-    return true;
-  }
-
-  void CbCodecRegistrationImpl() {
-    SleepMs(1);
-    if (HasFatalFailure()) {
-      // End the test early if a fatal failure (ASSERT_*) has occurred.
-      test_complete_.Set();
-    }
-    MutexLock lock(&mutex_);
-    if (!codec_registered_ &&
-        receive_packet_count_ > kRegisterAfterNumPackets) {
-      // Register the iSAC encoder.
-      acm_->SetEncoder(CreateBuiltinAudioEncoderFactory()->MakeAudioEncoder(
-          kPayloadType, *audio_format_, absl::nullopt));
-      codec_registered_ = true;
-    }
-    if (codec_registered_ && receive_packet_count_ > kNumPackets) {
-      test_complete_.Set();
-    }
-  }
-
-  rtc::PlatformThread receive_thread_;
-  rtc::PlatformThread codec_registration_thread_;
-  // Used to force worker threads to stop looping.
-  std::atomic<bool> quit_;
-
-  rtc::Event test_complete_;
-  Mutex mutex_;
-  bool codec_registered_ RTC_GUARDED_BY(mutex_);
-  int receive_packet_count_ RTC_GUARDED_BY(mutex_);
-  int64_t next_insert_packet_time_ms_ RTC_GUARDED_BY(mutex_);
-  std::unique_ptr<AudioEncoderIsacFloatImpl> isac_encoder_;
-  std::unique_ptr<SimulatedClock> fake_clock_;
-  test::AudioLoop audio_loop_;
-};
-
-#if defined(WEBRTC_IOS)
-#define MAYBE_DoTest DISABLED_DoTest
-#else
-#define MAYBE_DoTest DoTest
-#endif
-#if defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX)
-TEST_F(AcmReRegisterIsacMtTestOldApi, MAYBE_DoTest) {
-  EXPECT_TRUE(RunTest());
-}
-#endif
 
 // Disabling all of these tests on iOS until file support has been added.
 // See https://code.google.com/p/webrtc/issues/detail?id=4752 for details.
@@ -1025,41 +705,9 @@ class AcmSenderBitExactnessOldApi : public ::testing::Test,
 
 class AcmSenderBitExactnessNewApi : public AcmSenderBitExactnessOldApi {};
 
-// Run bit exactness tests only for release builds.
-#if (defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX)) && \
-    defined(NDEBUG) && defined(WEBRTC_LINUX) && defined(WEBRTC_ARCH_X86_64)
-TEST_F(AcmSenderBitExactnessOldApi, IsacWb30ms) {
-  ASSERT_NO_FATAL_FAILURE(SetUpTest("ISAC", 16000, 1, 103, 480, 480));
-  Run(/*audio_checksum_ref=*/"a3077ac01b0137e8bbc237fb1f9816a5",
-      /*payload_checksum_ref=*/"3c79f16f34218271f3dca4e2b1dfe1bb",
-      /*expected_packets=*/33,
-      /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
-}
-
-TEST_F(AcmSenderBitExactnessOldApi, IsacWb60ms) {
-  ASSERT_NO_FATAL_FAILURE(SetUpTest("ISAC", 16000, 1, 103, 960, 960));
-  Run(/*audio_checksum_ref=*/"76da9b7514f986fc2bb32b1c3170e8d4",
-      /*payload_checksum_ref=*/"9e0a0ab743ad987b55b8e14802769c56",
-      /*expected_packets=*/16,
-      /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
-}
-#endif
-
-// Run bit exactness test only for release build.
-#if defined(WEBRTC_CODEC_ISAC) && defined(NDEBUG) && defined(WEBRTC_LINUX) && \
-    defined(WEBRTC_ARCH_X86_64)
-TEST_F(AcmSenderBitExactnessOldApi, IsacSwb30ms) {
-  ASSERT_NO_FATAL_FAILURE(SetUpTest("ISAC", 32000, 1, 104, 960, 960));
-  Run(/*audio_checksum_ref=*/"f4cf577f28a0dcbac33358b757518e0c",
-      /*payload_checksum_ref=*/"ce86106a93419aefb063097108ec94ab",
-      /*expected_packets=*/33,
-      /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
-}
-#endif
-
 TEST_F(AcmSenderBitExactnessOldApi, Pcm16_8000khz_10ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("L16", 8000, 1, 107, 80, 80));
-  Run(/*audio_checksum_ref=*/"69118ed438ac76252d023e0463819471",
+  Run(/*audio_checksum_ref=*/"3e43fd5d3c73a59e8118e68fbfafe2c7",
       /*payload_checksum_ref=*/"c1edd36339ce0326cc4550041ad719a0",
       /*expected_packets=*/100,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
@@ -1067,7 +715,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcm16_8000khz_10ms) {
 
 TEST_F(AcmSenderBitExactnessOldApi, Pcm16_16000khz_10ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("L16", 16000, 1, 108, 160, 160));
-  Run(/*audio_checksum_ref=*/"bc6ab94d12a464921763d7544fdbd07e",
+  Run(/*audio_checksum_ref=*/"608750138315cbab33d76d38e8367807",
       /*payload_checksum_ref=*/"ad786526383178b08d80d6eee06e9bad",
       /*expected_packets=*/100,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
@@ -1075,7 +723,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcm16_16000khz_10ms) {
 
 TEST_F(AcmSenderBitExactnessOldApi, Pcm16_32000khz_10ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("L16", 32000, 1, 109, 320, 320));
-  Run(/*audio_checksum_ref=*/"c50244419c5c3a2f04cc69a022c266a2",
+  Run(/*audio_checksum_ref=*/"02e9927ef5e4d2cd792a5df0bdee5e19",
       /*payload_checksum_ref=*/"5ef82ea885e922263606c6fdbc49f651",
       /*expected_packets=*/100,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
@@ -1083,7 +731,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcm16_32000khz_10ms) {
 
 TEST_F(AcmSenderBitExactnessOldApi, Pcm16_stereo_8000khz_10ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("L16", 8000, 2, 111, 80, 80));
-  Run(/*audio_checksum_ref=*/"4fccf4cc96f1e8e8de4b9fadf62ded9e",
+  Run(/*audio_checksum_ref=*/"4ff38de045b19f64de9c7e229ba36317",
       /*payload_checksum_ref=*/"62ce5adb0d4965d0a52ec98ae7f98974",
       /*expected_packets=*/100,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kStereoOutput);
@@ -1091,7 +739,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcm16_stereo_8000khz_10ms) {
 
 TEST_F(AcmSenderBitExactnessOldApi, Pcm16_stereo_16000khz_10ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("L16", 16000, 2, 112, 160, 160));
-  Run(/*audio_checksum_ref=*/"e15e388d9d4af8c02a59fe1552fedee3",
+  Run(/*audio_checksum_ref=*/"1ee35394cfca78ad6d55468441af36fa",
       /*payload_checksum_ref=*/"41ca8edac4b8c71cd54fd9f25ec14870",
       /*expected_packets=*/100,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kStereoOutput);
@@ -1099,7 +747,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcm16_stereo_16000khz_10ms) {
 
 TEST_F(AcmSenderBitExactnessOldApi, Pcm16_stereo_32000khz_10ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("L16", 32000, 2, 113, 320, 320));
-  Run(/*audio_checksum_ref=*/"b240520c0d05003fde7a174ae5957286",
+  Run(/*audio_checksum_ref=*/"19cae34730a0f6a17cf4e76bf21b69d6",
       /*payload_checksum_ref=*/"50e58502fb04421bf5b857dda4c96879",
       /*expected_packets=*/100,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kStereoOutput);
@@ -1115,7 +763,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcmu_20ms) {
 
 TEST_F(AcmSenderBitExactnessOldApi, Pcma_20ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("PCMA", 8000, 1, 8, 160, 160));
-  Run(/*audio_checksum_ref=*/"47eb60e855eb12d1b0e6da9c975754a4",
+  Run(/*audio_checksum_ref=*/"ae259cab624095270b7369e53a7b53a3",
       /*payload_checksum_ref=*/"6ad745e55aa48981bfc790d0eeef2dd1",
       /*expected_packets=*/50,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
@@ -1131,7 +779,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcmu_stereo_20ms) {
 
 TEST_F(AcmSenderBitExactnessOldApi, Pcma_stereo_20ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("PCMA", 8000, 2, 118, 160, 160));
-  Run(/*audio_checksum_ref=*/"a84d75e098d87ab6b260687eb4b612a2",
+  Run(/*audio_checksum_ref=*/"f2e81d2531a805c40e61da5106b50006",
       /*payload_checksum_ref=*/"92b282c83efd20e7eeef52ba40842cf7",
       /*expected_packets=*/50,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kStereoOutput);
@@ -1141,7 +789,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcma_stereo_20ms) {
     defined(WEBRTC_ARCH_X86_64)
 TEST_F(AcmSenderBitExactnessOldApi, Ilbc_30ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("ILBC", 8000, 1, 102, 240, 240));
-  Run(/*audio_checksum_ref=*/"b14dba0de36efa5ec88a32c0b320b70f",
+  Run(/*audio_checksum_ref=*/"a739434bec8a754e9356ce2115603ce5",
       /*payload_checksum_ref=*/"cfae2e9f6aba96e145f2bcdd5050ce78",
       /*expected_packets=*/33,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
@@ -1151,7 +799,7 @@ TEST_F(AcmSenderBitExactnessOldApi, Ilbc_30ms) {
 #if defined(WEBRTC_LINUX) && defined(WEBRTC_ARCH_X86_64)
 TEST_F(AcmSenderBitExactnessOldApi, G722_20ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("G722", 16000, 1, 9, 320, 160));
-  Run(/*audio_checksum_ref=*/"a87a91ec0124510a64967f5d768554ff",
+  Run(/*audio_checksum_ref=*/"b875d9a3e41f5470857bdff02e3b368f",
       /*payload_checksum_ref=*/"fc68a87e1380614e658087cb35d5ca10",
       /*expected_packets=*/50,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kMonoOutput);
@@ -1161,7 +809,7 @@ TEST_F(AcmSenderBitExactnessOldApi, G722_20ms) {
 #if defined(WEBRTC_LINUX) && defined(WEBRTC_ARCH_X86_64)
 TEST_F(AcmSenderBitExactnessOldApi, G722_stereo_20ms) {
   ASSERT_NO_FATAL_FAILURE(SetUpTest("G722", 16000, 2, 119, 320, 160));
-  Run(/*audio_checksum_ref=*/"be0b8528ff9db3a2219f55ddd36faf7f",
+  Run(/*audio_checksum_ref=*/"02c427d73363b2f37853a0dd17fe1aba",
       /*payload_checksum_ref=*/"66516152eeaa1e650ad94ff85f668dac",
       /*expected_packets=*/50,
       /*expected_channels=*/test::AcmReceiveTestOldApi::kStereoOutput);
@@ -1249,8 +897,8 @@ TEST_F(AcmSenderBitExactnessNewApi, OpusFromFormat_stereo_20ms_voip) {
   ASSERT_NO_FATAL_FAILURE(SetUpTestExternalEncoder(
       AudioEncoderOpus::MakeAudioEncoder(*config, 120), 120));
   const std::string audio_maybe_sse =
-      "1010e60ad34cee73c939edaf563d0593"
-      "|c05b4523d4c3fad2bab96d2a56baa2d0";
+      "cb644fc17d9666a0f5986eef24818159"
+      "|4a74024473c7c729543c2790829b1e42";
 
   const std::string payload_maybe_sse =
       "ea48d94e43217793af9b7e15ece94e54"

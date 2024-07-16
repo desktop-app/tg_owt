@@ -97,11 +97,6 @@ RTC_OBJC_EXPORT
 @property(nonatomic, assign) RTCCandidateNetworkPolicy candidateNetworkPolicy;
 @property(nonatomic, assign) RTCContinualGatheringPolicy continualGatheringPolicy;
 
-/** If set to YES, don't gather IPv6 ICE candidates.
- *  Default is NO.
- */
-@property(nonatomic, assign) BOOL disableIPV6;
-
 /** If set to YES, don't gather IPv6 ICE candidates on Wi-Fi.
  *  Only intended to be used on specific devices. Certain phones disable IPv6
  *  when the screen is turned off and it would be better to just disable the
@@ -188,12 +183,6 @@ RTC_OBJC_EXPORT
  *  workaround for crbug.com/835958
  */
 @property(nonatomic, assign) BOOL activeResetSrtpParams;
-
-/** If the remote side support mid-stream codec switches then allow encoder
- *  switching to be performed.
- */
-
-@property(nonatomic, assign) BOOL allowCodecSwitching;
 
 /**
  * Defines advanced optional cryptographic settings related to SRTP and

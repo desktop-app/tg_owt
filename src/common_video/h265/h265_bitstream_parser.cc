@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2015 The WebRTC project authors. All Rights Reserved.
+ *  Copyright (c) 2023 The WebRTC project authors. All Rights Reserved.
  *
  *  Use of this source code is governed by a BSD-style license
  *  that can be found in the LICENSE file in the root of the source
@@ -15,8 +15,8 @@
 #include <vector>
 
 #include "common_video/h265/h265_common.h"
-#include "common_video/h265/legacy_bit_buffer.h"
 #include "rtc_base/logging.h"
+#include "common_video/h265/legacy_bit_buffer.h"
 
 namespace {
 

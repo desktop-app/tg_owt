@@ -18,6 +18,12 @@ rtc_library("bitrate_settings") {
   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
+rtc_library("bandwidth_estimation_settings") {
+  visibility = [ "*" ]
+  sources = [ "bandwidth_estimation_settings.h" ]
+  deps = [ "../../rtc_base/system:rtc_export" ]
+}
+
 rtc_source_set("enums") {
   visibility = [ "*" ]
   sources = [ "enums.h" ]
@@ -52,7 +58,8 @@ rtc_library("field_trial_based_config") {
     "field_trial_based_config.h",
   ]
   deps = [
-    "../../api:field_trials_view",
+    "../../api:field_trials_registry",
+    "../../rtc_base/system:rtc_export",
     "../../system_wrappers:field_trial",
   ]
   absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
@@ -101,10 +108,11 @@ rtc_source_set("stun_types") {
     "../../rtc_base:byte_buffer",
     "../../rtc_base:byte_order",
     "../../rtc_base:checks",
+    "../../rtc_base:crc32",
     "../../rtc_base:ip_address",
     "../../rtc_base:logging",
-    "../../rtc_base:rtc_base",
     "../../rtc_base:socket_address",
+    "../../rtc_base:ssl",
     "../../system_wrappers:metrics",
   ]
   absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
@@ -141,7 +149,6 @@ if (rtc_include_tests) {
     sources = [ "stun_unittest.cc" ]
     deps = [
       ":stun_types",
-      "../../rtc_base",
       "../../rtc_base:byte_buffer",
       "../../rtc_base:byte_order",
       "../../rtc_base:macromagic",
@@ -155,6 +162,7 @@ if (rtc_include_tests) {
 
 if (rtc_include_tests) {
   rtc_source_set("mock_network_control") {
+    visibility = [ "*" ]
     testonly = true
     sources = [ "test/mock_network_control.h" ]
     deps = [

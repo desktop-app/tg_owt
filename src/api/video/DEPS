@@ -1,11 +1,9 @@
 specific_include_rules = {
-  # Until the new VideoStreamDecoder is implemented the current decoding
-  # pipeline will be used, and therefore EncodedFrame needs to inherit
-  # VCMEncodedFrame.
-  "encoded_frame.h": [
-    "+modules/video_coding/encoded_frame.h",
+  "encoded_frame.h" : [
+    "+modules/rtp_rtcp/source/rtp_video_header.h",
+    "+modules/video_coding/include/video_codec_interface.h",
+    "+modules/video_coding/include/video_coding_defines.h",
   ],
-
   "encoded_image\.h" : [
     "+rtc_base/ref_count.h",
   ],
@@ -15,6 +13,10 @@ specific_include_rules = {
   ],
 
   "i210_buffer\.h": [
+    "+rtc_base/memory/aligned_malloc.h",
+  ],
+
+  "i410_buffer\.h": [
     "+rtc_base/memory/aligned_malloc.h",
   ],
 
@@ -43,6 +45,12 @@ specific_include_rules = {
 
   "video_frame_buffer\.h": [
     "+rtc_base/ref_count.h",
+  ],
+
+  "video_frame_metadata\.h": [
+    "+modules/video_coding/codecs/h264/include/h264_globals.h",
+    "+modules/video_coding/codecs/vp8/include/vp8_globals.h",
+    "+modules/video_coding/codecs/vp9/include/vp9_globals.h",
   ],
 
   "video_stream_decoder_create.cc": [

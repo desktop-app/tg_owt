@@ -12,13 +12,12 @@
 #ifndef SDK_OBJC_FRAMEWORK_CLASSES_VIDEOTOOLBOX_NALU_REWRITER_H_
 #define SDK_OBJC_FRAMEWORK_CLASSES_VIDEOTOOLBOX_NALU_REWRITER_H_
 
-#include "modules/video_coding/codecs/h264/include/h264.h"
-
 #include <CoreMedia/CoreMedia.h>
+
 #include <vector>
 
 #include "common_video/h264/h264_common.h"
-#include "common_video/h265/h265_common.h"
+#include "modules/video_coding/codecs/h264/include/h264.h"
 #include "rtc_base/buffer.h"
 
 using webrtc::H264::NaluIndex;
@@ -44,35 +43,12 @@ bool H264AnnexBBufferToCMSampleBuffer(const uint8_t* annexb_buffer,
                                       CMSampleBufferRef* out_sample_buffer,
                                       CMMemoryPoolRef memory_pool);
 
-bool H265CMSampleBufferToAnnexBBuffer(
-    CMSampleBufferRef hvcc_sample_buffer,
-    bool is_keyframe,
-    rtc::Buffer* annexb_buffer)
-    __OSX_AVAILABLE_STARTING(__MAC_10_12, __IPHONE_11_0);
-
- // Converts a buffer received from RTP into a sample buffer suitable for the
-// VideoToolbox decoder. The RTP buffer is in annex b format whereas the sample
-// buffer is in hvcc format.
-// If |is_keyframe| is true then |video_format| is ignored since the format will
-// be read from the buffer. Otherwise |video_format| must be provided.
-// Caller is responsible for releasing the created sample buffer.
-bool H265AnnexBBufferToCMSampleBuffer(const uint8_t* annexb_buffer,
-                                      size_t annexb_buffer_size,
-                                      CMVideoFormatDescriptionRef video_format,
-                                      CMSampleBufferRef* out_sample_buffer)
-    __OSX_AVAILABLE_STARTING(__MAC_10_12, __IPHONE_11_0);
-
 // Returns a video format description created from the sps/pps information in
 // the Annex B buffer. If there is no such information, nullptr is returned.
 // The caller is responsible for releasing the description.
 CMVideoFormatDescriptionRef CreateVideoFormatDescription(
     const uint8_t* annexb_buffer,
     size_t annexb_buffer_size);
-
-CMVideoFormatDescriptionRef CreateH265VideoFormatDescription(
-    const uint8_t* annexb_buffer,
-    size_t annexb_buffer_size)
-    __OSX_AVAILABLE_STARTING(__MAC_10_12, __IPHONE_11_0);
 
 // Helper class for reading NALUs from an RTP Annex B buffer.
 class AnnexBBufferReader final {
@@ -98,7 +74,6 @@ class AnnexBBufferReader final {
   // Return true if a NALU of the desired type is found, false if we
   // reached the end instead
   bool SeekToNextNaluOfType(H264::NaluType type);
-  bool SeekToNextNaluOfType(H265::NaluType type);
 
  private:
   // Returns the the next offset that contains NALU data.

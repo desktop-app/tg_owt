@@ -16,9 +16,7 @@
 #include "absl/strings/string_view.h"
 #include "api/rtc_event_log/rtc_event_log_factory.h"
 #include "api/rtc_event_log_output_file.h"
-#include "api/task_queue/default_task_queue_factory.h"
 #include "api/task_queue/task_queue_base.h"
-#include "api/task_queue/task_queue_factory.h"
 #include "api/test/metrics/global_metrics_logger_and_exporter.h"
 #include "api/test/metrics/metric.h"
 #include "call/fake_network_pipe.h"
@@ -30,6 +28,7 @@
 #include "rtc_base/time_utils.h"
 #include "test/encoder_settings.h"
 #include "test/gtest.h"
+#include "test/video_test_constants.h"
 
 ABSL_FLAG(std::string,
           ramp_dump_name,
@@ -65,12 +64,11 @@ RampUpTester::RampUpTester(size_t num_video_streams,
                            size_t num_flexfec_streams,
                            unsigned int start_bitrate_bps,
                            int64_t min_run_time_ms,
-                           absl::string_view extension_type,
                            bool rtx,
                            bool red,
                            bool report_perf_stats,
                            TaskQueueBase* task_queue)
-    : EndToEndTest(test::CallTest::kLongTimeout),
+    : EndToEndTest(test::VideoTestConstants::kLongTimeout),
       clock_(Clock::GetRealTimeClock()),
       num_video_streams_(num_video_streams),
       num_audio_streams_(num_audio_streams),
@@ -87,7 +85,6 @@ RampUpTester::RampUpTester(size_t num_video_streams,
       expected_bitrate_bps_(0),
       test_start_ms_(-1),
       ramp_up_finished_ms_(-1),
-      extension_type_(extension_type),
       video_ssrcs_(GenerateSsrcs(num_video_streams_, 100)),
       video_rtx_ssrcs_(GenerateSsrcs(num_video_streams_, 200)),
       audio_ssrcs_(GenerateSsrcs(num_audio_streams_, 300)),
@@ -113,18 +110,8 @@ void RampUpTester::OnVideoStreamsCreated(
   send_stream_ = send_stream;
 }
 
-std::unique_ptr<test::PacketTransport> RampUpTester::CreateSendTransport(
-    TaskQueueBase* task_queue,
-    Call* sender_call) {
-  auto network = std::make_unique<SimulatedNetwork>(forward_transport_config_);
-  send_simulated_network_ = network.get();
-  auto send_transport = std::make_unique<test::PacketTransport>(
-      task_queue, sender_call, this, test::PacketTransport::kSender,
-      test::CallTest::payload_type_map_,
-      std::make_unique<FakeNetworkPipe>(Clock::GetRealTimeClock(),
-                                        std::move(network)));
-  send_transport_ = send_transport.get();
-  return send_transport;
+BuiltInNetworkBehaviorConfig RampUpTester::GetSendTransportConfig() const {
+  return forward_transport_config_;
 }
 
 size_t RampUpTester::GetNumVideoStreams() const {
@@ -175,8 +162,8 @@ void RampUpTester::ModifyVideoConfigs(
     send_config->rtp.payload_name = "VP8";
     encoder_config->codec_type = kVideoCodecVP8;
     std::vector<VideoStream> streams = test::CreateVideoStreams(
-        test::CallTest::kDefaultWidth, test::CallTest::kDefaultHeight,
-        *encoder_config);
+        test::VideoTestConstants::kDefaultWidth,
+        test::VideoTestConstants::kDefaultHeight, *encoder_config);
     // For multi stream rampup until all streams are being sent. That means
     // enough bitrate to send all the target streams plus the min bitrate of
     // the last one.
@@ -186,43 +173,27 @@ void RampUpTester::ModifyVideoConfigs(
     }
   }
 
-  send_config->rtp.extensions.clear();
-
-  bool transport_cc;
-  if (extension_type_ == RtpExtension::kAbsSendTimeUri) {
-    transport_cc = false;
-    send_config->rtp.extensions.push_back(
-        RtpExtension(extension_type_.c_str(), kAbsSendTimeExtensionId));
-  } else if (extension_type_ == RtpExtension::kTransportSequenceNumberUri) {
-    transport_cc = true;
-    send_config->rtp.extensions.push_back(RtpExtension(
-        extension_type_.c_str(), kTransportSequenceNumberExtensionId));
-  } else {
-    transport_cc = false;
-    send_config->rtp.extensions.push_back(RtpExtension(
-        extension_type_.c_str(), kTransmissionTimeOffsetExtensionId));
-  }
-
-  send_config->rtp.nack.rtp_history_ms = test::CallTest::kNackRtpHistoryMs;
+  send_config->rtp.nack.rtp_history_ms =
+      test::VideoTestConstants::kNackRtpHistoryMs;
   send_config->rtp.ssrcs = video_ssrcs_;
   if (rtx_) {
-    send_config->rtp.rtx.payload_type = test::CallTest::kSendRtxPayloadType;
+    send_config->rtp.rtx.payload_type =
+        test::VideoTestConstants::kSendRtxPayloadType;
     send_config->rtp.rtx.ssrcs = video_rtx_ssrcs_;
   }
   if (red_) {
     send_config->rtp.ulpfec.ulpfec_payload_type =
-        test::CallTest::kUlpfecPayloadType;
-    send_config->rtp.ulpfec.red_payload_type = test::CallTest::kRedPayloadType;
+        test::VideoTestConstants::kUlpfecPayloadType;
+    send_config->rtp.ulpfec.red_payload_type =
+        test::VideoTestConstants::kRedPayloadType;
     if (rtx_) {
       send_config->rtp.ulpfec.red_rtx_payload_type =
-          test::CallTest::kRtxRedPayloadType;
+          test::VideoTestConstants::kRtxRedPayloadType;
     }
   }
 
   size_t i = 0;
   for (VideoReceiveStreamInterface::Config& recv_config : *receive_configs) {
-    recv_config.rtp.transport_cc = transport_cc;
-    recv_config.rtp.extensions = send_config->rtp.extensions;
     recv_config.decoders.reserve(1);
     recv_config.decoders[0].payload_type = send_config->rtp.payload_type;
     recv_config.decoders[0].video_format =
@@ -254,8 +225,9 @@ void RampUpTester::ModifyVideoConfigs(
 
   RTC_DCHECK_LE(num_flexfec_streams_, 1);
   if (num_flexfec_streams_ == 1) {
-    send_config->rtp.flexfec.payload_type = test::CallTest::kFlexfecPayloadType;
-    send_config->rtp.flexfec.ssrc = test::CallTest::kFlexfecSendSsrc;
+    send_config->rtp.flexfec.payload_type =
+        test::VideoTestConstants::kFlexfecPayloadType;
+    send_config->rtp.flexfec.ssrc = test::VideoTestConstants::kFlexfecSendSsrc;
     send_config->rtp.flexfec.protected_media_ssrcs = {video_ssrcs_[0]};
   }
 }
@@ -266,27 +238,11 @@ void RampUpTester::ModifyAudioConfigs(
   if (num_audio_streams_ == 0)
     return;
 
-  EXPECT_NE(RtpExtension::kTimestampOffsetUri, extension_type_)
-      << "Audio BWE not supported with toffset.";
-  EXPECT_NE(RtpExtension::kAbsSendTimeUri, extension_type_)
-      << "Audio BWE not supported with abs-send-time.";
-
   send_config->rtp.ssrc = audio_ssrcs_[0];
-  send_config->rtp.extensions.clear();
-
   send_config->min_bitrate_bps = 6000;
   send_config->max_bitrate_bps = 60000;
 
-  bool transport_cc = false;
-  if (extension_type_ == RtpExtension::kTransportSequenceNumberUri) {
-    transport_cc = true;
-    send_config->rtp.extensions.push_back(RtpExtension(
-        extension_type_.c_str(), kTransportSequenceNumberExtensionId));
-  }
-
   for (AudioReceiveStreamInterface::Config& recv_config : *receive_configs) {
-    recv_config.rtp.transport_cc = transport_cc;
-    recv_config.rtp.extensions = send_config->rtp.extensions;
     recv_config.rtp.remote_ssrc = send_config->rtp.ssrc;
   }
 }
@@ -296,19 +252,12 @@ void RampUpTester::ModifyFlexfecConfigs(
   if (num_flexfec_streams_ == 0)
     return;
   RTC_DCHECK_EQ(1, num_flexfec_streams_);
-  (*receive_configs)[0].payload_type = test::CallTest::kFlexfecPayloadType;
-  (*receive_configs)[0].rtp.remote_ssrc = test::CallTest::kFlexfecSendSsrc;
+  (*receive_configs)[0].payload_type =
+      test::VideoTestConstants::kFlexfecPayloadType;
+  (*receive_configs)[0].rtp.remote_ssrc =
+      test::VideoTestConstants::kFlexfecSendSsrc;
   (*receive_configs)[0].protected_media_ssrcs = {video_ssrcs_[0]};
   (*receive_configs)[0].rtp.local_ssrc = video_ssrcs_[0];
-  if (extension_type_ == RtpExtension::kAbsSendTimeUri) {
-    (*receive_configs)[0].rtp.transport_cc = false;
-    (*receive_configs)[0].rtp.extensions.push_back(
-        RtpExtension(extension_type_.c_str(), kAbsSendTimeExtensionId));
-  } else if (extension_type_ == RtpExtension::kTransportSequenceNumberUri) {
-    (*receive_configs)[0].rtp.transport_cc = true;
-    (*receive_configs)[0].rtp.extensions.push_back(RtpExtension(
-        extension_type_.c_str(), kTransportSequenceNumberExtensionId));
-  }
 }
 
 void RampUpTester::OnCallsCreated(Call* sender_call, Call* receiver_call) {
@@ -318,6 +267,17 @@ void RampUpTester::OnCallsCreated(Call* sender_call, Call* receiver_call) {
     PollStats();
     return kPollInterval;
   });
+}
+
+void RampUpTester::OnTransportCreated(
+    test::PacketTransport* to_receiver,
+    SimulatedNetworkInterface* sender_network,
+    test::PacketTransport* to_sender,
+    SimulatedNetworkInterface* receiver_network) {
+  RTC_DCHECK_RUN_ON(task_queue_);
+
+  send_transport_ = to_receiver;
+  send_simulated_network_ = sender_network;
 }
 
 void RampUpTester::PollStats() {
@@ -367,7 +327,7 @@ void RampUpTester::TriggerTestDone() {
   RTC_DCHECK_GE(test_start_ms_, 0);
 
   // Stop polling stats.
-  // Corner case for field_trials=WebRTC-QuickPerfTest/Enabled/
+  // Corner case for webrtc_quick_perf_test
   SendTask(task_queue_, [this] { pending_task_.Stop(); });
 
   // TODO(holmer): Add audio send stats here too when those APIs are available.
@@ -426,7 +386,6 @@ RampUpDownUpTester::RampUpDownUpTester(size_t num_video_streams,
                                        size_t num_audio_streams,
                                        size_t num_flexfec_streams,
                                        unsigned int start_bitrate_bps,
-                                       absl::string_view extension_type,
                                        bool rtx,
                                        bool red,
                                        const std::vector<int>& loss_rates,
@@ -437,7 +396,6 @@ RampUpDownUpTester::RampUpDownUpTester(size_t num_video_streams,
                    num_flexfec_streams,
                    start_bitrate_bps,
                    0,
-                   extension_type,
                    rtx,
                    red,
                    report_perf_stats,
@@ -605,30 +563,29 @@ void RampUpDownUpTester::EvolveTestState(int bitrate_bps, bool suspended) {
 
 class RampUpTest : public test::CallTest {
  public:
-  RampUpTest()
-      : task_queue_factory_(CreateDefaultTaskQueueFactory()),
-        rtc_event_log_factory_(task_queue_factory_.get()) {
+  RampUpTest() {
     std::string dump_name(absl::GetFlag(FLAGS_ramp_dump_name));
     if (!dump_name.empty()) {
-      send_event_log_ = rtc_event_log_factory_.CreateRtcEventLog(
-          RtcEventLog::EncodingType::Legacy);
-      recv_event_log_ = rtc_event_log_factory_.CreateRtcEventLog(
-          RtcEventLog::EncodingType::Legacy);
+      std::unique_ptr<RtcEventLog> send_event_log =
+          rtc_event_log_factory_.Create(env());
+      std::unique_ptr<RtcEventLog> recv_event_log =
+          rtc_event_log_factory_.Create(env());
       bool event_log_started =
-          send_event_log_->StartLogging(
+          send_event_log->StartLogging(
               std::make_unique<RtcEventLogOutputFile>(
                   dump_name + ".send.rtc.dat", RtcEventLog::kUnlimitedOutput),
               RtcEventLog::kImmediateOutput) &&
-          recv_event_log_->StartLogging(
+          recv_event_log->StartLogging(
               std::make_unique<RtcEventLogOutputFile>(
                   dump_name + ".recv.rtc.dat", RtcEventLog::kUnlimitedOutput),
               RtcEventLog::kImmediateOutput);
       RTC_DCHECK(event_log_started);
+      SetSendEventLog(std::move(send_event_log));
+      SetRecvEventLog(std::move(recv_event_log));
     }
   }
 
  private:
-  const std::unique_ptr<TaskQueueFactory> task_queue_factory_;
   RtcEventLogFactory rtc_event_log_factory_;
 };
 
@@ -636,8 +593,9 @@ static const uint32_t kStartBitrateBps = 60000;
 
 TEST_F(RampUpTest, UpDownUpAbsSendTimeSimulcastRedRtx) {
   std::vector<int> loss_rates = {0, 0, 0, 0};
-  RampUpDownUpTester test(3, 0, 0, kStartBitrateBps,
-                          RtpExtension::kAbsSendTimeUri, true, true, loss_rates,
+  RegisterRtpExtension(
+      RtpExtension(RtpExtension::kAbsSendTimeUri, kAbsSendTimeExtensionId));
+  RampUpDownUpTester test(3, 0, 0, kStartBitrateBps, true, true, loss_rates,
                           true, task_queue());
   RunBaseTest(&test);
 }
@@ -652,9 +610,10 @@ TEST_F(RampUpTest, UpDownUpAbsSendTimeSimulcastRedRtx) {
 #endif
 TEST_F(RampUpTest, MAYBE_UpDownUpTransportSequenceNumberRtx) {
   std::vector<int> loss_rates = {0, 0, 0, 0};
-  RampUpDownUpTester test(3, 0, 0, kStartBitrateBps,
-                          RtpExtension::kTransportSequenceNumberUri, true,
-                          false, loss_rates, true, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTransportSequenceNumberUri,
+                                    kTransportSequenceNumberExtensionId));
+  RampUpDownUpTester test(3, 0, 0, kStartBitrateBps, true, false, loss_rates,
+                          true, task_queue());
   RunBaseTest(&test);
 }
 
@@ -664,9 +623,10 @@ TEST_F(RampUpTest, MAYBE_UpDownUpTransportSequenceNumberRtx) {
 // platforms. See: crbug.com/webrtc/7919
 TEST_F(RampUpTest, DISABLED_UpDownUpTransportSequenceNumberPacketLoss) {
   std::vector<int> loss_rates = {20, 0, 0, 0};
-  RampUpDownUpTester test(1, 0, 1, kStartBitrateBps,
-                          RtpExtension::kTransportSequenceNumberUri, true,
-                          false, loss_rates, false, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTransportSequenceNumberUri,
+                                    kTransportSequenceNumberExtensionId));
+  RampUpDownUpTester test(1, 0, 1, kStartBitrateBps, true, false, loss_rates,
+                          false, task_queue());
   RunBaseTest(&test);
 }
 
@@ -680,60 +640,68 @@ TEST_F(RampUpTest, DISABLED_UpDownUpTransportSequenceNumberPacketLoss) {
 #endif
 TEST_F(RampUpTest, MAYBE_UpDownUpAudioVideoTransportSequenceNumberRtx) {
   std::vector<int> loss_rates = {0, 0, 0, 0};
-  RampUpDownUpTester test(3, 1, 0, kStartBitrateBps,
-                          RtpExtension::kTransportSequenceNumberUri, true,
-                          false, loss_rates, false, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTransportSequenceNumberUri,
+                                    kTransportSequenceNumberExtensionId));
+  RampUpDownUpTester test(3, 1, 0, kStartBitrateBps, true, false, loss_rates,
+                          false, task_queue());
   RunBaseTest(&test);
 }
 
 TEST_F(RampUpTest, UpDownUpAudioTransportSequenceNumberRtx) {
   std::vector<int> loss_rates = {0, 0, 0, 0};
-  RampUpDownUpTester test(0, 1, 0, kStartBitrateBps,
-                          RtpExtension::kTransportSequenceNumberUri, true,
-                          false, loss_rates, false, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTransportSequenceNumberUri,
+                                    kTransportSequenceNumberExtensionId));
+  RampUpDownUpTester test(0, 1, 0, kStartBitrateBps, true, false, loss_rates,
+                          false, task_queue());
   RunBaseTest(&test);
 }
 
 TEST_F(RampUpTest, TOffsetSimulcastRedRtx) {
-  RampUpTester test(3, 0, 0, 0, 0, RtpExtension::kTimestampOffsetUri, true,
-                    true, true, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTimestampOffsetUri,
+                                    kTransmissionTimeOffsetExtensionId));
+  RampUpTester test(3, 0, 0, 0, 0, true, true, true, task_queue());
   RunBaseTest(&test);
 }
 
 TEST_F(RampUpTest, AbsSendTime) {
-  RampUpTester test(1, 0, 0, 0, 0, RtpExtension::kAbsSendTimeUri, false, false,
-                    false, task_queue());
+  RegisterRtpExtension(
+      RtpExtension(RtpExtension::kAbsSendTimeUri, kAbsSendTimeExtensionId));
+  RampUpTester test(1, 0, 0, 0, 0, false, false, false, task_queue());
   RunBaseTest(&test);
 }
 
 TEST_F(RampUpTest, AbsSendTimeSimulcastRedRtx) {
-  RampUpTester test(3, 0, 0, 0, 0, RtpExtension::kAbsSendTimeUri, true, true,
-                    true, task_queue());
+  RegisterRtpExtension(
+      RtpExtension(RtpExtension::kAbsSendTimeUri, kAbsSendTimeExtensionId));
+  RampUpTester test(3, 0, 0, 0, 0, true, true, true, task_queue());
   RunBaseTest(&test);
 }
 
 TEST_F(RampUpTest, TransportSequenceNumber) {
-  RampUpTester test(1, 0, 0, 0, 0, RtpExtension::kTransportSequenceNumberUri,
-                    false, false, false, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTransportSequenceNumberUri,
+                                    kTransportSequenceNumberExtensionId));
+  RampUpTester test(1, 0, 0, 0, 0, false, false, false, task_queue());
   RunBaseTest(&test);
 }
 
 TEST_F(RampUpTest, TransportSequenceNumberSimulcast) {
-  RampUpTester test(3, 0, 0, 0, 0, RtpExtension::kTransportSequenceNumberUri,
-                    false, false, false, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTransportSequenceNumberUri,
+                                    kTransportSequenceNumberExtensionId));
+  RampUpTester test(3, 0, 0, 0, 0, false, false, false, task_queue());
   RunBaseTest(&test);
 }
 
 TEST_F(RampUpTest, TransportSequenceNumberSimulcastRedRtx) {
-  RampUpTester test(3, 0, 0, 0, 0, RtpExtension::kTransportSequenceNumberUri,
-                    true, true, true, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTransportSequenceNumberUri,
+                                    kTransportSequenceNumberExtensionId));
+  RampUpTester test(3, 0, 0, 0, 0, true, true, true, task_queue());
   RunBaseTest(&test);
 }
 
 TEST_F(RampUpTest, AudioTransportSequenceNumber) {
-  RampUpTester test(0, 1, 0, 300000, 10000,
-                    RtpExtension::kTransportSequenceNumberUri, false, false,
-                    false, task_queue());
+  RegisterRtpExtension(RtpExtension(RtpExtension::kTransportSequenceNumberUri,
+                                    kTransportSequenceNumberExtensionId));
+  RampUpTester test(0, 1, 0, 300000, 10000, false, false, false, task_queue());
   RunBaseTest(&test);
 }
 

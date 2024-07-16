@@ -16,12 +16,14 @@
 #ifdef OPENBSD
 #include <netinet/in_systm.h>
 #endif
+#ifndef __native_client__
+#include <netinet/ip.h>
+#endif
 #include <netdb.h>
 #endif
 
-#include "rtc_base/ip_address.h"
-
 #include "rtc_base/byte_order.h"
+#include "rtc_base/ip_address.h"
 #include "rtc_base/net_helpers.h"
 #include "rtc_base/string_utils.h"
 

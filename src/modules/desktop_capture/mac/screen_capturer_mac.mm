@@ -439,6 +439,10 @@ void ScreenCapturerMac::ScreenConfigurationChanged() {
 
 bool ScreenCapturerMac::RegisterRefreshAndMoveHandlers() {
   RTC_DCHECK(thread_checker_.IsCurrent());
+  if (!desktop_frame_provider_.allow_iosurface()) {
+    return true;
+  }
+
   desktop_config_ = desktop_config_monitor_->desktop_configuration();
   for (const auto& config : desktop_config_.displays) {
     size_t pixel_width = config.pixel_bounds.width();
@@ -469,8 +473,8 @@ bool ScreenCapturerMac::RegisterRefreshAndMoveHandlers() {
 
     rtc::ScopedCFTypeRef<CFDictionaryRef> properties_dict(
         CFDictionaryCreate(kCFAllocatorDefault,
-                           (const void* []){kCGDisplayStreamShowCursor},
-                           (const void* []){kCFBooleanFalse},
+                           (const void*[]){kCGDisplayStreamShowCursor},
+                           (const void*[]){kCFBooleanFalse},
                            1,
                            &kCFTypeDictionaryKeyCallBacks,
                            &kCFTypeDictionaryValueCallBacks));

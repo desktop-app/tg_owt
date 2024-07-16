@@ -27,7 +27,9 @@ std::unique_ptr<SimulcastTestFixture> CreateSpecificSimulcastTestFixture() {
           []() { return VP8Encoder::Create(); });
   std::unique_ptr<VideoDecoderFactory> decoder_factory =
       std::make_unique<FunctionVideoDecoderFactory>(
-          []() { return VP8Decoder::Create(); });
+          [](const Environment& env, const SdpVideoFormat& format) {
+            return CreateVp8Decoder(env);
+          });
   return CreateSimulcastTestFixture(std::move(encoder_factory),
                                     std::move(decoder_factory),
                                     SdpVideoFormat("VP8"));
@@ -37,6 +39,10 @@ std::unique_ptr<SimulcastTestFixture> CreateSpecificSimulcastTestFixture() {
 TEST(LibvpxVp8SimulcastTest, TestKeyFrameRequestsOnAllStreams) {
   auto fixture = CreateSpecificSimulcastTestFixture();
   fixture->TestKeyFrameRequestsOnAllStreams();
+}
+
+TEST(LibvpxVp8SimulcastTest, TestKeyFrameRequestsOnSpecificStreams) {
+  GTEST_SKIP() << "Not applicable to VP8.";
 }
 
 TEST(LibvpxVp8SimulcastTest, TestPaddingAllStreams) {

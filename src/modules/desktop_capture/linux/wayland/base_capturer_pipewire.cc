@@ -13,10 +13,12 @@
 #include "modules/desktop_capture/desktop_capture_options.h"
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/linux/wayland/restore_token_manager.h"
-#include "modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.h"
+#include "modules/portal/pipewire_utils.h"
+#include "modules/portal/xdg_desktop_portal_utils.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "screencast_portal.h"
+#include "rtc_base/time_utils.h"
+#include "rtc_base/trace_event.h"
 
 namespace webrtc {
 
@@ -27,6 +29,18 @@ using xdg_portal::ScreenCapturePortalInterface;
 using xdg_portal::SessionDetails;
 
 }  // namespace
+
+// static
+bool BaseCapturerPipeWire::IsSupported() {
+  // Unfortunately, the best way we have to check if PipeWire is available is
+  // to try to initialize it.
+  // InitializePipeWire should prevent us from repeatedly initializing PipeWire,
+  // but we also don't really expect support to change without the application
+  // restarting.
+  static bool supported =
+      DesktopCapturer::IsRunningUnderWayland() && InitializePipeWire();
+  return supported;
+}
 
 BaseCapturerPipeWire::BaseCapturerPipeWire(const DesktopCaptureOptions& options,
                                            CaptureType type)
@@ -42,6 +56,8 @@ BaseCapturerPipeWire::BaseCapturerPipeWire(
       is_screencast_portal_(false),
       portal_(std::move(portal)) {
   source_id_ = RestoreTokenManager::GetInstance().GetUnusedId();
+  options_.screencast_stream()->SetUseDamageRegion(
+      options_.pipewire_use_damage_region());
 }
 
 BaseCapturerPipeWire::~BaseCapturerPipeWire() {
@@ -58,14 +74,18 @@ void BaseCapturerPipeWire::OnScreenCastRequestResult(RequestResponse result,
   capturer_failed_ = false;
   if (result != RequestResponse::kSuccess ||
       !options_.screencast_stream()->StartScreenCastStream(
-          stream_node_id, fd, options_.get_width(), options_.get_height())) {
+          stream_node_id, fd, options_.get_width(), options_.get_height(),
+          options_.prefer_cursor_embedded(),
+          send_frames_immediately_ ? callback_ : nullptr)) {
     capturer_failed_ = true;
     RTC_LOG(LS_ERROR) << "ScreenCastPortal failed: "
                       << static_cast<uint>(result);
   } else if (ScreenCastPortal* screencast_portal = GetScreenCastPortal()) {
     if (!screencast_portal->RestoreToken().empty()) {
+      const SourceId token_id =
+          selected_source_id_ ? selected_source_id_ : source_id_;
       RestoreTokenManager::GetInstance().AddToken(
-          source_id_, screencast_portal->RestoreToken());
+          token_id, screencast_portal->RestoreToken());
     }
   }
 
@@ -101,6 +121,13 @@ void BaseCapturerPipeWire::UpdateResolution(uint32_t width, uint32_t height) {
   }
 }
 
+void BaseCapturerPipeWire::SetMaxFrameRate(uint32_t max_frame_rate) {
+  if (!capturer_failed_) {
+    options_.screencast_stream()->UpdateScreenCastStreamFrameRate(
+        max_frame_rate);
+  }
+}
+
 void BaseCapturerPipeWire::Start(Callback* callback) {
   RTC_DCHECK(!callback_);
   RTC_DCHECK(callback);
@@ -112,7 +139,7 @@ void BaseCapturerPipeWire::Start(Callback* callback) {
         ScreenCastPortal::PersistMode::kTransient);
     if (selected_source_id_) {
       screencast_portal->SetRestoreToken(
-          RestoreTokenManager::GetInstance().TakeToken(selected_source_id_));
+          RestoreTokenManager::GetInstance().GetToken(selected_source_id_));
     }
   }
 
@@ -121,6 +148,7 @@ void BaseCapturerPipeWire::Start(Callback* callback) {
 }
 
 void BaseCapturerPipeWire::CaptureFrame() {
+  TRACE_EVENT0("webrtc", "BaseCapturerPipeWire::CaptureFrame");
   if (capturer_failed_) {
     // This could be recoverable if the source list is re-summoned; but for our
     // purposes this is fine, since it requires intervention to resolve and
@@ -129,6 +157,7 @@ void BaseCapturerPipeWire::CaptureFrame() {
     return;
   }
 
+  int64_t capture_start_time_nanos = rtc::TimeNanos();
   std::unique_ptr<DesktopFrame> frame =
       options_.screencast_stream()->CaptureFrame();
 
@@ -141,6 +170,8 @@ void BaseCapturerPipeWire::CaptureFrame() {
   // the frame, see ScreenCapturerX11::CaptureFrame.
 
   frame->set_capturer_id(DesktopCapturerId::kWaylandCapturerLinux);
+  frame->set_capture_time_ms((rtc::TimeNanos() - capture_start_time_nanos) /
+                             rtc::kNumNanosecsPerMillisec);
   callback_->OnCaptureResult(Result::SUCCESS, std::move(frame));
 }
 
@@ -204,6 +235,10 @@ SessionDetails BaseCapturerPipeWire::GetSessionDetails() {
 ScreenCastPortal* BaseCapturerPipeWire::GetScreenCastPortal() {
   return is_screencast_portal_ ? static_cast<ScreenCastPortal*>(portal_.get())
                                : nullptr;
+}
+
+void BaseCapturerPipeWire::SendFramesImmediately(bool send_frames_immediately) {
+  send_frames_immediately_ = send_frames_immediately;
 }
 
 }  // namespace webrtc

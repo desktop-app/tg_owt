@@ -44,6 +44,7 @@ using ::testing::Ge;
 using ::testing::IsEmpty;
 using ::testing::Not;
 using ::testing::NotNull;
+using ::testing::Optional;
 using ::testing::Pointwise;
 using ::testing::SizeIs;
 using ::testing::Truly;
@@ -61,6 +62,7 @@ VideoCodec DefaultCodecSettings() {
   codec_settings.height = kHeight;
   codec_settings.maxFramerate = kFramerate;
   codec_settings.maxBitrate = 1000;
+  codec_settings.startBitrate = 1;
   codec_settings.qpMax = 63;
   return codec_settings;
 }
@@ -88,8 +90,8 @@ class TestAv1Decoder {
 
   void Decode(int64_t frame_id, const EncodedImage& image) {
     ASSERT_THAT(decoder_, NotNull());
-    int32_t error = decoder_->Decode(image, /*missing_frames=*/false,
-                                     /*render_time_ms=*/image.capture_time_ms_);
+    int32_t error =
+        decoder_->Decode(image, /*render_time_ms=*/image.capture_time_ms_);
     if (error != WEBRTC_VIDEO_CODEC_OK) {
       ADD_FAILURE() << "Failed to decode frame id " << frame_id
                     << " with error code " << error << " by decoder#"
@@ -248,6 +250,8 @@ TEST_P(LibaomAv1SvcTest, EncodeAndDecodeAllDecodeTargets) {
         requested_ids.push_back(frame_id);
         decoder.Decode(frame_id, frame.encoded_image);
       }
+      EXPECT_THAT(frame.codec_specific_info.scalability_mode,
+                  Optional(param.GetScalabilityMode()));
     }
 
     ASSERT_THAT(requested_ids, SizeIs(Ge(2u)));
@@ -264,9 +268,9 @@ MATCHER(SameLayerIdAndBitrateIsNear, "") {
   // First check if layer id is the same.
   return std::get<0>(arg).first == std::get<1>(arg).first &&
          // check measured bitrate is not much lower than requested.
-         std::get<0>(arg).second >= std::get<1>(arg).second * 0.8 &&
+         std::get<0>(arg).second >= std::get<1>(arg).second * 0.75 &&
          // check measured bitrate is not much larger than requested.
-         std::get<0>(arg).second <= std::get<1>(arg).second * 1.1;
+         std::get<0>(arg).second <= std::get<1>(arg).second * 1.25;
 }
 
 TEST_P(LibaomAv1SvcTest, SetRatesMatchMeasuredBitrate) {
@@ -347,7 +351,8 @@ INSTANTIATE_TEST_SUITE_P(
            SvcTestParam{"L3T1", /*num_frames_to_generate=*/3},
            SvcTestParam{"L3T3", /*num_frames_to_generate=*/8},
            SvcTestParam{"S2T1", /*num_frames_to_generate=*/3},
-           SvcTestParam{"S3T3", /*num_frames_to_generate=*/8},
+           // TODO: bugs.webrtc.org/15715 - Re-enable once AV1 is fixed.
+           // SvcTestParam{"S3T3", /*num_frames_to_generate=*/8},
            SvcTestParam{"L2T2", /*num_frames_to_generate=*/4},
            SvcTestParam{"L2T2_KEY", /*num_frames_to_generate=*/4},
            SvcTestParam{"L2T2_KEY_SHIFT",

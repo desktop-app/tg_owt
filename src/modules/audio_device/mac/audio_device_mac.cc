@@ -11,8 +11,8 @@
 #include "modules/audio_device/mac/audio_device_mac.h"
 
 #include <ApplicationServices/ApplicationServices.h>
-#include <mach/mach.h>         // mach_task_self()
-#include <sys/sysctl.h>        // sysctlbyname()
+#include <mach/mach.h>   // mach_task_self()
+#include <sys/sysctl.h>  // sysctlbyname()
 
 #include <memory>
 
@@ -831,16 +831,12 @@ int32_t AudioDeviceMac::PlayoutDeviceName(uint16_t index,
 
   memset(name, 0, kAdmMaxDeviceNameSize);
 
-  char noguid[kAdmMaxGuidSize];
   if (guid != NULL) {
     memset(guid, 0, kAdmMaxGuidSize);
-  } else {
-    memset(noguid, 0, kAdmMaxGuidSize);
   }
 
   return GetDeviceName(kAudioDevicePropertyScopeOutput, index,
-                       rtc::ArrayView<char>(name, kAdmMaxDeviceNameSize),
-                       rtc::ArrayView<char>(guid ? guid : noguid, kAdmMaxGuidSize));
+                       rtc::ArrayView<char>(name, kAdmMaxDeviceNameSize));
 }
 
 int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
@@ -854,16 +850,12 @@ int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
 
   memset(name, 0, kAdmMaxDeviceNameSize);
 
-  char noguid[kAdmMaxGuidSize];
   if (guid != NULL) {
     memset(guid, 0, kAdmMaxGuidSize);
-  } else {
-    memset(noguid, 0, kAdmMaxGuidSize);
   }
 
   return GetDeviceName(kAudioDevicePropertyScopeInput, index,
-                       rtc::ArrayView<char>(name, kAdmMaxDeviceNameSize),
-                       rtc::ArrayView<char>(guid ? guid : noguid, kAdmMaxGuidSize));
+                       rtc::ArrayView<char>(name, kAdmMaxDeviceNameSize));
 }
 
 int16_t AudioDeviceMac::RecordingDevices() {
@@ -1363,8 +1355,8 @@ int32_t AudioDeviceMac::StopRecording() {
     // rendering has ended before stopping itself.
     if (_recording && captureDeviceIsAlive == 1) {
       _recording = false;
-      _doStop = true;     // Signal to io proc to stop audio device
-      mutex_.Unlock();    // Cannot be under lock, risk of deadlock
+      _doStop = true;   // Signal to io proc to stop audio device
+      mutex_.Unlock();  // Cannot be under lock, risk of deadlock
       if (!_stopEvent.Wait(TimeDelta::Seconds(2))) {
         MutexLock lockScoped(&mutex_);
         RTC_LOG(LS_WARNING) << "Timed out stopping the shared IOProc."
@@ -1473,8 +1465,8 @@ int32_t AudioDeviceMac::StopPlayout() {
     // In the case of a shared device, the IOProc will verify capturing
     // has ended before stopping itself.
     _playing = false;
-    _doStop = true;     // Signal to io proc to stop audio device
-    mutex_.Unlock();    // Cannot be under lock, risk of deadlock
+    _doStop = true;   // Signal to io proc to stop audio device
+    mutex_.Unlock();  // Cannot be under lock, risk of deadlock
     if (!_stopEvent.Wait(TimeDelta::Seconds(2))) {
       MutexLock lockScoped(&mutex_);
       RTC_LOG(LS_WARNING) << "Timed out stopping the render IOProc."
@@ -1656,8 +1648,7 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
 
 int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
                                       const uint16_t index,
-                                      rtc::ArrayView<char> name,
-                                      rtc::ArrayView<char> guid) {
+                                      rtc::ArrayView<char> name) {
   OSStatus err = noErr;
   AudioDeviceID deviceIds[MaxNumberDevices];
 
@@ -1717,23 +1708,6 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
 
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(
         usedID, &propertyAddress, 0, NULL, &len, name.data()));
-  }
-
-  // Get UID
-  {
-    AudioObjectPropertyAddress propertyAddress = {kAudioDevicePropertyDeviceUID,
-                                                kAudioObjectPropertyScopeGlobal, 0};
-    CFStringRef uid = NULL;
-    UInt32 size = sizeof(uid);
-    WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(usedID, &propertyAddress,
-                                                       0, NULL, &size, &uid));
-
-    const CFIndex kCStringSize = kAdmMaxGuidSize;
-    CFStringGetCString(uid, guid.data(), kCStringSize, kCFStringEncodingUTF8);
-
-    if (uid) {
-      CFRelease(uid);
-    }
   }
 
   return 0;
@@ -2426,24 +2400,24 @@ bool AudioDeviceMac::RenderWorkerThread() {
   uint32_t nOutSamples = nSamples * _outDesiredFormat.mChannelsPerFrame;
 
   SInt16* pPlayBuffer = (SInt16*)&playBuffer;
-  // if (_macBookProPanRight && (_playChannels == 2)) {
-  //   // Mix entirely into the right channel and zero the left channel.
-  //   SInt32 sampleInt32 = 0;
-  //   for (uint32_t sampleIdx = 0; sampleIdx < nOutSamples; sampleIdx += 2) {
-  //     sampleInt32 = pPlayBuffer[sampleIdx];
-  //     sampleInt32 += pPlayBuffer[sampleIdx + 1];
-  //     sampleInt32 /= 2;
+  if (_macBookProPanRight && (_playChannels == 2)) {
+    // Mix entirely into the right channel and zero the left channel.
+    SInt32 sampleInt32 = 0;
+    for (uint32_t sampleIdx = 0; sampleIdx < nOutSamples; sampleIdx += 2) {
+      sampleInt32 = pPlayBuffer[sampleIdx];
+      sampleInt32 += pPlayBuffer[sampleIdx + 1];
+      sampleInt32 /= 2;
 
-  //     if (sampleInt32 > 32767) {
-  //       sampleInt32 = 32767;
-  //     } else if (sampleInt32 < -32768) {
-  //       sampleInt32 = -32768;
-  //     }
+      if (sampleInt32 > 32767) {
+        sampleInt32 = 32767;
+      } else if (sampleInt32 < -32768) {
+        sampleInt32 = -32768;
+      }
 
-  //     pPlayBuffer[sampleIdx] = 0;
-  //     pPlayBuffer[sampleIdx + 1] = static_cast<SInt16>(sampleInt32);
-  //   }
-  // }
+      pPlayBuffer[sampleIdx] = 0;
+      pPlayBuffer[sampleIdx + 1] = static_cast<SInt16>(sampleInt32);
+    }
+  }
 
   PaUtil_WriteRingBuffer(_paRenderBuffer, pPlayBuffer, nOutSamples);
 

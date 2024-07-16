@@ -50,7 +50,11 @@ class MockRtpTransportControllerSend
               DestroyRtpVideoSender,
               (RtpVideoSenderInterface*),
               (override));
-  MOCK_METHOD(MaybeWorkerThread*, GetWorkerQueue, (), (override));
+  MOCK_METHOD(void, RegisterSendingRtpStream, (RtpRtcpInterface&), (override));
+  MOCK_METHOD(void,
+              DeRegisterSendingRtpStream,
+              (RtpRtcpInterface&),
+              (override));
   MOCK_METHOD(PacketRouter*, packet_router, (), (override));
   MOCK_METHOD(NetworkStateEstimateObserver*,
               network_state_estimate_observer,
@@ -64,6 +68,10 @@ class MockRtpTransportControllerSend
   MOCK_METHOD(void,
               SetAllocatedSendBitrateLimits,
               (BitrateAllocationLimits),
+              (override));
+  MOCK_METHOD(void,
+              ReconfigureBandwidthEstimation,
+              (const BandwidthEstimationSettings&),
               (override));
   MOCK_METHOD(void, SetPacingFactor, (float), (override));
   MOCK_METHOD(void, SetQueueTimeLimit, (int), (override));
@@ -80,7 +88,7 @@ class MockRtpTransportControllerSend
               (absl::string_view, const rtc::NetworkRoute&),
               (override));
   MOCK_METHOD(void, OnNetworkAvailability, (bool), (override));
-  MOCK_METHOD(RtcpBandwidthObserver*, GetBandwidthObserver, (), (override));
+  MOCK_METHOD(NetworkLinkRtcpObserver*, GetRtcpObserver, (), (override));
   MOCK_METHOD(int64_t, GetPacerQueuingDelayMs, (), (const, override));
   MOCK_METHOD(absl::optional<Timestamp>,
               GetFirstPacketTime,

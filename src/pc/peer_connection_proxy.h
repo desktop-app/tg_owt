@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "api/peer_connection_interface.h"
+#include "api/transport/bandwidth_estimation_settings.h"
 #include "pc/proxy.h"
 
 namespace webrtc {
@@ -35,6 +36,11 @@ PROXY_METHOD2(RTCErrorOr<rtc::scoped_refptr<RtpSenderInterface>>,
               AddTrack,
               rtc::scoped_refptr<MediaStreamTrackInterface>,
               const std::vector<std::string>&)
+PROXY_METHOD3(RTCErrorOr<rtc::scoped_refptr<RtpSenderInterface>>,
+              AddTrack,
+              rtc::scoped_refptr<MediaStreamTrackInterface>,
+              const std::vector<std::string>&,
+              const std::vector<RtpEncodingParameters>&)
 PROXY_METHOD1(RTCError,
               RemoveTrackOrError,
               rtc::scoped_refptr<RtpSenderInterface>)
@@ -132,6 +138,9 @@ PROXY_METHOD2(void,
               std::function<void(RTCError)>)
 PROXY_METHOD1(bool, RemoveIceCandidates, const std::vector<cricket::Candidate>&)
 PROXY_METHOD1(RTCError, SetBitrate, const BitrateSettings&)
+PROXY_METHOD1(void,
+              ReconfigureBandwidthEstimation,
+              const BandwidthEstimationSettings&)
 PROXY_METHOD1(void, SetAudioPlayout, bool)
 PROXY_METHOD1(void, SetAudioRecording, bool)
 // This method will be invoked on the network thread. See

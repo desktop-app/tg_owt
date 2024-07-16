@@ -32,7 +32,6 @@
 @synthesize tcpCandidatePolicy = _tcpCandidatePolicy;
 @synthesize candidateNetworkPolicy = _candidateNetworkPolicy;
 @synthesize continualGatheringPolicy = _continualGatheringPolicy;
-@synthesize disableIPV6 = _disableIPV6;
 @synthesize disableIPV6OnWiFi = _disableIPV6OnWiFi;
 @synthesize maxIPv6Networks = _maxIPv6Networks;
 @synthesize disableLinkLocalNetworks = _disableLinkLocalNetworks;
@@ -52,7 +51,6 @@
 @synthesize sdpSemantics = _sdpSemantics;
 @synthesize turnCustomizer = _turnCustomizer;
 @synthesize activeResetSrtpParams = _activeResetSrtpParams;
-@synthesize allowCodecSwitching = _allowCodecSwitching;
 @synthesize cryptoOptions = _cryptoOptions;
 @synthesize turnLoggingId = _turnLoggingId;
 @synthesize rtcpAudioReportIntervalMs = _rtcpAudioReportIntervalMs;
@@ -103,9 +101,7 @@
         candidateNetworkPolicyForNativePolicy:config.candidate_network_policy];
     webrtc::PeerConnectionInterface::ContinualGatheringPolicy nativePolicy =
     config.continual_gathering_policy;
-    _continualGatheringPolicy =
-        [[self class] continualGatheringPolicyForNativePolicy:nativePolicy];
-    _disableIPV6 = config.disable_ipv6;
+    _continualGatheringPolicy = [[self class] continualGatheringPolicyForNativePolicy:nativePolicy];
     _disableIPV6OnWiFi = config.disable_ipv6_on_wifi;
     _maxIPv6Networks = config.max_ipv6_networks;
     _disableLinkLocalNetworks = config.disable_link_local_networks;
@@ -142,7 +138,6 @@
     _turnLoggingId = [NSString stringWithUTF8String:config.turn_logging_id.c_str()];
     _rtcpAudioReportIntervalMs = config.audio_rtcp_report_interval_ms();
     _rtcpVideoReportIntervalMs = config.video_rtcp_report_interval_ms();
-    _allowCodecSwitching = config.allow_codec_switching.value_or(false);
     _enableImplicitRollback = config.enable_implicit_rollback;
     _offerExtmapAllowMixed = config.offer_extmap_allow_mixed;
     _iceCheckIntervalStrongConnectivity =
@@ -190,7 +185,6 @@
                        _shouldSurfaceIceCandidatesOnIceTransportTypeChanged,
                        _iceCheckMinInterval,
                        _disableLinkLocalNetworks,
-                       _disableIPV6,
                        _disableIPV6OnWiFi,
                        _maxIPv6Networks,
                        _activeResetSrtpParams,
@@ -220,9 +214,8 @@
       [[self class] nativeTcpCandidatePolicyForPolicy:_tcpCandidatePolicy];
   nativeConfig->candidate_network_policy = [[self class]
       nativeCandidateNetworkPolicyForPolicy:_candidateNetworkPolicy];
-  nativeConfig->continual_gathering_policy = [[self class]
-      nativeContinualGatheringPolicyForPolicy:_continualGatheringPolicy];
-  nativeConfig->disable_ipv6 = _disableIPV6;
+  nativeConfig->continual_gathering_policy =
+      [[self class] nativeContinualGatheringPolicyForPolicy:_continualGatheringPolicy];
   nativeConfig->disable_ipv6_on_wifi = _disableIPV6OnWiFi;
   nativeConfig->max_ipv6_networks = _maxIPv6Networks;
   nativeConfig->disable_link_local_networks = _disableLinkLocalNetworks;
@@ -291,7 +284,6 @@
   nativeConfig->turn_logging_id = [_turnLoggingId UTF8String];
   nativeConfig->set_audio_rtcp_report_interval_ms(_rtcpAudioReportIntervalMs);
   nativeConfig->set_video_rtcp_report_interval_ms(_rtcpVideoReportIntervalMs);
-  nativeConfig->allow_codec_switching = _allowCodecSwitching;
   nativeConfig->enable_implicit_rollback = _enableImplicitRollback;
   nativeConfig->offer_extmap_allow_mixed = _offerExtmapAllowMixed;
   if (_iceCheckIntervalStrongConnectivity != nil) {

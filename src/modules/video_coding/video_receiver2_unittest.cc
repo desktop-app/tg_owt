@@ -35,13 +35,19 @@ class MockVCMReceiveCallback : public VCMReceiveCallback {
  public:
   MockVCMReceiveCallback() = default;
 
-  MOCK_METHOD(
-      int32_t,
-      FrameToRender,
-      (VideoFrame&, absl::optional<uint8_t>, TimeDelta, VideoContentType),
-      (override));
+  MOCK_METHOD(int32_t,
+              FrameToRender,
+              (VideoFrame&,
+               absl::optional<uint8_t>,
+               TimeDelta,
+               VideoContentType,
+               VideoFrameType),
+              (override));
   MOCK_METHOD(void, OnIncomingPayloadType, (int), (override));
-  MOCK_METHOD(void, OnDecoderImplementationName, (const char*), (override));
+  MOCK_METHOD(void,
+              OnDecoderInfoChanged,
+              (const VideoDecoder::DecoderInfo&),
+              (override));
 };
 
 class TestEncodedFrame : public EncodedFrame {
@@ -117,7 +123,7 @@ TEST_F(VideoReceiver2Test, RegisterReceiveCodecs) {
   auto decoder = std::make_unique<NiceMock<MockVideoDecoder>>();
   EXPECT_CALL(*decoder, RegisterDecodeCompleteCallback)
       .WillOnce(Return(WEBRTC_VIDEO_CODEC_OK));
-  EXPECT_CALL(*decoder, Decode).WillOnce(Return(WEBRTC_VIDEO_CODEC_OK));
+  EXPECT_CALL(*decoder, Decode(_, _)).WillOnce(Return(WEBRTC_VIDEO_CODEC_OK));
   EXPECT_CALL(*decoder, Release).WillOnce(Return(WEBRTC_VIDEO_CODEC_OK));
 
   // Register the decoder. Note that this moves ownership of the mock object
@@ -126,7 +132,7 @@ TEST_F(VideoReceiver2Test, RegisterReceiveCodecs) {
   EXPECT_TRUE(receiver_.IsExternalDecoderRegistered(kPayloadType));
 
   EXPECT_CALL(receive_callback_, OnIncomingPayloadType(kPayloadType));
-  EXPECT_CALL(receive_callback_, OnDecoderImplementationName);
+  EXPECT_CALL(receive_callback_, OnDecoderInfoChanged);
 
   // Call `Decode`. This triggers the above call expectations.
   EXPECT_EQ(receiver_.Decode(&frame), VCM_OK);

@@ -118,16 +118,11 @@ const int64_t kNanosecondsPerSecond = 1000000000;
 }
 
 + (NSArray<AVCaptureDevice *> *)captureDevices {
-#if defined(WEBRTC_IOS) && defined(__IPHONE_10_0) && \
-    __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_10_0
   AVCaptureDeviceDiscoverySession *session = [AVCaptureDeviceDiscoverySession
       discoverySessionWithDeviceTypes:@[ AVCaptureDeviceTypeBuiltInWideAngleCamera ]
                             mediaType:AVMediaTypeVideo
                              position:AVCaptureDevicePositionUnspecified];
   return session.devices;
-#else
-  return [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
-#endif
 }
 
 + (NSArray<AVCaptureDeviceFormat *> *)supportedFormatsForDevice:(AVCaptureDevice *)device {
@@ -476,9 +471,16 @@ const int64_t kNanosecondsPerSecond = 1000000000;
 
   if (mediaSubType != _outputPixelFormat) {
     _outputPixelFormat = mediaSubType;
-    _videoDataOutput.videoSettings =
-        @{ (NSString *)kCVPixelBufferPixelFormatTypeKey : @(mediaSubType) };
   }
+
+  // Update videoSettings with dimensions, as some virtual cameras, e.g. Snap Camera, may not work
+  // otherwise.
+  CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription);
+  _videoDataOutput.videoSettings = @{
+    (id)kCVPixelBufferWidthKey : @(dimensions.width),
+    (id)kCVPixelBufferHeightKey : @(dimensions.height),
+    (id)kCVPixelBufferPixelFormatTypeKey : @(_outputPixelFormat),
+  };
 }
 
 #pragma mark - Private, called inside capture queue

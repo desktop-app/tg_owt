@@ -11,6 +11,7 @@ include_rules = [
   "-common_video",
   "-data",
   "-examples",
+  "-experiments",
   "-g3doc",
   "-ios",
   "-infra",
@@ -80,7 +81,6 @@ specific_include_rules = {
 
   "data_channel_interface\.h": [
     "+rtc_base/copy_on_write_buffer.h",
-    "+rtc_base/ref_count.h",
   ],
 
   "data_channel_transport_interface\.h": [
@@ -88,33 +88,15 @@ specific_include_rules = {
   ],
 
   "dtls_transport_interface\.h": [
-    "+rtc_base/ref_count.h",
     "+rtc_base/ssl_certificate.h",
-  ],
-
-  "dtmf_sender_interface\.h": [
-    "+rtc_base/ref_count.h",
   ],
 
   "fec_controller\.h": [
     "+modules/include/module_fec_types.h",
   ],
 
-  "frame_transformer_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "ice_transport_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "jsep\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
   "media_stream_interface\.h": [
     "+modules/audio_processing/include/audio_processing_statistics.h",
-    "+rtc_base/ref_count.h",
   ],
 
   "packet_socket_factory\.h": [
@@ -131,7 +113,6 @@ specific_include_rules = {
     "+rtc_base/network.h",
     "+rtc_base/network_constants.h",
     "+rtc_base/network_monitor_factory.h",
-    "+rtc_base/ref_count.h",
     "+rtc_base/rtc_certificate.h",
     "+rtc_base/rtc_certificate_generator.h",
     "+rtc_base/socket_address.h",
@@ -147,7 +128,6 @@ specific_include_rules = {
   ],
 
   "ref_counted_base\.h": [
-    "+rtc_base/ref_count.h",
     "+rtc_base/ref_counter.h",
   ],
 
@@ -158,72 +138,17 @@ specific_include_rules = {
     # For private member and constructor.
     "+rtc_base/system/file_wrapper.h",
   ],
-  "rtp_receiver_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
 
-  "rtp_sender_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "rtp_transceiver_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "sctp_transport_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "set_local_description_observer_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-  "set_remote_description_observer_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "stats_types\.h": [
-    "+rtc_base/ref_count.h",
+  "legacy_stats_types\.h": [
     "+rtc_base/thread_checker.h",
-  ],
-
-  "uma_metrics\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "audio_mixer\.h": [
-    "+rtc_base/ref_count.h",
   ],
 
   "audio_decoder\.h": [
     "+rtc_base/buffer.h",
   ],
 
-  "audio_decoder_factory\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
   "audio_encoder\.h": [
     "+rtc_base/buffer.h",
-  ],
-
-  "audio_encoder_factory\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "frame_decryptor_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "frame_encryptor_interface\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "rtc_stats_collector_callback\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
-  "rtc_stats_report\.h": [
-    "+rtc_base/ref_count.h",
   ],
 
   "audioproc_float\.h": [
@@ -232,13 +157,6 @@ specific_include_rules = {
 
   "echo_detector_creator\.h": [
     "+modules/audio_processing/include/audio_processing.h",
-  ],
-
-  "fake_metronome\.h": [
-    "+rtc_base/synchronization/mutex.h",
-    "+rtc_base/task_queue.h",
-    "+rtc_base/task_utils/repeating_task.h",
-    "+rtc_base/thread_annotations.h",
   ],
 
   "make_ref_counted\.h": [
@@ -278,10 +196,6 @@ specific_include_rules = {
     "+modules/video_coding/include/video_codec_interface.h"
   ],
 
-  "video_encoder_config\.h": [
-    "+rtc_base/ref_count.h",
-  ],
-
   "sequence_checker\.h": [
     "+rtc_base/synchronization/sequence_checker_internal.h",
     "+rtc_base/thread_annotations.h",
@@ -311,6 +225,10 @@ specific_include_rules = {
     "+rtc_base/thread.h",
   ],
 
+  "field_trials_registry\.h": [
+    "+rtc_base/containers/flat_set.h",
+  ],
+
   # .cc files in api/ should not be restricted in what they can #include,
   # so we re-add all the top-level directories here. (That's because .h
   # files leak their #includes to whoever's #including them, but .cc files
@@ -321,6 +239,7 @@ specific_include_rules = {
     "+common_audio",
     "+common_video",
     "+examples",
+    "+experiments",
     "+logging",
     "+media",
     "+modules",

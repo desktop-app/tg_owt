@@ -47,6 +47,12 @@ class MockPeerConnectionInterface : public webrtc::PeerConnectionInterface {
               (rtc::scoped_refptr<MediaStreamTrackInterface>,
                const std::vector<std::string>&),
               (override));
+  MOCK_METHOD(RTCErrorOr<rtc::scoped_refptr<RtpSenderInterface>>,
+              AddTrack,
+              (rtc::scoped_refptr<MediaStreamTrackInterface>,
+               const std::vector<std::string>&,
+               const std::vector<RtpEncodingParameters>&),
+              (override));
   MOCK_METHOD(RTCError,
               RemoveTrackOrError,
               (rtc::scoped_refptr<RtpSenderInterface>),
@@ -171,6 +177,10 @@ class MockPeerConnectionInterface : public webrtc::PeerConnectionInterface {
               (const std::vector<cricket::Candidate>&),
               (override));
   MOCK_METHOD(RTCError, SetBitrate, (const BitrateSettings&), (override));
+  MOCK_METHOD(void,
+              ReconfigureBandwidthEstimation,
+              (const BandwidthEstimationSettings&),
+              (override));
   MOCK_METHOD(void, SetAudioPlayout, (bool), (override));
   MOCK_METHOD(void, SetAudioRecording, (bool), (override));
   MOCK_METHOD(rtc::scoped_refptr<DtlsTransportInterface>,

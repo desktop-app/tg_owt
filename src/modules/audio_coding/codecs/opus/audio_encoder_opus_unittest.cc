@@ -39,7 +39,7 @@ constexpr int kDefaultOpusPacSize = 960;
 constexpr int64_t kInitialTimeUs = 12345678;
 
 AudioEncoderOpusConfig CreateConfigWithParameters(
-    const SdpAudioFormat::Parameters& params) {
+    const CodecParameterMap& params) {
   const SdpAudioFormat format("opus", 48000, 2, params);
   return *AudioEncoderOpus::SdpToConfig(format);
 }
@@ -373,9 +373,6 @@ TEST_P(AudioEncoderOpusTest, PacketLossRateUpperBounded) {
 }
 
 TEST_P(AudioEncoderOpusTest, DoNotInvokeSetTargetBitrateIfOverheadUnknown) {
-  test::ScopedFieldTrials override_field_trials(
-      "WebRTC-SendSideBwe-WithOverhead/Enabled/");
-
   auto states = CreateCodec(sample_rate_hz_, 2);
 
   states->encoder->OnReceivedUplinkBandwidth(kDefaultOpusRate * 2,
@@ -668,6 +665,17 @@ TEST(AudioEncoderOpusTest, TestConfigFromInvalidParams) {
   config = CreateConfigWithParameters({{"ptime", "invalid"}});
   EXPECT_EQ(default_supported_frame_lengths_ms,
             config.supported_frame_lengths_ms);
+}
+
+TEST(AudioEncoderOpusTest, GetFrameLenghtRange) {
+  AudioEncoderOpusConfig config =
+      CreateConfigWithParameters({{"maxptime", "10"}, {"ptime", "10"}});
+  std::unique_ptr<AudioEncoder> encoder =
+      AudioEncoderOpus::MakeAudioEncoder(config, kDefaultOpusPayloadType);
+  auto ptime = webrtc::TimeDelta::Millis(10);
+  absl::optional<std::pair<webrtc::TimeDelta, webrtc::TimeDelta>> range = {
+      {ptime, ptime}};
+  EXPECT_EQ(encoder->GetFrameLengthRange(), range);
 }
 
 // Test that bitrate will be overridden by the "maxaveragebitrate" parameter.
