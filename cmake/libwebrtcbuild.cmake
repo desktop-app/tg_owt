@@ -61,6 +61,7 @@ if (WIN32)
     target_compile_definitions(libwebrtcbuild
     INTERFACE
         WEBRTC_WIN
+        RTC_ENABLE_WIN_WGC
     )
 else()
     target_compile_definitions(libwebrtcbuild

@@ -14,6 +14,15 @@ PRIVATE
     api/peerconnection/RTCIceCandidateErrorEvent+Private.h
     api/peerconnection/RTCIceCandidateErrorEvent.h
     api/peerconnection/RTCIceCandidateErrorEvent.mm
+    api/peerconnection/RTCRtpCapabilities+Private.h
+    api/peerconnection/RTCRtpCapabilities.h
+    api/peerconnection/RTCRtpCapabilities.mm
+    api/peerconnection/RTCRtpCodecCapability+Private.h
+    api/peerconnection/RTCRtpCodecCapability.h
+    api/peerconnection/RTCRtpCodecCapability.mm
+    api/peerconnection/RTCRtpHeaderExtensionCapability+Private.h
+    api/peerconnection/RTCRtpHeaderExtensionCapability.h
+    api/peerconnection/RTCRtpHeaderExtensionCapability.mm
     api/video_frame_buffer/RTCNativeI420Buffer+Private.h
     api/video_frame_buffer/RTCNativeI420Buffer.h
     api/video_frame_buffer/RTCNativeI420Buffer.mm
@@ -40,13 +49,8 @@ PRIVATE
     components/video_codec/RTCCodecSpecificInfoH264+Private.h
     components/video_codec/RTCCodecSpecificInfoH264.h
     components/video_codec/RTCCodecSpecificInfoH264.mm
-    components/video_codec/RTCCodecSpecificInfoH265+Private.h
-    components/video_codec/RTCCodecSpecificInfoH265.h
-    components/video_codec/RTCCodecSpecificInfoH265.mm
     components/video_codec/RTCH264ProfileLevelId.h
     components/video_codec/RTCH264ProfileLevelId.mm
-    components/video_codec/RTCH265ProfileLevelId.h
-    components/video_codec/RTCH265ProfileLevelId.mm
     components/video_codec/RTCDefaultVideoDecoderFactory.h
     components/video_codec/RTCDefaultVideoDecoderFactory.m
     components/video_codec/RTCDefaultVideoEncoderFactory.h
@@ -63,12 +67,12 @@ PRIVATE
     components/video_codec/helpers.h
     components/video_codec/nalu_rewriter.cc
     components/video_codec/nalu_rewriter.h
-    components/renderer/opengl/RTCShader.h
-    components/renderer/opengl/RTCShader.mm
-    components/renderer/opengl/RTCDefaultShader.h
-    components/renderer/opengl/RTCDefaultShader.mm
-    components/renderer/opengl/RTCI420TextureCache.h
-    components/renderer/opengl/RTCI420TextureCache.mm
+    # components/renderer/opengl/RTCShader.h
+    # components/renderer/opengl/RTCShader.mm
+    # components/renderer/opengl/RTCDefaultShader.h
+    # components/renderer/opengl/RTCDefaultShader.mm
+    # components/renderer/opengl/RTCI420TextureCache.h
+    # components/renderer/opengl/RTCI420TextureCache.mm
     components/renderer/metal/RTCMTLI420Renderer.h
     components/renderer/metal/RTCMTLI420Renderer.mm
     components/renderer/metal/RTCMTLRenderer+Private.h
