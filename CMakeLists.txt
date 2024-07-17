@@ -45,7 +45,7 @@ if (TG_OWT_BUILD_AUDIO_BACKENDS)
 endif()
 
 project(tg_owt
-    LANGUAGES C CXX ASM
+    LANGUAGES C CXX
     DESCRIPTION "WebRTC build for Telegram"
     HOMEPAGE_URL "https://github.com/desktop-app/tg_owt.git"
 )
@@ -73,11 +73,9 @@ include(cmake/nice_target_sources.cmake)
 include(cmake/init_target.cmake)
 include(cmake/generate_target.cmake)
 include(cmake/generate_field_trials.cmake)
-include(cmake/target_yasm_sources.cmake)
 include(cmake/external.cmake)
 include(cmake/libabsl.cmake)
 include(cmake/libcrc32c.cmake)
-include(cmake/libopenh264.cmake)
 include(cmake/libpffft.cmake)
 include(cmake/librnnoise.cmake)
 include(cmake/libsrtp.cmake)
@@ -161,12 +159,6 @@ if (TG_OWT_USE_PROTOBUF)
         tg_owt::proto
     )
 endif()
-
-target_sources(tg_owt
-PRIVATE
-    ${libvpx_yasm_objects}
-    ${libopenh264_yasm_objects}
-)
 
 if (APPLE)
     target_link_libraries(tg_owt PUBLIC tg_owt::libsdkmacos)
@@ -2675,9 +2667,6 @@ endif()
 
 if (NOT absl_FOUND)
     list(APPEND export_targets libabsl)
-endif()
-if (NOT LIBOPENH264_FOUND)
-    list(APPEND export_targets libopenh264)
 endif()
 if (NOT Crc32c_FOUND)
     list(APPEND export_targets libcrc32c)

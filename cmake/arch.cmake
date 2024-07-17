@@ -112,7 +112,6 @@ if ((HAVE_ARM_DEF1 OR HAVE_ARM_DEF2) OR HAVE_ARM_DEF3)
     endif() #armv8
 else()
 
-
 # Check for 64-bit RISC-V:
 check_symbol_exists(__riscv  "stddef.h" HAVE_RISCV64_DEF)
 
@@ -137,3 +136,7 @@ endif() # arm32
 endif() # aarch64
 endif() # x86
 endif() # x64
+
+if (MSVC)
+    set(arm_use_neon 0)
+endif()

@@ -10,6 +10,3 @@
 [submodule "src/third_party/libsrtp"]
 	path = src/third_party/libsrtp
 	url = https://github.com/cisco/libsrtp.git
-[submodule "src/third_party/openh264/src"]
-	path = src/third_party/openh264/src
-	url = https://github.com/cisco/openh264

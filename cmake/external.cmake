@@ -128,6 +128,7 @@ function(link_libabsl target_name)
 endfunction()
 
 # libopenh264
+set(TG_OWT_OPENH264_INCLUDE_PATH "" CACHE STRING "Include path for openh264.")
 function(link_libopenh264 target_name)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(PkgConfig REQUIRED)
@@ -137,10 +138,15 @@ function(link_libopenh264 target_name)
             target_link_libraries(${target_name} PRIVATE ${LIBOPENH264_LINK_LIBRARIES})
             target_include_directories(${target_name} SYSTEM PRIVATE ${LIBOPENH264_INCLUDE_DIRS})
         endif()
-    endif()
-    if (NOT LIBOPENH264_FOUND)
-        target_link_libraries(${target_name} PRIVATE tg_owt::libopenh264)
-        target_include_directories(${target_name} SYSTEM PRIVATE ${libopenh264_loc}/include)
+    else()
+        if (TG_OWT_OPENH264_INCLUDE_PATH STREQUAL "")
+            message(FATAL_ERROR "You should specify 'TG_OWT_OPENH264_INCLUDE_PATH'.")
+        endif()
+
+        target_include_directories(${target_name} SYSTEM
+        PRIVATE
+            ${TG_OWT_OPENH264_INCLUDE_PATH}
+        )
     endif()
 endfunction()
 
