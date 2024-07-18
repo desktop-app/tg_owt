@@ -15,7 +15,7 @@ function(generate_stubs target_name extra_stub_header output_name sigs_file)
     set(gen_timestamp ${gen_dst}/${sigs_file_name}_stubs.timestamp)
     set(gen_files
         ${gen_dst}/${output_name}.cc
-        ${gen_dst}/modules/desktop_capture/linux/wayland/${output_name}.h
+        ${gen_dst}/modules/portal/${output_name}.h
     )
     add_custom_command(
     OUTPUT
@@ -26,12 +26,12 @@ function(generate_stubs target_name extra_stub_header output_name sigs_file)
         ${Python_EXECUTABLE}
         ${tools_loc}/generate_stubs/generate_stubs.py
         --intermediate_dir ${gen_dst}
-        --output ${gen_dst}/modules/desktop_capture/linux/wayland
+        --output ${gen_dst}/modules/portal
         --type posix_stubs
         --extra_stub_header ${extra_stub_header}
         --stubfile_name ${output_name}
         --path_from_source ${gen_dst}
-        --path_from_source modules/desktop_capture/linux/wayland
+        --path_from_source modules/portal
         --logging-function "\"RTC_LOG(LS_VERBOSE)\""
         --logging-include "rtc_base/logging.h"
         ${sigs_file}
