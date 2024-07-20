@@ -13,6 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(WEBRTC_USE_PIPEWIRE) || defined(WEBRTC_USE_X11)
+#include <dlfcn.h>
+#endif  // defined(WEBRTC_USE_PIPEWIRE) || defined(WEBRTC_USE_X11)
+
 #include <cstring>
 #include <utility>
 
@@ -128,14 +132,33 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateGenericCapturer(
 
 #if defined(WEBRTC_USE_PIPEWIRE) || defined(WEBRTC_USE_X11)
 bool DesktopCapturer::IsRunningUnderWayland() {
+  if (const auto lib = dlopen("libwayland-client.so.0", RTLD_LAZY)) {
+    const auto wl_display_connect = reinterpret_cast<
+      struct wl_display *(*)(const char *name)
+    >(dlsym(lib, "wl_display_connect"));
+    (void)dlerror();
+    const auto wl_display_disconnect = reinterpret_cast<
+      void (*)(struct wl_display *display)
+    >(dlsym(lib, "wl_display_disconnect"));
+    (void)dlerror();
+    if (wl_display_connect && wl_display_disconnect) {
+      const auto display = wl_display_connect(nullptr);
+      wl_display_disconnect(display);
+      dlclose(lib);
+      return display;
+    }
+    dlclose(lib);
+  }
+  (void)dlerror();
+
   const char* xdg_session_type = getenv("XDG_SESSION_TYPE");
-  if (!xdg_session_type || strncmp(xdg_session_type, "wayland", 7) != 0)
-    return false;
+  if (xdg_session_type && strncmp(xdg_session_type, "wayland", 7) == 0)
+    return true;
 
-  if (!(getenv("WAYLAND_DISPLAY")))
-    return false;
+  if (const auto display = getenv("WAYLAND_DISPLAY"); display && *display)
+    return true;
 
-  return true;
+  return false;
 }
 #endif  // defined(WEBRTC_USE_PIPEWIRE) || defined(WEBRTC_USE_X11)
 
