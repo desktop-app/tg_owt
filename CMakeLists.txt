@@ -171,11 +171,11 @@ link_libabsl(tg_owt)
 link_libopenh264(tg_owt)
 link_libvpx(tg_owt)
 link_crc32c(tg_owt)
+link_dl(tg_owt)
 
 if (TG_OWT_BUILD_AUDIO_BACKENDS AND (UNIX AND NOT APPLE))
     link_libalsa(tg_owt)
     link_libpulse(tg_owt)
-    link_dl(tg_owt)
 endif()
 
 include(cmake/libwebrtcbuild.cmake)
