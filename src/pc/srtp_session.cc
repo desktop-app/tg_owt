@@ -30,8 +30,12 @@
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/time_utils.h"
 #include "system_wrappers/include/metrics.h"
-#include "third_party/libsrtp/include/srtp.h"
-#include "third_party/libsrtp/include/srtp_priv.h"
+
+#ifdef HAVE_LIBSRTP
+# include <srtp2/srtp.h>
+#else
+# include "srtp_priv.h"
+#endif
 
 namespace cricket {
 
@@ -290,6 +294,9 @@ bool SrtpSession::UnprotectRtcp(void* p, int in_len, int* out_len) {
 bool SrtpSession::GetRtpAuthParams(uint8_t** key, int* key_len, int* tag_len) {
   RTC_DCHECK(thread_checker_.IsCurrent());
   RTC_DCHECK(IsExternalAuthActive());
+#ifdef HAVE_LIBSRTP
+  return false;
+#else
   if (!IsExternalAuthActive()) {
     return false;
   }
@@ -313,6 +320,7 @@ bool SrtpSession::GetRtpAuthParams(uint8_t** key, int* key_len, int* tag_len) {
   *key_len = external_hmac->key_length;
   *tag_len = rtp_auth_tag_len_;
   return true;
+#endif
 }
 
 int SrtpSession::GetSrtpOverhead() const {
@@ -342,6 +350,9 @@ bool SrtpSession::GetSendStreamPacketIndex(void* p,
                                            int in_len,
                                            int64_t* index) {
   RTC_DCHECK(thread_checker_.IsCurrent());
+#ifdef HAVE_LIBSRTP
+  return false;
+#else
   srtp_hdr_t* hdr = reinterpret_cast<srtp_hdr_t*>(p);
   srtp_stream_ctx_t* stream = srtp_get_stream(session_, hdr->ssrc);
   if (!stream) {
@@ -352,6 +363,7 @@ bool SrtpSession::GetSendStreamPacketIndex(void* p,
   *index = static_cast<int64_t>(rtc::NetworkToHost64(
       srtp_rdbx_get_packet_index(&stream->rtp_rdbx) << 16));
   return true;
+#endif
 }
 
 bool SrtpSession::DoSetKey(int type,

@@ -1,3 +1,16 @@
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBSRTP libsrtp2)
+
+if (LIBSRTP_FOUND)
+    add_library(libsrtp INTERFACE EXCLUDE_FROM_ALL)
+    add_library(tg_owt::libsrtp ALIAS libsrtp)
+
+    target_include_directories(libsrtp INTERFACE ${LIBSRTP_INCLUDE_DIRS} ${LIBSRTP_CFLAGS_OTHER})
+    target_link_libraries(libsrtp INTERFACE ${LIBSRTP_LINK_LIBRARIES} ${LIBSRTP_LDFLAGS_OTHER})
+
+    return()
+endif()
+
 add_library(libsrtp OBJECT EXCLUDE_FROM_ALL)
 init_target(libsrtp)
 add_library(tg_owt::libsrtp ALIAS libsrtp)
