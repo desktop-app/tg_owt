@@ -2636,35 +2636,26 @@ if (WIN32)
     )
 endif()
 
-set(platform_export)
-if (APPLE)
-    set(platform_export
-        libsdkmacos
-    )
-endif()
-
-set(tg_owt_export tg_owt)
+set(export_targets tg_owt)
 if (is_x86 OR is_x64)
-    set(tg_owt_export
-        tg_owt
+    list(APPEND export_targets
         tg_owt_avx2
         tg_owt_sse2
     )
 endif()
-
-set(export_targets
-    ${tg_owt_export}
-    libpffft
-    librnnoise
-    libsrtp
-    libwebrtcbuild
-    libyuv
-    ${platform_export}
-)
 if (TG_OWT_USE_PROTOBUF)
     list(APPEND export_targets proto)
 endif()
-
+if (APPLE)
+    list(APPEND export_targets libsdkmacos)
+endif()
+list(APPEND export_targets
+    libwebrtcbuild
+    libpffft
+    librnnoise
+    libsrtp
+    libyuv
+)
 if (NOT absl_FOUND)
     list(APPEND export_targets libabsl)
 endif()
