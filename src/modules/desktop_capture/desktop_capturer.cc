@@ -143,7 +143,8 @@ bool DesktopCapturer::IsRunningUnderWayland() {
     (void)dlerror();
     if (wl_display_connect && wl_display_disconnect) {
       const auto display = wl_display_connect(nullptr);
-      wl_display_disconnect(display);
+      if (display)
+        wl_display_disconnect(display);
       dlclose(lib);
       return display;
     }
