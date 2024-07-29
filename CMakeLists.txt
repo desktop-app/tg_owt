@@ -20,7 +20,6 @@ if (NOT TG_OWT_PACKAGED_BUILD)
 endif()
 
 option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." OFF)
-option(TG_OWT_USE_PROTOBUF "Use protobuf to generate additional headers. Useful for packaged build." ${BUILD_SHARED_LIBS})
 cmake_dependent_option(TG_OWT_USE_X11 "Use X11 for desktop capture." ON "UNIX; NOT APPLE" OFF)
 cmake_dependent_option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture." ON "UNIX; NOT APPLE" OFF)
 cmake_dependent_option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire for desktop capture." ${not_packaged_build} TG_OWT_USE_PIPEWIRE OFF)
@@ -84,12 +83,6 @@ if (APPLE)
     include(cmake/libsdkmacos.cmake)
 endif()
 
-# Use a separate subdirectory, because it will be exported as an INTERFACE
-# for the generated sources and headers.
-if (TG_OWT_USE_PROTOBUF)
-    add_subdirectory(cmake/protobuf)
-endif()
-
 add_library(tg_owt)
 init_target(tg_owt)
 
@@ -150,13 +143,6 @@ if (is_x86 OR is_x64)
     PRIVATE
         tg_owt::tg_owt_avx2
         tg_owt::tg_owt_sse2
-    )
-endif()
-
-if (TG_OWT_USE_PROTOBUF)
-    target_link_libraries(tg_owt
-    PRIVATE
-        tg_owt::proto
     )
 endif()
 
@@ -1985,8 +1971,6 @@ PRIVATE
     logging/rtc_event_log/encoder/optional_blob_encoding.cc
     logging/rtc_event_log/encoder/optional_blob_encoding.h
     logging/rtc_event_log/encoder/rtc_event_log_encoder_common.cc
-    logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.cc
-    logging/rtc_event_log/encoder/rtc_event_log_encoder_new_format.cc
     logging/rtc_event_log/encoder/rtc_event_log_encoder_v3.cc
     logging/rtc_event_log/encoder/rtc_event_log_encoder_v3.h
     logging/rtc_event_log/encoder/var_int.cc
@@ -2406,13 +2390,6 @@ if (is_x86 OR is_x64)
     )
 endif()
 
-if (NOT TG_OWT_USE_PROTOBUF)
-    remove_target_sources(tg_owt ${webrtc_loc}
-        logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.cc
-        logging/rtc_event_log/encoder/rtc_event_log_encoder_new_format.cc
-    )
-endif()
-
 if (NOT TG_OWT_USE_X11)
     remove_target_sources(tg_owt ${webrtc_loc}
         # src/modules/desktop_capture/BUILD.gn (rtc_use_x11_extensions)
@@ -2642,9 +2619,6 @@ if (is_x86 OR is_x64)
         tg_owt_avx2
         tg_owt_sse2
     )
-endif()
-if (TG_OWT_USE_PROTOBUF)
-    list(APPEND export_targets proto)
 endif()
 if (APPLE)
     list(APPEND export_targets libsdkmacos)
