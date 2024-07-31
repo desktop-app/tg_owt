@@ -947,8 +947,6 @@ PRIVATE
     modules/audio_coding/codecs/ilbc/vq4.c
     modules/audio_coding/codecs/ilbc/window32_w32.c
     modules/audio_coding/codecs/ilbc/xcorr_coef.c
-    modules/audio_coding/neteq/tools/neteq_rtp_dump_input.cc
-    modules/audio_coding/neteq/tools/neteq_rtp_dump_input.h
     modules/audio_coding/neteq/reorder_optimizer.cc
     modules/audio_coding/neteq/reorder_optimizer.h
     modules/audio_coding/neteq/underrun_optimizer.cc
@@ -2020,7 +2018,6 @@ PRIVATE
     logging/rtc_event_log/fake_rtc_event_log.cc
     logging/rtc_event_log/fake_rtc_event_log_factory.cc
     logging/rtc_event_log/ice_logger.cc
-    logging/rtc_event_log/rtc_event_log_impl.cc
     logging/rtc_event_log/rtc_event_log2_proto_include.h
     logging/rtc_event_log/rtc_event_processor_order.h
     logging/rtc_event_log/rtc_stream_config.cc
