@@ -19,6 +19,11 @@
 
 #include "rtc_base/win/windows_version.h"
 #endif
+#if defined(WEBRTC_FREEBSD)
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#endif
 #if defined(WEBRTC_POSIX) && !defined(__native_client__)
 #include <arpa/inet.h>
 #if defined(WEBRTC_ANDROID)
