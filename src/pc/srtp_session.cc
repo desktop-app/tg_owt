@@ -31,7 +31,12 @@
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/time_utils.h"
 #include "system_wrappers/include/metrics.h"
-#include "third_party/libsrtp/include/srtp.h"
+
+#ifdef WEBRTC_EXTERNAL_SRTP
+# include <srtp2/srtp.h>
+#else
+# include "third_party/libsrtp/include/srtp.h"
+#endif
 
 #ifndef SRTP_SRCTP_INDEX_LEN
 #define SRTP_SRCTP_INDEX_LEN 4
