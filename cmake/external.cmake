@@ -150,6 +150,21 @@ function(link_libopenh264 target_name)
     endif()
 endfunction()
 
+# libSRTP
+function(link_libsrtp target_name)
+    if (TG_OWT_PACKAGED_BUILD)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SRTP libsrtp2)
+        if (SRTP_FOUND)
+            target_include_directories(${target_name} SYSTEM PRIVATE ${SRTP_INCLUDE_DIRS})
+            target_link_libraries(${target_name} PRIVATE ${SRTP_LINK_LIBRARIES})
+        endif()
+    endif()
+    if (NOT SRTP_FOUND)
+        target_link_libraries(${target_name} PRIVATE tg_owt::libsrtp)
+    endif()
+endfunction()
+
 # libvpx
 set(TG_OWT_LIBVPX_INCLUDE_PATH "" CACHE STRING "Include path for libvpx.")
 function(link_libvpx target_name)
