@@ -75,7 +75,6 @@ include(cmake/generate_field_trials.cmake)
 include(cmake/external.cmake)
 include(cmake/libpffft.cmake)
 include(cmake/librnnoise.cmake)
-include(cmake/libsrtp.cmake)
 include(cmake/libyuv.cmake)
 if (APPLE)
     include(cmake/libsdkmacos.cmake)
@@ -132,7 +131,6 @@ target_link_libraries(tg_owt
 PRIVATE
     tg_owt::libpffft
     tg_owt::librnnoise
-    tg_owt::libsrtp
     tg_owt::libyuv
 )
 
@@ -153,6 +151,7 @@ link_ffmpeg(tg_owt)
 link_opus(tg_owt)
 link_libabsl(tg_owt)
 link_libopenh264(tg_owt)
+link_libsrtp(tg_owt)
 link_libvpx(tg_owt)
 link_crc32c(tg_owt)
 link_dl(tg_owt)
@@ -2631,12 +2630,17 @@ list(APPEND export_targets
     libwebrtcbuild
     libpffft
     librnnoise
-    libsrtp
     libyuv
 )
 if (NOT absl_FOUND)
     include(cmake/libabsl.cmake)
     list(APPEND export_targets libabsl)
+endif()
+if (NOT SRTP_FOUND)
+    include(cmake/libsrtp.cmake)
+    list(APPEND export_targets libsrtp)
+else()
+    target_compile_definitions(tg_owt PRIVATE WEBRTC_EXTERNAL_SRTP)
 endif()
 if (NOT Crc32c_FOUND)
     include(cmake/libcrc32c.cmake)
