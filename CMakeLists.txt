@@ -2445,6 +2445,15 @@ if (NOT TG_OWT_USE_PIPEWIRE)
         modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.h
         modules/desktop_capture/linux/wayland/xdg_session_details.h
 
+        modules/video_capture/linux/camera_portal.cc
+        modules/video_capture/linux/camera_portal.h
+        modules/video_capture/linux/device_info_pipewire.cc
+        modules/video_capture/linux/device_info_pipewire.h
+        modules/video_capture/linux/pipewire_session.cc
+        modules/video_capture/linux/pipewire_session.h
+        modules/video_capture/linux/video_capture_pipewire.cc
+        modules/video_capture/linux/video_capture_pipewire.h
+
         modules/portal/pipewire.sigs
         modules/portal/pipewire_stub_header.fragment
         modules/portal/pipewire_utils.cc
