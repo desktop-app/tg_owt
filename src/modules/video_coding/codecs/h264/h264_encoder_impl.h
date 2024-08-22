@@ -30,7 +30,12 @@
 #include "modules/video_coding/codecs/h264/include/h264.h"
 #include "modules/video_coding/svc/scalable_video_controller.h"
 #include "modules/video_coding/utility/quality_scaler.h"
+
+#ifdef WEBRTC_USE_H264_DLOPEN
+#include "h264_dlopen.h"
+#else
 #include <wels/codec_app_def.h>
+#endif
 
 class ISVCEncoder;
 

@@ -129,7 +129,7 @@ endfunction()
 
 # libopenh264
 set(TG_OWT_OPENH264_INCLUDE_PATH "" CACHE STRING "Include path for openh264.")
-function(link_libopenh264 target_name)
+function(link_libopenh264 target_name with_dlopen)
     if (TG_OWT_PACKAGED_BUILD)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(LIBOPENH264 openh264)
@@ -147,6 +147,10 @@ function(link_libopenh264 target_name)
         PRIVATE
             ${TG_OWT_OPENH264_INCLUDE_PATH}
         )
+    endif()
+    if (with_dlopen)
+        target_compile_definitions(${target_name} PRIVATE -DWEBRTC_USE_H264_DLOPEN)
+        target_sources(${target_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/modules/video_coding/codecs/h264/h264_dlopen.cc)
     endif()
 endfunction()
 
