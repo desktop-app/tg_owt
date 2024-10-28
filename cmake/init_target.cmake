@@ -44,23 +44,25 @@ function(init_target target_name) # init_target(my_target folder_name)
             HAVE_SSE2
         )
 
-        target_compile_options(${target_name}
-        PRIVATE
-            /W1
-            /wd4715 # not all control paths return a value.
-            /wd4244 # 'initializing' conversion from .. to .., possible loss of data.
-            /wd4838 # conversion from .. to .. requires a narrowing conversion.
-            /wd4305 # 'return': truncation from 'int' to 'bool'.
-            /wd4068 # unknown pragma 'clang'
+        if (MSVC) # implies not MINGW
+            target_compile_options(${target_name}
+            PRIVATE
+                /W1
+                /wd4715 # not all control paths return a value.
+                /wd4244 # 'initializing' conversion from .. to .., possible loss of data.
+                /wd4838 # conversion from .. to .. requires a narrowing conversion.
+                /wd4305 # 'return': truncation from 'int' to 'bool'.
+                /wd4068 # unknown pragma 'clang'
 
-            # C++20: enum-s used as constants in WebRTC code.
-            /wd5055 # operator 'X': deprecated between enumerations and floating-point types
+                # C++20: enum-s used as constants in WebRTC code.
+                /wd5055 # operator 'X': deprecated between enumerations and floating-point types
 
-            /MP     # Enable multi process build.
-            /EHsc   # Catch C++ exceptions only, extern C functions never throw a C++ exception.
-            # /Zc:wchar_t- # don't tread wchar_t as builtin type
-            /Zi
-        )
+                /MP     # Enable multi process build.
+                /EHsc   # Catch C++ exceptions only, extern C functions never throw a C++ exception.
+                # /Zc:wchar_t- # don't tread wchar_t as builtin type
+                /Zi
+            )
+        endif()
     else()
         if (APPLE)
             target_compile_options(${target_name}
@@ -105,7 +107,7 @@ function(init_feature_target target_name feature)
     init_target(${target_name})
 
     set(option "")
-    if (WIN32)
+    if (MSVC)
         if (${feature} STREQUAL "avx")
             set(option /arch:AVX)
         elseif (${feature} STREQUAL "avx2")
