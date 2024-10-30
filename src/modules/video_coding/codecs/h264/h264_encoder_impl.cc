@@ -218,6 +218,12 @@ int32_t H264EncoderImpl::InitEncode(const VideoCodec* inst,
     return release_ret;
   }
 
+  #ifdef WEBRTC_USE_H264_DLOPEN
+  if (loadLibOpenH264()) {
+    return WEBRTC_VIDEO_CODEC_ERROR;
+  }
+  #endif
+
   int number_of_streams = SimulcastUtility::NumberOfSimulcastStreams(*inst);
   bool doing_simulcast = (number_of_streams > 1);
 
