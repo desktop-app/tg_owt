@@ -295,6 +295,7 @@ bool SrtpSession::GetRtpAuthParams(uint8_t** key, int* key_len, int* tag_len) {
   RTC_DCHECK(thread_checker_.IsCurrent());
   RTC_DCHECK(IsExternalAuthActive());
 #ifdef WEBRTC_EXTERNAL_SRTP
+  RTC_CHECK(false);
   return false;
 #else
   if (!IsExternalAuthActive()) {
@@ -351,6 +352,7 @@ bool SrtpSession::GetSendStreamPacketIndex(void* p,
                                            int64_t* index) {
   RTC_DCHECK(thread_checker_.IsCurrent());
 #ifdef WEBRTC_EXTERNAL_SRTP
+  RTC_CHECK(false);
   return false;
 #else
   srtp_hdr_t* hdr = reinterpret_cast<srtp_hdr_t*>(p);
