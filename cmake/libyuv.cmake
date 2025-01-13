@@ -109,6 +109,8 @@ if (arm_use_neon)
     PRIVATE
         LIBYUV_NEON
     )
+    # libyuv needs dotprod on aarch64
+    target_compile_options(libyuv PRIVATE -march=armv8-a+dotprod+i8mm)
 else()
     target_compile_definitions(libyuv
     PRIVATE
