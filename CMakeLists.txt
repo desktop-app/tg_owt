@@ -168,6 +168,18 @@ if (TG_OWT_USE_X11)
     link_x11(tg_owt)
 endif()
 
+if (WIN32)
+    target_link_libraries(tg_owt
+    PRIVATE
+        d3d11
+        dwmapi
+        dxgi
+        iphlpapi
+        shcore
+        winmm
+    )
+endif()
+
 function(add_sublibrary postfix)
     add_library(tg_owt_${postfix} OBJECT)
     init_feature_target(tg_owt_${postfix} ${postfix})
