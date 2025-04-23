@@ -2396,7 +2396,7 @@ if (is_x86 OR is_x64)
     )
 endif()
 
-if (NOT TG_OWT_USE_X11)
+if (UNIX AND NOT APPLE AND NOT TG_OWT_USE_X11)
     remove_target_sources(tg_owt ${webrtc_loc}
         # src/modules/desktop_capture/BUILD.gn (rtc_use_x11_extensions)
         modules/desktop_capture/linux/x11/mouse_cursor_monitor_x11.cc
