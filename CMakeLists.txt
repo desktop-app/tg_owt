@@ -175,8 +175,11 @@ if (WIN32)
         dwmapi
         dxgi
         iphlpapi
+        secur32
         shcore
+        strmiids
         winmm
+        ws2_32
     )
 endif()
 
