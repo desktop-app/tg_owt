@@ -57,7 +57,6 @@ function(init_target target_name) # init_target(my_target folder_name)
                 /MP     # Enable multi process build.
                 /EHsc   # Catch C++ exceptions only, extern C functions never throw a C++ exception.
                 # /Zc:wchar_t- # don't tread wchar_t as builtin type
-                /Zi
             )
         endif()
     else()
