@@ -5,9 +5,7 @@ target_link_libraries(libwebrtcbuild
 INTERFACE
     tg_owt::libyuv
 )
-if (NOT absl_FOUND)
-    target_link_libraries(libwebrtcbuild INTERFACE tg_owt::libabsl)
-endif()
+link_libabsl(libwebrtcbuild)
 
 target_compile_definitions(libwebrtcbuild
 INTERFACE
