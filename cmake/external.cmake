@@ -230,30 +230,10 @@ endfunction()
 # x11
 function(link_x11 target_name)
     if (TG_OWT_PACKAGED_BUILD)
-        find_package(X11 REQUIRED COMPONENTS Xcomposite Xdamage Xext Xfixes Xrender Xrandr Xtst)
-        target_include_directories(${target_name} SYSTEM
-        PRIVATE
-            ${X11_X11_INCLUDE_PATH}
-            ${X11_Xlib_INCLUDE_PATH}
-            ${X11_Xcomposite_INCLUDE_PATH}
-            ${X11_Xdamage_INCLUDE_PATH}
-            ${X11_Xext_INCLUDE_PATH}
-            ${X11_Xfixes_INCLUDE_PATH}
-            ${X11_Xrender_INCLUDE_PATH}
-            ${X11_Xrandr_INCLUDE_PATH}
-            ${X11_Xtst_INCLUDE_PATH}
-        )
-        target_link_libraries(${target_name}
-        PRIVATE
-            ${X11_X11_LIB}
-            ${X11_Xcomposite_LIB}
-            ${X11_Xdamage_LIB}
-            ${X11_Xext_LIB}
-            ${X11_Xfixes_LIB}
-            ${X11_Xrender_LIB}
-            ${X11_Xrandr_LIB}
-            ${X11_Xtst_LIB}
-        )
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(X11 REQUIRED x11 xcomposite xdamage xext xfixes xrandr xrender xtst)
+        target_include_directories(${target_name} SYSTEM PRIVATE ${X11_INCLUDE_DIRS})
+        target_link_libraries(${target_name} PRIVATE ${X11_LINK_LIBRARIES})
     endif()
 endfunction()
 
