@@ -10,6 +10,7 @@
 
 #include "modules/audio_coding/neteq/reorder_optimizer.h"
 
+#include <stdint.h>
 #include <algorithm>
 #include <limits>
 #include <vector>
