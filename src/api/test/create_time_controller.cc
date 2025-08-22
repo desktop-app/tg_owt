@@ -44,8 +44,8 @@ void EnableMediaWithDefaultsAndTimeController(
   class TimeControllerBasedFactory : public MediaFactory {
    public:
     TimeControllerBasedFactory(
-        absl::Nonnull<Clock*> clock,
-        absl::Nonnull<std::unique_ptr<MediaFactory>> media_factory)
+        Clock* absl_nonnull clock,
+        std::unique_ptr<MediaFactory> absl_nonnull media_factory)
         : clock_(clock), media_factory_(std::move(media_factory)) {}
 
     std::unique_ptr<Call> CreateCall(const CallConfig& config) override {
@@ -64,8 +64,8 @@ void EnableMediaWithDefaultsAndTimeController(
     }
 
    private:
-    absl::Nonnull<Clock*> clock_;
-    absl::Nonnull<std::unique_ptr<MediaFactory>> media_factory_;
+    Clock* absl_nonnull clock_;
+    std::unique_ptr<MediaFactory> absl_nonnull media_factory_;
   };
 
   EnableMediaWithDefaults(deps);
