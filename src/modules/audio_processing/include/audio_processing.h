@@ -633,11 +633,11 @@ class RTC_EXPORT AudioProcessing : public RefCountInterface {
   virtual bool CreateAndAttachAecDump(
       absl::string_view file_name,
       int64_t max_log_size_bytes,
-      absl::Nonnull<TaskQueueBase*> worker_queue) = 0;
+      TaskQueueBase* absl_nonnull worker_queue) = 0;
   virtual bool CreateAndAttachAecDump(
-      absl::Nonnull<FILE*> handle,
+      FILE* absl_nonnull handle,
       int64_t max_log_size_bytes,
-      absl::Nonnull<TaskQueueBase*> worker_queue) = 0;
+      TaskQueueBase* absl_nonnull worker_queue) = 0;
 
   // TODO(webrtc:5298) Deprecated variant.
   // Attaches provided webrtc::AecDump for recording debugging

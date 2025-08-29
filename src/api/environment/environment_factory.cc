@@ -25,12 +25,12 @@ namespace webrtc {
 namespace {
 
 template <typename T>
-void Store(absl::Nonnull<std::unique_ptr<T>> value,
+void Store(std::unique_ptr<T> absl_nonnull value,
            scoped_refptr<const rtc::RefCountedBase>& leaf) {
   class StorageNode : public rtc::RefCountedBase {
    public:
     StorageNode(scoped_refptr<const rtc::RefCountedBase> parent,
-                absl::Nonnull<std::unique_ptr<T>> value)
+                std::unique_ptr<T> absl_nonnull value)
         : parent_(std::move(parent)), value_(std::move(value)) {}
 
     StorageNode(const StorageNode&) = delete;
@@ -40,7 +40,7 @@ void Store(absl::Nonnull<std::unique_ptr<T>> value,
 
    private:
     scoped_refptr<const rtc::RefCountedBase> parent_;
-    absl::Nonnull<std::unique_ptr<T>> value_;
+    std::unique_ptr<T> absl_nonnull value_;
   };
 
   // Utilities provided with ownership form a tree:
@@ -63,14 +63,14 @@ EnvironmentFactory::EnvironmentFactory(const Environment& env)
       event_log_(env.event_log_) {}
 
 void EnvironmentFactory::Set(
-    absl::Nullable<std::unique_ptr<const FieldTrialsView>> utility) {
+    std::unique_ptr<const FieldTrialsView> absl_nullable utility) {
   if (utility != nullptr) {
     field_trials_ = utility.get();
     Store(std::move(utility), leaf_);
   }
 }
 
-void EnvironmentFactory::Set(absl::Nullable<std::unique_ptr<Clock>> utility) {
+void EnvironmentFactory::Set(std::unique_ptr<Clock> absl_nullable utility) {
   if (utility != nullptr) {
     clock_ = utility.get();
     Store(std::move(utility), leaf_);
@@ -78,7 +78,7 @@ void EnvironmentFactory::Set(absl::Nullable<std::unique_ptr<Clock>> utility) {
 }
 
 void EnvironmentFactory::Set(
-    absl::Nullable<std::unique_ptr<TaskQueueFactory>> utility) {
+    std::unique_ptr<TaskQueueFactory> absl_nullable utility) {
   if (utility != nullptr) {
     task_queue_factory_ = utility.get();
     Store(std::move(utility), leaf_);
@@ -86,7 +86,7 @@ void EnvironmentFactory::Set(
 }
 
 void EnvironmentFactory::Set(
-    absl::Nullable<std::unique_ptr<RtcEventLog>> utility) {
+    std::unique_ptr<RtcEventLog> absl_nullable utility) {
   if (utility != nullptr) {
     event_log_ = utility.get();
     Store(std::move(utility), leaf_);
