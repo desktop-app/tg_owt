@@ -9,7 +9,6 @@ link_libabsl(libwebrtcbuild)
 
 target_compile_definitions(libwebrtcbuild
 INTERFACE
-    $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
     WEBRTC_ENABLE_PROTOBUF=0
     WEBRTC_APM_DEBUG_DUMP=0
     WEBRTC_USE_BUILTIN_ISAC_FLOAT
@@ -28,6 +27,19 @@ INTERFACE
     RTC_DISABLE_TRACE_EVENTS
     BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=0
 )
+
+get_property(is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if (is_multi_config)
+    target_compile_definitions(libwebrtcbuild
+    INTERFACE
+        $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
+    )
+elseif (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(libwebrtcbuild
+    INTERFACE
+        NDEBUG
+    )
+endif()
 
 if (TG_OWT_USE_X11)
     target_compile_definitions(libwebrtcbuild
