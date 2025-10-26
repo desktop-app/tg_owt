@@ -66,6 +66,20 @@
 #include <memory>
 #include <utility>
 
+#include "absl/base/nullability.h"
+
+namespace absl {
+#ifdef absl_nonnull
+template<typename T>
+using Nonnull = T absl_nonnull;
+#endif // absl_nonnull
+
+#ifdef absl_nullable
+template<typename T>
+using Nullable = T absl_nullable;
+#endif // absl_nullable
+}
+
 namespace webrtc {
 
 template <class T>
