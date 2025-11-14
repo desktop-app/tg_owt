@@ -37,7 +37,7 @@ PendingTaskSafetyFlag::CreateDetached() {
 rtc::scoped_refptr<PendingTaskSafetyFlag>
 PendingTaskSafetyFlag::CreateAttachedToTaskQueue(
     bool alive,
-    absl::Nonnull<TaskQueueBase*> attached_queue) {
+    TaskQueueBase* absl_nonnull attached_queue) {
   RTC_DCHECK(attached_queue) << "Null TaskQueue provided";
   return rtc::scoped_refptr<PendingTaskSafetyFlag>(
       new PendingTaskSafetyFlag(alive, attached_queue));

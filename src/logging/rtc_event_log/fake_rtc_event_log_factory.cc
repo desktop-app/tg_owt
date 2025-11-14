@@ -17,7 +17,7 @@
 
 namespace webrtc {
 
-absl::Nonnull<std::unique_ptr<RtcEventLog>> FakeRtcEventLogFactory::Create(
+std::unique_ptr<RtcEventLog> absl_nonnull FakeRtcEventLogFactory::Create(
     const Environment& /*env*/) const {
   auto fake_event_log = std::make_unique<FakeRtcEventLog>();
   const_cast<FakeRtcEventLog*&>(last_log_created_) = fake_event_log.get();

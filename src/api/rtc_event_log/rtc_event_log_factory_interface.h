@@ -26,7 +26,7 @@ class RtcEventLogFactoryInterface {
  public:
   virtual ~RtcEventLogFactoryInterface() = default;
 
-  virtual absl::Nonnull<std::unique_ptr<RtcEventLog>> Create(
+  virtual std::unique_ptr<RtcEventLog> absl_nonnull Create(
       const Environment& env) const = 0;
 };
 

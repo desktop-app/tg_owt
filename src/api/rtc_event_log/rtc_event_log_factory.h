@@ -31,7 +31,7 @@ class RTC_EXPORT RtcEventLogFactory : public RtcEventLogFactoryInterface {
 
   ~RtcEventLogFactory() override = default;
 
-  absl::Nonnull<std::unique_ptr<RtcEventLog>> Create(
+  std::unique_ptr<RtcEventLog> absl_nonnull Create(
       const Environment& env) const override;
 };
 

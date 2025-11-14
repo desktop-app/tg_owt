@@ -29,11 +29,11 @@ using ::cricket::MediaEngineInterface;
 
 void EnableFakeMedia(
     PeerConnectionFactoryDependencies& deps,
-    absl::Nonnull<std::unique_ptr<FakeMediaEngine>> fake_media_engine) {
+    std::unique_ptr<FakeMediaEngine> absl_nonnull fake_media_engine) {
   class FakeMediaFactory : public MediaFactory {
    public:
     explicit FakeMediaFactory(
-        absl::Nonnull<std::unique_ptr<FakeMediaEngine>> fake)
+        std::unique_ptr<FakeMediaEngine> absl_nonnull fake)
         : fake_(std::move(fake)) {}
 
     std::unique_ptr<Call> CreateCall(const CallConfig& config) override {
@@ -49,7 +49,7 @@ void EnableFakeMedia(
     }
 
    private:
-    absl::Nullable<std::unique_ptr<FakeMediaEngine>> fake_;
+    std::unique_ptr<FakeMediaEngine> absl_nullable fake_;
   };
 
   deps.media_factory =
