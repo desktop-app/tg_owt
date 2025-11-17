@@ -16,24 +16,24 @@
 
 namespace webrtc {
 
-absl::Nullable<std::unique_ptr<AecDump>> AecDumpFactory::Create(
+std::unique_ptr<AecDump> absl_nullable AecDumpFactory::Create(
     FileWrapper file,
     int64_t max_log_size_bytes,
-    absl::Nonnull<TaskQueueBase*> worker_queue) {
+    TaskQueueBase* absl_nonnull worker_queue) {
   return nullptr;
 }
 
-absl::Nullable<std::unique_ptr<AecDump>> AecDumpFactory::Create(
+std::unique_ptr<AecDump> absl_nullable AecDumpFactory::Create(
     absl::string_view file_name,
     int64_t max_log_size_bytes,
-    absl::Nonnull<TaskQueueBase*> worker_queue) {
+    TaskQueueBase* absl_nonnull worker_queue) {
   return nullptr;
 }
 
-absl::Nullable<std::unique_ptr<AecDump>> AecDumpFactory::Create(
-    absl::Nonnull<FILE*> handle,
+std::unique_ptr<AecDump> absl_nullable AecDumpFactory::Create(
+    FILE* absl_nonnull handle,
     int64_t max_log_size_bytes,
-    absl::Nonnull<TaskQueueBase*> worker_queue) {
+    TaskQueueBase* absl_nonnull worker_queue) {
   return nullptr;
 }
 }  // namespace webrtc
