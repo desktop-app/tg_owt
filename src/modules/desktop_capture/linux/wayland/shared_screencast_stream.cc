@@ -13,6 +13,8 @@
 #include <fcntl.h>
 #include <libdrm/drm_fourcc.h>
 #include <pipewire/pipewire.h>
+#include <spa/pod/parser.h>
+#include <spa/pod/iter.h>
 #include <spa/param/video/format-utils.h>
 #include <sys/mman.h>
 

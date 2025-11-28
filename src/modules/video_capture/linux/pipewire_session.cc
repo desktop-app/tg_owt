@@ -15,6 +15,7 @@
 #include <spa/param/format.h>
 #include <spa/param/video/raw.h>
 #include <spa/pod/parser.h>
+#include <spa/pod/iter.h>
 
 #include "common_video/libyuv/include/webrtc_libyuv.h"
 #include "modules/video_capture/device_info_impl.h"
