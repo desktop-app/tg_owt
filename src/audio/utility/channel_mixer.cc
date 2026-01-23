@@ -15,6 +15,8 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
 
+#include <cstring>
+
 namespace webrtc {
 
 ChannelMixer::ChannelMixer(ChannelLayout input_layout,

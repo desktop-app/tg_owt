@@ -10,6 +10,7 @@
 #include "modules/audio_processing/aec3/alignment_mixer.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "rtc_base/checks.h"
 

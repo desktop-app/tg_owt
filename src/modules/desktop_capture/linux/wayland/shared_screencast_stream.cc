@@ -18,6 +18,7 @@
 #include <spa/param/video/format-utils.h>
 #include <sys/mman.h>
 
+#include <cstring>
 #include <vector>
 
 #include "absl/memory/memory.h"

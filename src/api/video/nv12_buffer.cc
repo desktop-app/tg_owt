@@ -16,6 +16,8 @@
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/scale.h"
 
+#include <cstring>
+
 namespace webrtc {
 
 namespace {

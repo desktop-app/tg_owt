@@ -12,6 +12,7 @@
 #define NET_DCSCTP_PACKET_BOUNDED_BYTE_WRITER_H_
 
 #include <algorithm>
+#include <cstring>
 
 #include "api/array_view.h"
 
