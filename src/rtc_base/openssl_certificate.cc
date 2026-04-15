@@ -15,9 +15,11 @@
 #include "rtc_base/win32.h"  // NOLINT
 #endif                       // WEBRTC_WIN
 
+#include <openssl/asn1.h>
 #include <openssl/bio.h>
 #include <openssl/bn.h>
 #include <openssl/pem.h>
+#include <openssl/x509.h>
 #include <time.h>
 
 #include <memory>
@@ -27,8 +29,9 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/message_digest.h"
 #include "rtc_base/openssl_digest.h"
-#include "rtc_base/openssl_identity.h"
+#include "rtc_base/openssl_key_pair.h"
 #include "rtc_base/openssl_utility.h"
+#include "rtc_base/time_utils.h"
 
 namespace rtc {
 namespace {
@@ -275,16 +278,10 @@ bool OpenSSLCertificate::operator!=(const OpenSSLCertificate& other) const {
 }
 
 int64_t OpenSSLCertificate::CertificateExpirationTime() const {
-  ASN1_TIME* expire_time = X509_get_notAfter(x509_);
-  bool long_format;
-  if (expire_time->type == V_ASN1_UTCTIME) {
-    long_format = false;
-  } else if (expire_time->type == V_ASN1_GENERALIZEDTIME) {
-    long_format = true;
-  } else {
-    return -1;
+  if (tm tm; ASN1_TIME_to_tm(X509_get0_notAfter(x509_), &tm)) {
+    return TmToSeconds(tm);
   }
-  return ASN1TimeToSec(expire_time->data, expire_time->length, long_format);
+  return -1;
 }
 
 }  // namespace rtc
