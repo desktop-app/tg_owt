@@ -112,8 +112,8 @@ if (TG_OWT_USE_PIPEWIRE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GBM REQUIRED gbm)
     pkg_check_modules(DRM REQUIRED libdrm)
-    pkg_check_modules(GL REQUIRED gl)
-    pkg_check_modules(EGL REQUIRED egl)
+    find_path(GL_INCLUDE_DIRS GL/gl.h REQUIRED)
+    find_path(EGL_INCLUDE_DIRS EGL/egl.h REQUIRED)
 
     target_include_directories(tg_owt SYSTEM
     PRIVATE
