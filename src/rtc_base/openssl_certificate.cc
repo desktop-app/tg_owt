@@ -275,16 +275,18 @@ bool OpenSSLCertificate::operator!=(const OpenSSLCertificate& other) const {
 }
 
 int64_t OpenSSLCertificate::CertificateExpirationTime() const {
-  ASN1_TIME* expire_time = X509_get_notAfter(x509_);
+  const ASN1_TIME* expire_time = X509_get0_notAfter(x509_);
   bool long_format;
-  if (expire_time->type == V_ASN1_UTCTIME) {
+  const int time_type = ASN1_STRING_type(expire_time);
+  if (time_type == V_ASN1_UTCTIME) {
     long_format = false;
-  } else if (expire_time->type == V_ASN1_GENERALIZEDTIME) {
+  } else if (time_type == V_ASN1_GENERALIZEDTIME) {
     long_format = true;
   } else {
     return -1;
   }
-  return ASN1TimeToSec(expire_time->data, expire_time->length, long_format);
+  return ASN1TimeToSec(ASN1_STRING_get0_data(expire_time),
+                       ASN1_STRING_length(expire_time), long_format);
 }
 
 }  // namespace rtc
