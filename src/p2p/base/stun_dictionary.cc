@@ -329,15 +329,20 @@ std::unique_ptr<StunByteStringAttribute> StunDictionaryWriter::CreateDelta() {
 // Apply a delta ack, i.e prune list of pending changes.
 void StunDictionaryWriter::ApplyDeltaAck(const StunUInt64Attribute& ack) {
   uint64_t acked_version = ack.value();
-  auto entries_to_remove = std::remove_if(
-      pending_.begin(), pending_.end(),
-      [acked_version](const auto& p) { return p.first <= acked_version; });
 
-  // remove tombstones.
-  for (auto it = entries_to_remove; it != pending_.end(); ++it) {
-    tombstones_.erase((*it).second->type());
+  // remove tombstones of the acked entries. This must be done before
+  // std::remove_if, which leaves unspecified (in practice: still pending)
+  // elements in the tail instead of the removed ones.
+  for (const auto& p : pending_) {
+    if (p.first <= acked_version) {
+      tombstones_.erase(p.second->type());
+    }
   }
-  pending_.erase(entries_to_remove, pending_.end());
+  pending_.erase(
+      std::remove_if(
+          pending_.begin(), pending_.end(),
+          [acked_version](const auto& p) { return p.first <= acked_version; }),
+      pending_.end());
 }
 
 // Check if a key has a pending change (i.e a change
