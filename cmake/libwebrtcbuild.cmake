@@ -1,10 +1,6 @@
 add_library(libwebrtcbuild INTERFACE)
 add_library(tg_owt::libwebrtcbuild ALIAS libwebrtcbuild)
 
-target_link_libraries(libwebrtcbuild
-INTERFACE
-    tg_owt::libyuv
-)
 link_libabsl(libwebrtcbuild)
 
 target_compile_definitions(libwebrtcbuild
