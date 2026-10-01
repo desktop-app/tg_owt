@@ -117,6 +117,14 @@ absl::optional<ScalabilityMode> ScalabilityModeFromTemporalLayers(
   return absl::nullopt;
 }
 
+void OpenH264TraceCallback(void* context, int level, const char* message) {
+  if (level <= WELS_LOG_ERROR) {
+    RTC_LOG(LS_ERROR) << message;
+  } else {
+    RTC_LOG(LS_VERBOSE) << message;
+  }
+}
+
 }  // namespace
 
 // Helper method used by H264EncoderImpl::Encode.
@@ -264,6 +272,8 @@ int32_t H264EncoderImpl::InitEncode(const VideoCodec* inst,
       openh264_encoder->SetOption(ENCODER_OPTION_TRACE_LEVEL, &trace_level);
     }
     // else WELS_LOG_DEFAULT is used by default.
+    WelsTraceCallback trace_callback = &OpenH264TraceCallback;
+    openh264_encoder->SetOption(ENCODER_OPTION_TRACE_CALLBACK, &trace_callback);
 
     // Store h264 encoder.
     encoders_[i] = openh264_encoder;
