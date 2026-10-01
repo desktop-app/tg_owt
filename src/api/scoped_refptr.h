@@ -66,6 +66,24 @@
 #include <memory>
 #include <utility>
 
+#include "absl/base/nullability.h"
+
+// Compatibility shim for abseil versions that remove absl::Nonnull and
+// absl::Nullable.
+#if ABSL_LTS_RELEASE_VERSION > 20250512
+namespace absl {
+#ifdef absl_nonnull
+template<typename T>
+using Nonnull = T absl_nonnull;
+#endif // absl_nonnull
+
+#ifdef absl_nullable
+template<typename T>
+using Nullable = T absl_nullable;
+#endif // absl_nullable
+}
+#endif // ABSL_LTS_RELEASE_VERSION > 20250512
+
 namespace webrtc {
 
 template <class T>

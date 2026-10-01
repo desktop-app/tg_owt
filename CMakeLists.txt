@@ -16,7 +16,6 @@ endif()
 set(not_packaged_build 0)
 if (NOT TG_OWT_PACKAGED_BUILD)
     set(not_packaged_build 1)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET 10.13 CACHE STRING "Minimum OS X deployment version" FORCE)
 endif()
 
 option(BUILD_SHARED_LIBS "Builds shared libraries instead of static." OFF)
@@ -113,8 +112,8 @@ if (TG_OWT_USE_PIPEWIRE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GBM REQUIRED gbm)
     pkg_check_modules(DRM REQUIRED libdrm)
-    pkg_check_modules(GL REQUIRED gl)
-    pkg_check_modules(EGL REQUIRED egl)
+    find_path(GL_INCLUDE_DIRS GL/gl.h REQUIRED)
+    find_path(EGL_INCLUDE_DIRS EGL/egl.h REQUIRED)
 
     target_include_directories(tg_owt SYSTEM
     PRIVATE
@@ -166,6 +165,21 @@ target_link_libraries(tg_owt PUBLIC tg_owt::libwebrtcbuild)
 
 if (TG_OWT_USE_X11)
     link_x11(tg_owt)
+endif()
+
+if (WIN32)
+    target_link_libraries(tg_owt
+    PRIVATE
+        d3d11
+        dwmapi
+        dxgi
+        iphlpapi
+        secur32
+        shcore
+        strmiids
+        winmm
+        ws2_32
+    )
 endif()
 
 function(add_sublibrary postfix)
@@ -2384,7 +2398,7 @@ if (is_x86 OR is_x64)
     )
 endif()
 
-if (NOT TG_OWT_USE_X11)
+if (UNIX AND NOT APPLE AND NOT TG_OWT_USE_X11)
     remove_target_sources(tg_owt ${webrtc_loc}
         # src/modules/desktop_capture/BUILD.gn (rtc_use_x11_extensions)
         modules/desktop_capture/linux/x11/mouse_cursor_monitor_x11.cc
@@ -2670,6 +2684,7 @@ install(
     EXPORT tg_owtTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 install(

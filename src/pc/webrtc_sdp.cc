@@ -1560,9 +1560,9 @@ void BuildMediaDescription(const ContentInfo* content_info,
   AddLine(os.str(), message);
 
   if (cricket::IsDtlsSctp(media_desc->protocol())) {
-    const cricket::SctpDataContentDescription* data_desc =
-        media_desc->as_sctp();
-    BuildSctpContentAttributes(message, data_desc);
+    if (const auto data_desc = media_desc->as_sctp()) {
+      BuildSctpContentAttributes(message, data_desc);
+    }
   } else if (cricket::IsRtpProtocol(media_desc->protocol())) {
     BuildRtpContentAttributes(media_desc, media_type, msid_signaling, message);
   }

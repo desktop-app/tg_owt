@@ -15,6 +15,7 @@
 #include <spa/param/format.h>
 #include <spa/param/video/raw.h>
 #include <spa/pod/parser.h>
+#include <spa/pod/iter.h>
 
 #include "common_video/libyuv/include/webrtc_libyuv.h"
 #include "modules/video_capture/device_info_impl.h"
@@ -60,7 +61,7 @@ PipeWireNode::PipeWireNode(PipeWireSession* session,
       .param = OnNodeParam,
   };
 
-  pw_node_add_listener(proxy_, &node_listener_, &node_events, this);
+  pw_node_add_listener(reinterpret_cast<struct pw_node*>(proxy_), &node_listener_, &node_events, this);
 }
 
 PipeWireNode::~PipeWireNode() {
@@ -94,7 +95,7 @@ void PipeWireNode::OnNodeInfo(void* data, const pw_node_info* info) {
       uint32_t id = info->params[i].id;
       if (id == SPA_PARAM_EnumFormat &&
           info->params[i].flags & SPA_PARAM_INFO_READ) {
-        pw_node_enum_params(that->proxy_, 0, id, 0, UINT32_MAX, nullptr);
+        pw_node_enum_params(reinterpret_cast<struct pw_node*>(that->proxy_), 0, id, 0, UINT32_MAX, nullptr);
         break;
       }
     }

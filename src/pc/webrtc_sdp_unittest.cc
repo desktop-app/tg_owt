@@ -4871,7 +4871,10 @@ TEST_F(WebRtcSdpTest, SctpPortInUnsupportedContent) {
       "a=sctp-port\r\n";
 
   JsepSessionDescription jdesc_output(kDummyType);
-  EXPECT_TRUE(SdpDeserialize(sdp, &jdesc_output));
+  ASSERT_TRUE(SdpDeserialize(sdp, &jdesc_output));
+  const auto serialized = SdpSerialize(jdesc_output);
+  EXPECT_NE(std::string::npos, serialized.find("m=o 0 DTLS/SCTP 0\r\n"));
+  EXPECT_EQ(std::string::npos, serialized.find("a=sctp-port"));
 }
 
 TEST_F(WebRtcSdpTest, IllegalMidCharacterValue) {

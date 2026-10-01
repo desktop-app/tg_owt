@@ -13,21 +13,6 @@ endfunction()
 function(init_target target_name) # init_target(my_target folder_name)
     target_compile_features(${target_name} PUBLIC cxx_std_20)
 
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-        set_target_properties(${target_name} PROPERTIES
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    endif()
-    set_target_properties(${target_name} PROPERTIES
-        XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_WEAK YES
-        XCODE_ATTRIBUTE_GCC_INLINES_ARE_PRIVATE_EXTERN YES
-        XCODE_ATTRIBUTE_GCC_SYMBOLS_PRIVATE_EXTERN YES
-    )
-    if (NOT TG_OWT_SPECIAL_TARGET STREQUAL "")
-        set_target_properties(${target_name} PROPERTIES
-            XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL $<IF:$<CONFIG:Debug>,0,fast>
-            XCODE_ATTRIBUTE_LLVM_LTO $<IF:$<CONFIG:Debug>,NO,YES>
-        )
-    endif()
     target_compile_definitions(${target_name}
     PRIVATE
         HAVE_SCTP
@@ -60,7 +45,6 @@ function(init_target target_name) # init_target(my_target folder_name)
                 /MP     # Enable multi process build.
                 /EHsc   # Catch C++ exceptions only, extern C functions never throw a C++ exception.
                 # /Zc:wchar_t- # don't tread wchar_t as builtin type
-                /Zi
             )
         endif()
     else()
