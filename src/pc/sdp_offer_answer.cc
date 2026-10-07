@@ -2183,7 +2183,7 @@ void SdpOfferAnswerHandler::ApplyRemoteDescriptionUpdateTransceiverState(
       // direction.
       transceiver->set_current_direction(local_direction);
       // 2.2.8.1.11.[3-6]: Set the transport internal slots.
-      if (transceiver->mid()) {
+      if (transceiver->mid() && !transceiver->stopped()) {
         auto dtls_transport = LookupDtlsTransportByMid(
             context_->network_thread(), transport_controller_s(),
             *transceiver->mid());
@@ -3930,7 +3930,7 @@ RTCError SdpOfferAnswerHandler::UpdateTransceiverChannel(
   RTC_DCHECK(IsUnifiedPlan());
   RTC_DCHECK(transceiver);
   cricket::ChannelInterface* channel = transceiver->internal()->channel();
-  if (content.rejected) {
+  if (content.rejected || transceiver->internal()->stopped()) {
     if (channel) {
       transceiver->internal()->ClearChannel();
     }
@@ -4954,6 +4954,7 @@ void SdpOfferAnswerHandler::RemoveStoppedTransceivers() {
       RTC_LOG(LS_INFO)
           << "Dropping stopped transceiver that was never associated";
     }
+    transceiver->internal()->ClearChannel();
     transceivers()->Remove(transceiver);
   }
 }
