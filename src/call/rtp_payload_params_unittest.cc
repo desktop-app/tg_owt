@@ -560,6 +560,22 @@ TEST_F(RtpPayloadParamsVp8ToGenericTest, FrameIdGaps) {
   ConvertAndCheck(1, 20, VideoFrameType::kVideoFrameDelta, kNoSync, {10, 15});
 }
 
+TEST(RtpPayloadParamsTest, RejectsVp8TemporalIndexOutsideDecodeTargets) {
+  for (int temporal_index = kMaxTemporalStreams; temporal_index < 8;
+       ++temporal_index) {
+    RtpPayloadState state{};
+    RtpPayloadParams params(kSsrc1, &state, FieldTrialBasedConfig());
+    EncodedImage encoded_image;
+    encoded_image._frameType = VideoFrameType::kVideoFrameDelta;
+    CodecSpecificInfo codec_info{};
+    codec_info.codecType = kVideoCodecVP8;
+    codec_info.codecSpecific.VP8.temporalIdx = temporal_index;
+    const auto header =
+        params.GetRtpVideoHeader(encoded_image, &codec_info, 0);
+    EXPECT_FALSE(header.generic);
+  }
+}
+
 TEST(RtpPayloadParamsVp9ToGenericTest, NoScalability) {
   RtpPayloadState state;
   RtpPayloadParams params(/*ssrc=*/123, &state, FieldTrialBasedConfig());
