@@ -73,8 +73,6 @@ include(cmake/generate_target.cmake)
 include(cmake/generate_field_trials.cmake)
 include(cmake/external.cmake)
 include(cmake/libpffft.cmake)
-include(cmake/librnnoise.cmake)
-include(cmake/libyuv.cmake)
 if (APPLE)
     include(cmake/libsdkmacos.cmake)
 endif()
@@ -129,8 +127,6 @@ set_target_properties(tg_owt PROPERTIES SOVERSION 0 VERSION 0.0.0)
 target_link_libraries(tg_owt
 PRIVATE
     tg_owt::libpffft
-    tg_owt::librnnoise
-    tg_owt::libyuv
 )
 
 if (is_x86 OR is_x64)
@@ -154,6 +150,8 @@ link_libsrtp(tg_owt)
 link_libvpx(tg_owt)
 link_crc32c(tg_owt)
 link_dl(tg_owt)
+link_libyuv(tg_owt)
+link_rnnoise(tg_owt)
 
 if (TG_OWT_BUILD_AUDIO_BACKENDS AND (UNIX AND NOT APPLE))
     link_libalsa(tg_owt)
@@ -2643,12 +2641,33 @@ endif()
 list(APPEND export_targets
     libwebrtcbuild
     libpffft
-    librnnoise
-    libyuv
 )
 if (NOT absl_FOUND)
     include(cmake/libabsl.cmake)
     list(APPEND export_targets libabsl)
+endif()
+if (NOT LIBYUV_FOUND)
+    include(cmake/libyuv.cmake)
+    list(APPEND export_targets libyuv)
+    target_link_libraries(libwebrtcbuild
+    INTERFACE
+        tg_owt::libyuv
+    )
+    target_include_directories(libwebrtcbuild
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libyuv/include
+    )
+    target_include_directories(tg_owt
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libyuv/include
+    )
+else()
+    target_link_libraries(libwebrtcbuild INTERFACE ${LIBYUV_LINK_LIBRARIES})
+    target_compile_definitions(tg_owt PRIVATE USE_EXTERNAL_LIBYUV)
+endif()
+if (NOT RNNOISE_FOUND)
+    include(cmake/librnnoise.cmake)
+    list(APPEND export_targets librnnoise)
 endif()
 if (NOT SRTP_FOUND)
     include(cmake/libsrtp.cmake)
