@@ -926,9 +926,9 @@ TEST_F(RetransmissionQueueTest, HandleGapAckBlocksMatchingNoInflightData) {
               testing::ElementsAre(TSN(10), TSN(11), TSN(12), TSN(13), TSN(14),
                                    TSN(15), TSN(16), TSN(17)));
 
-  // Ack 9, 20-25. This is an invalid SACK, but should still be handled.
-  queue.HandleSack(
-      now_, SackChunk(TSN(9), kArwnd, {SackChunk::GapAckBlock(11, 16)}, {}));
+  // Ack 9, 20-25. Reject the SACK because those chunks were never sent.
+  EXPECT_FALSE(queue.HandleSack(
+      now_, SackChunk(TSN(9), kArwnd, {SackChunk::GapAckBlock(11, 16)}, {})));
 
   EXPECT_THAT(queue.GetChunkStatesForTesting(),
               ElementsAre(Pair(TSN(9), State::kAcked),      //
@@ -954,6 +954,59 @@ TEST_F(RetransmissionQueueTest, HandleInvalidGapAckBlocks) {
   // Gap ack blocks are just ignore.
   EXPECT_THAT(queue.GetChunkStatesForTesting(),
               ElementsAre(Pair(TSN(9), State::kAcked)));
+}
+
+TEST_F(RetransmissionQueueTest, RejectsGapBeyondHighestSentTsn) {
+  RetransmissionQueue queue = CreateQueue();
+  EXPECT_CALL(producer_, Produce)
+      .WillOnce(CreateChunk(OutgoingMessageId(0)))
+      .WillOnce(CreateChunk(OutgoingMessageId(1)))
+      .WillOnce(CreateChunk(OutgoingMessageId(2)))
+      .WillRepeatedly([](Timestamp, size_t) { return absl::nullopt; });
+  EXPECT_THAT(GetSentPacketTSNs(queue), ElementsAre(TSN(10), TSN(11), TSN(12)));
+  const auto before = queue.GetChunkStatesForTesting();
+
+  EXPECT_FALSE(queue.HandleSack(
+      now_, SackChunk(TSN(9), kArwnd, {SackChunk::GapAckBlock(2, 4)}, {})));
+  EXPECT_EQ(queue.GetChunkStatesForTesting(), before);
+  EXPECT_FALSE(queue.HandleSack(
+      now_, SackChunk(TSN(9), kArwnd, {SackChunk::GapAckBlock(1, 40000)}, {})));
+  EXPECT_EQ(queue.GetChunkStatesForTesting(), before);
+  EXPECT_TRUE(queue.HandleSack(
+      now_, SackChunk(TSN(9), kArwnd, {SackChunk::GapAckBlock(2, 3)}, {})));
+  EXPECT_THAT(queue.GetChunkStatesForTesting(),
+              ElementsAre(Pair(TSN(9), State::kAcked),
+                          Pair(TSN(10), State::kNacked),
+                          Pair(TSN(11), State::kAcked),
+                          Pair(TSN(12), State::kAcked)));
+}
+
+TEST_F(RetransmissionQueueTest, ValidatesGapBoundsAcrossTsnWrap) {
+  RetransmissionQueue queue(
+      "", &callbacks_, TSN(0xfffffffe), kArwnd, producer_,
+      on_rtt_.AsStdFunction(), on_clear_retransmission_counter_.AsStdFunction(),
+      *timer_, options_, true, false);
+  EXPECT_CALL(producer_, Produce)
+      .WillOnce(CreateChunk(OutgoingMessageId(0)))
+      .WillOnce(CreateChunk(OutgoingMessageId(1)))
+      .WillOnce(CreateChunk(OutgoingMessageId(2)))
+      .WillRepeatedly([](Timestamp, size_t) { return absl::nullopt; });
+  EXPECT_THAT(GetSentPacketTSNs(queue),
+              ElementsAre(TSN(0xfffffffe), TSN(0xffffffff), TSN(0)));
+  const auto before = queue.GetChunkStatesForTesting();
+
+  EXPECT_FALSE(queue.HandleSack(
+      now_, SackChunk(TSN(0xfffffffd), kArwnd,
+                     {SackChunk::GapAckBlock(2, 4)}, {})));
+  EXPECT_EQ(queue.GetChunkStatesForTesting(), before);
+  EXPECT_TRUE(queue.HandleSack(
+      now_, SackChunk(TSN(0xfffffffd), kArwnd,
+                     {SackChunk::GapAckBlock(2, 3)}, {})));
+  EXPECT_THAT(queue.GetChunkStatesForTesting(),
+              ElementsAre(Pair(TSN(0xfffffffd), State::kAcked),
+                          Pair(TSN(0xfffffffe), State::kNacked),
+                          Pair(TSN(0xffffffff), State::kAcked),
+                          Pair(TSN(0), State::kAcked)));
 }
 
 TEST_F(RetransmissionQueueTest, GapAckBlocksDoNotMoveCumTsnAck) {

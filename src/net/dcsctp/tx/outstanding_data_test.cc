@@ -657,5 +657,29 @@ TEST_F(OutstandingDataTest, GeneratesForwardTsnUntilNextStreamResetTsn) {
   EXPECT_FALSE(buf_.ShouldSendForwardTsn());
 }
 
+TEST_F(OutstandingDataTest, NackBetweenAckBlocksDoesNotAccessOutOfBounds) {
+  for (int i = 0; i < 5; ++i) {
+    buf_.Insert(kMessageId, gen_.Ordered({1}, ""), kNow);
+  }
+
+  std::vector<SackChunk::GapAckBlock> malformed_blocks = {
+      SackChunk::GapAckBlock(1, 40000)};
+  buf_.HandleSack(unwrapper_.Unwrap(TSN(10)), malformed_blocks,
+                  /*is_in_fast_recovery=*/false);
+}
+
+TEST_F(OutstandingDataTest, FastRecoveryDoesNotNackBeyondSentData) {
+  for (int i = 0; i < 5; ++i) {
+    buf_.Insert(kMessageId, gen_.Ordered({1}, "BE"), kNow);
+  }
+
+  std::vector<SackChunk::GapAckBlock> malformed_blocks = {
+      SackChunk::GapAckBlock(2, 40000)};
+  buf_.HandleSack(unwrapper_.Unwrap(TSN(15)), malformed_blocks,
+                  /*is_in_fast_recovery=*/true);
+  EXPECT_TRUE(buf_.empty());
+  EXPECT_EQ(buf_.next_tsn().Wrap(), TSN(15));
+}
+
 }  // namespace
 }  // namespace dcsctp
