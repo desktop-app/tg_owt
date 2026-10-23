@@ -973,14 +973,24 @@ SSL_CTX* OpenSSLAdapter::CreateContext(SSLMode mode, bool enable_cache) {
     return nullptr;
   }
 
-#ifndef WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS
+#if defined(WEBRTC_USE_SYSTEM_SSL_ROOT_CERTS)
+#if defined(OPENSSL_IS_BORINGSSL)
+#error "WEBRTC_USE_SYSTEM_SSL_ROOT_CERTS requires OpenSSL, not BoringSSL"
+#endif
+  if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
+    RTC_LOG(LS_ERROR) << "SSL_CTX creation failed: Failed to set the default "
+                         "SSL certificate verification paths.";
+    SSL_CTX_free(ctx);
+    return nullptr;
+  }
+#elif !defined(WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS)
   if (!openssl::LoadBuiltinSSLRootCertificates(ctx)) {
     RTC_LOG(LS_ERROR) << "SSL_CTX creation failed: Failed to load any trusted "
                          "ssl root certificates.";
     SSL_CTX_free(ctx);
     return nullptr;
   }
-#endif  // WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS
+#endif  // WEBRTC_USE_SYSTEM_SSL_ROOT_CERTS
 
 #if !defined(NDEBUG)
   SSL_CTX_set_info_callback(ctx, SSLInfoCallback);
