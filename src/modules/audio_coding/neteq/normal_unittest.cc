@@ -142,6 +142,25 @@ TEST(Normal, LastModeExpand120msPacket) {
   EXPECT_CALL(expand, Die());  // Called when `expand` goes out of scope.
 }
 
+TEST(Normal, LastModeRfc3389CngSmallInput) {
+  constexpr size_t kChannels = 1;
+  constexpr size_t kInputFrames = 10;
+  MockDecoderDatabase db;
+  BackgroundNoise bgn(kChannels);
+  Normal normal(48000, &db, bgn, nullptr, nullptr);
+  EXPECT_CALL(db, GetActiveCngDecoder()).WillOnce(::testing::Return(nullptr));
+  EXPECT_CALL(db, Die());
+  AudioMultiVector output(kChannels);
+  std::vector<int16_t> input(kChannels * kInputFrames, 1000);
+  EXPECT_EQ(normal.Process(input.data(), input.size(), NetEq::Mode::kRfc3389Cng,
+                           &output),
+            static_cast<int>(input.size()));
+  EXPECT_EQ(output.Size(), kInputFrames);
+  for (size_t i = 0; i < kInputFrames; ++i) {
+    EXPECT_EQ(output[0][i], input[i]);
+  }
+}
+
 // TODO(hlundin): Write more tests.
 
 }  // namespace webrtc
