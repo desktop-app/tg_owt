@@ -258,6 +258,26 @@ TYPED_TEST(RtpFecTest,
   EXPECT_TRUE(this->generated_fec_packets_.empty());
 }
 
+TYPED_TEST(RtpFecTest,
+           WillNotProtectMediaPacketsWithOutOfOrderWrappedSequenceNumbers) {
+  for (uint16_t middle_seq_num : {46, 47}) {
+    auto media_packets =
+        this->media_packet_generator_.ConstructMediaPackets(3);
+    ASSERT_EQ(3u, media_packets.size());
+    auto it = media_packets.begin();
+    ByteWriter<uint16_t>::WriteBigEndian((*it++)->data.MutableData() + 2, 0);
+    ByteWriter<uint16_t>::WriteBigEndian(
+        (*it++)->data.MutableData() + 2, middle_seq_num);
+    ByteWriter<uint16_t>::WriteBigEndian((*it++)->data.MutableData() + 2, 20);
+
+    std::list<ForwardErrorCorrection::Packet*> generated_fec_packets;
+    EXPECT_LT(this->fec_.EncodeFec(media_packets, 127, 3, false,
+                                 kFecMaskBursty, &generated_fec_packets),
+              0);
+    EXPECT_TRUE(generated_fec_packets.empty());
+  }
+}
+
 TYPED_TEST(RtpFecTest, FecRecoveryNoLoss) {
   constexpr int kNumImportantPackets = 0;
   constexpr bool kUseUnequalProtection = false;

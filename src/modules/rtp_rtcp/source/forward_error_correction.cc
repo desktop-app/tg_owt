@@ -290,9 +290,9 @@ int ForwardErrorCorrection::InsertZerosInPacketMasks(
   size_t old_bit_index = 1;
   // Insert zeros in the bit mask for every hole in the sequence.
   while (media_packets_it != media_packets.end()) {
-    if (new_bit_index == max_media_packets) {
-      // We can only cover up to 48 packets.
-      break;
+    if (new_bit_index >= max_media_packets) {
+      // Repeated wraps can exceed the initial sequence-number estimate.
+      return -1;
     }
     uint16_t seq_num = ParseSequenceNumber((*media_packets_it)->data.data());
     const int num_zeros_to_insert =
@@ -301,8 +301,11 @@ int ForwardErrorCorrection::InsertZerosInPacketMasks(
       internal::InsertZeroColumns(num_zeros_to_insert, tmp_packet_masks_,
                                   tmp_packet_mask_size, num_fec_packets,
                                   new_bit_index);
+      new_bit_index += num_zeros_to_insert;
+      if (new_bit_index >= max_media_packets) {
+        return -1;
+      }
     }
-    new_bit_index += num_zeros_to_insert;
     internal::CopyColumn(tmp_packet_masks_, tmp_packet_mask_size, packet_masks_,
                          packet_mask_size_, num_fec_packets, new_bit_index,
                          old_bit_index);
