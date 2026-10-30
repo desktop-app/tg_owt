@@ -96,11 +96,11 @@ void RotateDesktopFrame(const DesktopFrame& source,
                         const DesktopVector& target_offset,
                         DesktopFrame* target) {
   RTC_DCHECK(target);
-  RTC_DCHECK(DesktopRect::MakeSize(source.size()).ContainsRect(source_rect));
+  RTC_CHECK(DesktopRect::MakeSize(source.size()).ContainsRect(source_rect));
   // The rectangle in `target`.
   const DesktopRect target_rect =
       RotateAndOffsetRect(source_rect, source.size(), rotation, target_offset);
-  RTC_DCHECK(DesktopRect::MakeSize(target->size()).ContainsRect(target_rect));
+  RTC_CHECK(DesktopRect::MakeSize(target->size()).ContainsRect(target_rect));
 
   if (target_rect.is_empty()) {
     return;

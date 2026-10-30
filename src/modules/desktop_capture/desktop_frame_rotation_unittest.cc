@@ -38,6 +38,26 @@ ArrayDesktopFrame::~ArrayDesktopFrame() = default;
 
 }  // namespace
 
+#if GTEST_HAS_DEATH_TEST
+TEST(DesktopFrameRotationDeathTest, RejectsSourceOutsideFrame) {
+  BasicDesktopFrame frame(DesktopSize(4, 3));
+  BasicDesktopFrame target(DesktopSize(4, 3));
+  EXPECT_DEATH(
+      RotateDesktopFrame(frame, DesktopRect::MakeXYWH(0, 0, 5, 3),
+                         Rotation::CLOCK_WISE_0, DesktopVector(), &target),
+      "ContainsRect");
+}
+
+TEST(DesktopFrameRotationDeathTest, RejectsRotatedTargetOutsideFrame) {
+  BasicDesktopFrame frame(DesktopSize(4, 3));
+  BasicDesktopFrame target(DesktopSize(3, 4));
+  EXPECT_DEATH(
+      RotateDesktopFrame(frame, DesktopRect::MakeSize(frame.size()),
+                         Rotation::CLOCK_WISE_90, DesktopVector(1, 0), &target),
+      "ContainsRect");
+}
+#endif  // GTEST_HAS_DEATH_TEST
+
 TEST(DesktopFrameRotationTest, CopyRect3x4) {
   // A DesktopFrame of 4-pixel width by 3-pixel height.
   static uint32_t frame_pixels[] = {

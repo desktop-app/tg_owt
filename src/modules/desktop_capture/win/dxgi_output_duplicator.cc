@@ -220,6 +220,15 @@ bool DxgiOutputDuplicator::Duplicate(Context* context,
     // triggers screen flickering?
 
     const DesktopFrame& source = texture_->AsDesktopFrame();
+    // A resolution change can deliver a new size before controller reinitialization.
+    if (!source.size().equals(unrotated_size_)) {
+      RTC_LOG(LS_WARNING) << "Captured frame size " << source.size().width()
+                        << "x" << source.size().height()
+                        << " does not match expected size "
+                        << unrotated_size_.width() << "x"
+                        << unrotated_size_.height();
+      return false;
+    }
     if (rotation_ != Rotation::CLOCK_WISE_0) {
       for (DesktopRegion::Iterator it(updated_region); !it.IsAtEnd();
            it.Advance()) {
