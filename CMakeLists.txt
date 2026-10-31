@@ -23,6 +23,8 @@ cmake_dependent_option(TG_OWT_USE_X11 "Use X11 for desktop capture." ON "UNIX; N
 cmake_dependent_option(TG_OWT_USE_PIPEWIRE "Use pipewire for desktop capture." ON "UNIX; NOT APPLE" OFF)
 cmake_dependent_option(TG_OWT_DLOPEN_PIPEWIRE "dlopen pipewire for desktop capture." ${not_packaged_build} TG_OWT_USE_PIPEWIRE OFF)
 option(TG_OWT_BUILD_AUDIO_BACKENDS "Build webrtc audio backends." OFF)
+option(TG_OWT_USE_SYSTEM_SSL_ROOT_CERTS
+    "Use OpenSSL's default trust store instead of the bundled CA roots." OFF)
 
 if (BUILD_SHARED_LIBS)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -81,6 +83,17 @@ endif()
 
 add_library(tg_owt)
 init_target(tg_owt)
+
+if (TG_OWT_USE_SYSTEM_SSL_ROOT_CERTS)
+    if (NOT TG_OWT_PACKAGED_BUILD)
+        message(FATAL_ERROR
+            "TG_OWT_USE_SYSTEM_SSL_ROOT_CERTS requires a packaged build using system OpenSSL.")
+    endif()
+    target_compile_definitions(tg_owt PRIVATE
+        WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS
+        WEBRTC_USE_SYSTEM_SSL_ROOT_CERTS
+    )
+endif()
 
 generate_field_trials(tg_owt)
 
