@@ -310,6 +310,11 @@ static bool ValidateStreamParams(const StreamParams& sp) {
   // Validate that a primary SSRC can only have one ssrc-group per semantics.
   std::map<uint32_t, std::set<std::string>> primary_ssrc_to_semantics;
   for (const auto& group : sp.ssrc_groups) {
+    if (group.ssrcs.empty()) {
+      RTC_LOG(LS_ERROR) << "Empty ssrc-group '" << group.semantics
+                        << "' in stream parameters: " << sp.ToString();
+      return false;
+    }
     auto result = primary_ssrc_to_semantics.try_emplace(
         group.ssrcs[0], std::set<std::string>({group.semantics}));
     if (!result.second) {
