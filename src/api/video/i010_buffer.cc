@@ -9,6 +9,8 @@
  */
 #include "api/video/i010_buffer.h"
 
+#include <string.h>
+
 #include <utility>
 
 #include "api/make_ref_counted.h"
@@ -134,6 +136,11 @@ rtc::scoped_refptr<I420BufferInterface> I010Buffer::ToI420() {
   RTC_DCHECK_EQ(res, 0);
 
   return i420_buffer;
+}
+
+void I010Buffer::InitializeData() {
+  memset(data_.get(), 0,
+         I010DataSize(height_, stride_y_, stride_u_, stride_v_));
 }
 
 int I010Buffer::width() const {

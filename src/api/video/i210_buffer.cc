@@ -9,6 +9,8 @@
  */
 #include "api/video/i210_buffer.h"
 
+#include <string.h>
+
 #include <utility>
 
 #include "api/make_ref_counted.h"
@@ -131,6 +133,11 @@ rtc::scoped_refptr<I420BufferInterface> I210Buffer::ToI420() {
                      i420_buffer->MutableDataV(), i420_buffer->StrideV(),
                      width(), height());
   return i420_buffer;
+}
+
+void I210Buffer::InitializeData() {
+  memset(data_.get(), 0,
+         I210DataSize(height_, stride_y_, stride_u_, stride_v_));
 }
 
 int I210Buffer::width() const {

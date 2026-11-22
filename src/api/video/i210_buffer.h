@@ -41,6 +41,8 @@ class I210Buffer : public I210BufferInterface {
   // VideoFrameBuffer implementation.
   rtc::scoped_refptr<I420BufferInterface> ToI420() override;
 
+  void InitializeData();
+
   // PlanarYuv16BBuffer implementation.
   int width() const override;
   int height() const override;

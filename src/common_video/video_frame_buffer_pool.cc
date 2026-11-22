@@ -254,6 +254,9 @@ rtc::scoped_refptr<I010Buffer> VideoFrameBufferPool::CreateI010Buffer(
   // Allocate new buffer.
   rtc::scoped_refptr<I010Buffer> buffer = I010Buffer::Create(width, height);
 
+  if (zero_initialize_)
+    buffer->InitializeData();
+
   buffers_.push_back(buffer);
   return buffer;
 }
@@ -281,6 +284,9 @@ rtc::scoped_refptr<I210Buffer> VideoFrameBufferPool::CreateI210Buffer(
   // Allocate new buffer.
   rtc::scoped_refptr<I210Buffer> buffer = I210Buffer::Create(width, height);
 
+  if (zero_initialize_)
+    buffer->InitializeData();
+
   buffers_.push_back(buffer);
   return buffer;
 }
@@ -307,6 +313,9 @@ rtc::scoped_refptr<I410Buffer> VideoFrameBufferPool::CreateI410Buffer(
     return nullptr;
   // Allocate new buffer.
   rtc::scoped_refptr<I410Buffer> buffer = I410Buffer::Create(width, height);
+
+  if (zero_initialize_)
+    buffer->InitializeData();
 
   buffers_.push_back(buffer);
   return buffer;
