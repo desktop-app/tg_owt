@@ -357,7 +357,7 @@ void DataChannelController::AllocateSctpSids(rtc::SSLRole role) {
   const bool ready_to_send =
       data_channel_transport_ && data_channel_transport_->IsReadyToSend();
 
-  std::vector<std::pair<SctpDataChannel*, StreamId>> channels_to_update;
+  std::vector<rtc::scoped_refptr<SctpDataChannel>> channels_to_start;
   std::vector<rtc::scoped_refptr<SctpDataChannel>> channels_to_close;
   for (auto it = sctp_data_channels_n_.begin();
        it != sctp_data_channels_n_.end();) {
@@ -366,11 +366,8 @@ void DataChannelController::AllocateSctpSids(rtc::SSLRole role) {
       if (sid.HasValue()) {
         (*it)->SetSctpSid_n(sid);
         AddSctpDataStream(sid);
-        if (ready_to_send) {
-          RTC_LOG(LS_INFO) << "AllocateSctpSids: Id assigned, ready to send.";
-          (*it)->OnTransportReady();
-        }
-        channels_to_update.push_back(std::make_pair((*it).get(), sid));
+        if (ready_to_send)
+          channels_to_start.push_back(*it);
       } else {
         channels_to_close.push_back(std::move(*it));
         it = sctp_data_channels_n_.erase(it);
@@ -378,6 +375,11 @@ void DataChannelController::AllocateSctpSids(rtc::SSLRole role) {
       }
     }
     ++it;
+  }
+
+  for (const auto& channel : channels_to_start) {
+    RTC_LOG(LS_INFO) << "AllocateSctpSids: Id assigned, ready to send.";
+    channel->OnTransportReady();
   }
 
   // Since closing modifies the list of channels, we have to do the actual
