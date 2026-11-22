@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <deque>
 #include <utility>
+#include <vector>
 
 #include "rtc_base/logging.h"
 
@@ -103,6 +104,7 @@ StunDictionaryView::ParseDelta(const StunByteStringAttribute& delta) {
   }
 
   // Now read all the attributes
+  std::vector<uint16_t> seen_keys;
   std::deque<std::unique_ptr<StunAttribute>> attrs;
   while (buf.Length()) {
     uint16_t key, length, value_type;
@@ -110,6 +112,11 @@ StunDictionaryView::ParseDelta(const StunByteStringAttribute& delta) {
       return webrtc::RTCError(webrtc::RTCErrorType::INVALID_PARAMETER,
                               "Failed to read attribute key");
     }
+    if (std::find(seen_keys.begin(), seen_keys.end(), key) != seen_keys.end()) {
+      return webrtc::RTCError(webrtc::RTCErrorType::INVALID_PARAMETER,
+                              "Duplicate key in delta");
+    }
+    seen_keys.push_back(key);
     if (!buf.ReadUInt16(&length)) {
       return webrtc::RTCError(webrtc::RTCErrorType::INVALID_PARAMETER,
                               "Failed to read attribute length");
