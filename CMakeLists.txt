@@ -519,8 +519,17 @@ PRIVATE
     api/async_dns_resolver.h
     api/audio_options.cc
     api/call/transport.cc
+    api/stats/attribute.cc
     api/stats/attribute.h
+    api/stats/rtc_stats.cc
+    api/stats/rtc_stats.h
+    api/stats/rtc_stats_report.cc
+    api/stats/rtc_stats_report.h
+    api/stats/rtcstats_objects.cc
+    api/stats/rtcstats_objects.h
     api/candidate.cc
+    api/create_modular_peer_connection_factory.cc
+    api/create_modular_peer_connection_factory.h
     api/create_peerconnection_factory.cc
     api/crypto/crypto_options.cc
     api/data_channel_interface.cc
@@ -552,6 +561,8 @@ PRIVATE
     api/neteq/neteq.cc
     api/neteq/tick_timer.cc
     api/peer_connection_interface.cc
+    api/priority.cc
+    api/priority.h
     api/ref_count.h
     api/rtc_error.cc
     api/rtc_event_log/rtc_event_log.cc
@@ -564,6 +575,10 @@ PRIVATE
     api/rtp_sender_interface.cc
     api/rtp_transceiver_interface.cc
     api/sctp_transport_interface.cc
+    api/webrtc_sdp.cc
+    api/webrtc_sdp.h
+    api/webrtc_sdp_planb.cc
+    api/webrtc_sdp_planb.h
     api/task_queue/default_task_queue_factory.h
     api/task_queue/default_task_queue_factory_gcd.cc
     api/task_queue/default_task_queue_factory_stdlib.cc
@@ -611,6 +626,8 @@ PRIVATE
     api/units/frequency.cc
     api/units/time_delta.cc
     api/units/timestamp.cc
+    api/video/adapted_video_track_source.cc
+    api/video/adapted_video_track_source.h
     api/video/builtin_video_bitrate_allocator_factory.cc
     api/video/color_space.cc
     api/video/encoded_frame.cc
@@ -636,8 +653,14 @@ PRIVATE
     api/video/rtp_video_frame_assembler.h
     api/video/video_adaptation_counters.cc
     api/video/video_adaptation_counters.h
+    api/video/video_adapter.cc
+    api/video/video_adapter.h
     api/video/video_bitrate_allocation.cc
     api/video/video_bitrate_allocator.cc
+    api/video/video_broadcaster.cc
+    api/video/video_broadcaster.h
+    api/video/video_common.cc
+    api/video/video_common.h
     api/video/video_content_type.cc
     api/video/video_frame.cc
     api/video/video_frame_buffer.cc
@@ -685,15 +708,14 @@ PRIVATE
     pc/channel.cc
     pc/channel.h
     pc/channel_interface.h
+    pc/codec_vendor.cc
+    pc/codec_vendor.h
     pc/dtls_srtp_transport.cc
     pc/dtls_srtp_transport.h
     pc/dtls_transport.cc
     pc/dtls_transport.h
-    pc/external_hmac.cc
-    pc/external_hmac.h
     pc/ice_transport.cc
     pc/ice_transport.h
-    pc/jsep_ice_candidate.cc
     pc/jsep_transport.cc
     pc/jsep_transport.h
     pc/jsep_transport_collection.cc
@@ -701,6 +723,8 @@ PRIVATE
     pc/jsep_transport_controller.cc
     pc/jsep_transport_controller.h
     pc/media_factory.h
+    pc/media_options.cc
+    pc/media_options.h
     pc/media_protocol_names.cc
     pc/media_protocol_names.h
     pc/media_session.cc
@@ -709,7 +733,6 @@ PRIVATE
     pc/media_stream_track_proxy.h
     pc/peer_connection_factory_proxy.h
     pc/peer_connection_proxy.h
-    pc/proxy.cc
     pc/proxy.h
     pc/rtcp_mux_filter.cc
     pc/rtcp_mux_filter.h
@@ -722,10 +745,14 @@ PRIVATE
     pc/rtp_transport.cc
     pc/rtp_transport.h
     pc/rtp_transport_internal.h
+    pc/scoped_operations_batcher.cc
+    pc/scoped_operations_batcher.h
     pc/sctp_transport.cc
     pc/sctp_transport.h
     pc/sctp_utils.cc
     pc/sctp_utils.h
+    pc/sdp_munging_detector.cc
+    pc/sdp_munging_detector.h
     pc/session_description.cc
     pc/session_description.h
     pc/simulcast_description.cc
@@ -738,15 +765,15 @@ PRIVATE
     pc/srtp_transport.h
     pc/transport_stats.cc
     pc/transport_stats.h
+    pc/typed_codec_vendor.cc
+    pc/typed_codec_vendor.h
     pc/video_track_source.cc
     pc/video_track_source.h
     pc/video_track_source_proxy.cc
     pc/video_track_source_proxy.h
-    pc/webrtc_sdp.cc
     pc/webrtc_sdp.h
     pc/usage_pattern.cc
     pc/usage_pattern.h
-    pc/used_ids.h
     pc/audio_rtp_receiver.cc
     pc/audio_rtp_receiver.h
     pc/audio_track.cc
@@ -759,12 +786,14 @@ PRIVATE
     pc/data_channel_controller.h
     pc/dtmf_sender.cc
     pc/dtmf_sender.h
+    pc/encoded_audio_frame_injector.cc
+    pc/encoded_audio_frame_injector.h
+    pc/encoded_video_frame_injector.cc
+    pc/encoded_video_frame_injector.h
     pc/ice_server_parsing.cc
     pc/ice_server_parsing.h
     pc/jitter_buffer_delay.cc
     pc/jitter_buffer_delay.h
-    pc/jsep_ice_candidate.cc
-    pc/jsep_session_description.cc
     pc/legacy_stats_collector.cc
     pc/legacy_stats_collector.h
     pc/legacy_stats_collector_interface.h
@@ -799,6 +828,8 @@ PRIVATE
     pc/rtp_transceiver.h
     pc/sdp_offer_answer.cc
     pc/sdp_offer_answer.h
+    pc/sdp_payload_type_suggester.cc
+    pc/sdp_payload_type_suggester.h
     pc/sdp_utils.cc
     pc/sdp_utils.h
     pc/sctp_data_channel.cc
@@ -816,12 +847,13 @@ PRIVATE
     pc/video_track.h
     pc/video_track_source.cc
     pc/video_track_source.h
-    pc/webrtc_sdp.cc
-    pc/webrtc_sdp.h
     pc/webrtc_session_description_factory.cc
     pc/webrtc_session_description_factory.h
-    media/base/adapted_video_track_source.cc
     media/base/codec.cc
+    media/base/codec_comparators.cc
+    media/base/codec_comparators.h
+    media/base/codec_list.cc
+    media/base/codec_list.h
     media/base/media_channel_impl.cc
     media/base/media_channel_impl.h
     media/base/media_constants.cc
@@ -832,15 +864,9 @@ PRIVATE
     media/base/sdp_video_format_utils.h
     media/base/stream_params.cc
     media/base/turn_utils.cc
-    media/base/video_adapter.cc
-    media/base/video_broadcaster.cc
-    media/base/video_common.cc
-    media/base/video_source_base.cc
     media/engine/adm_helpers.cc
     media/engine/internal_decoder_factory.cc
     media/engine/internal_encoder_factory.cc
-    media/engine/multiplex_codec_factory.cc
-    media/engine/payload_type_mapper.cc
     media/engine/simulcast_encoder_adapter.cc
     media/engine/webrtc_media_engine.cc
     media/engine/webrtc_video_engine.cc
@@ -1963,15 +1989,12 @@ PRIVATE
     p2p/base/connection.cc
     p2p/base/connection_info.cc
     p2p/base/default_ice_transport_factory.cc
-    p2p/base/dtls_transport.cc
-    p2p/base/dtls_transport_internal.cc
     p2p/base/ice_agent_interface.h
     p2p/base/ice_controller_interface.cc
     p2p/base/ice_credentials_iterator.cc
     p2p/base/ice_switch_reason.cc
     p2p/base/ice_switch_reason.h
     p2p/base/ice_transport_internal.cc
-    p2p/base/mock_active_ice_controller.h
     p2p/base/mock_ice_agent.h
     p2p/base/mock_ice_controller.h
     p2p/base/p2p_constants.cc
@@ -1980,24 +2003,27 @@ PRIVATE
     p2p/base/port.cc
     p2p/base/port_allocator.cc
     p2p/base/port_interface.cc
-    p2p/base/pseudo_tcp.cc
-    p2p/base/regathering_controller.cc
     p2p/base/stun_dictionary.cc
     p2p/base/stun_dictionary.h
     p2p/base/stun_port.cc
     p2p/base/stun_request.cc
-    p2p/base/stun_server.cc
     p2p/base/tcp_port.cc
-    p2p/base/test_stun_server.cc
     p2p/base/transport_description.cc
     p2p/base/transport_description_factory.cc
     p2p/base/turn_port.cc
-    p2p/base/turn_server.cc
     p2p/base/wrapping_active_ice_controller.cc
     p2p/base/wrapping_active_ice_controller.h
     p2p/client/basic_port_allocator.cc
     p2p/client/turn_port_factory.cc
-    p2p/stunprober/stun_prober.cc
+    p2p/dtls/dtls_stun_piggyback_callbacks.h
+    p2p/dtls/dtls_stun_piggyback_controller.cc
+    p2p/dtls/dtls_stun_piggyback_controller.h
+    p2p/dtls/dtls_transport.cc
+    p2p/dtls/dtls_transport.h
+    p2p/dtls/dtls_transport_internal.cc
+    p2p/dtls/dtls_transport_internal.h
+    p2p/dtls/dtls_utils.cc
+    p2p/dtls/dtls_utils.h
     logging/rtc_event_log/encoder/bit_writer.cc
     logging/rtc_event_log/encoder/bit_writer.h
     logging/rtc_event_log/encoder/blob_encoding.cc
@@ -2401,11 +2427,6 @@ PRIVATE
     modules/desktop_capture/win/window_capture_utils.h
     modules/desktop_capture/win/window_capturer_win_gdi.cc
     modules/desktop_capture/win/window_capturer_win_gdi.h
-
-    stats/attribute.cc
-    stats/rtc_stats_report.cc
-    stats/rtc_stats.cc
-    stats/rtcstats_objects.cc
 )
 
 if (is_x86 OR is_x64)
