@@ -10,7 +10,10 @@
 
 #include "rtc_base/experiments/keyframe_interval_settings.h"
 
-#include "api/transport/field_trial_based_config.h"
+#include <optional>
+
+#include "api/field_trials_view.h"
+#include "rtc_base/experiments/field_trial_parser.h"
 
 namespace webrtc {
 
@@ -21,19 +24,13 @@ constexpr char kFieldTrialName[] = "WebRTC-KeyframeInterval";
 }  // namespace
 
 KeyframeIntervalSettings::KeyframeIntervalSettings(
-    const FieldTrialsView* const key_value_config)
+    const FieldTrialsView& key_value_config)
     : min_keyframe_send_interval_ms_("min_keyframe_send_interval_ms") {
   ParseFieldTrial({&min_keyframe_send_interval_ms_},
-                  key_value_config->Lookup(kFieldTrialName));
+                  key_value_config.Lookup(kFieldTrialName));
 }
 
-KeyframeIntervalSettings KeyframeIntervalSettings::ParseFromFieldTrials() {
-  FieldTrialBasedConfig field_trial_config;
-  return KeyframeIntervalSettings(&field_trial_config);
-}
-
-absl::optional<int> KeyframeIntervalSettings::MinKeyframeSendIntervalMs()
-    const {
+std::optional<int> KeyframeIntervalSettings::MinKeyframeSendIntervalMs() const {
   return min_keyframe_send_interval_ms_.GetOptional();
 }
 }  // namespace webrtc

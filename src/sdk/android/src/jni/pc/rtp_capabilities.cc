@@ -10,9 +10,13 @@
 
 #include "sdk/android/src/jni/pc/rtp_capabilities.h"
 
+#include <jni.h>
+
+#include "api/rtp_header_extension_id.h"
+#include "api/rtp_parameters.h"
 #include "sdk/android/generated_peerconnection_jni/RtpCapabilities_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/pc/media_stream_track.h"
 
 namespace webrtc {
@@ -38,7 +42,8 @@ ScopedJavaLocalRef<jobject> NativeToJavaRtpHeaderExtensionParameter(
     const RtpHeaderExtensionCapability& extension) {
   return Java_HeaderExtensionCapability_Constructor(
       env, NativeToJavaString(env, extension.uri),
-      extension.preferred_id.value(), extension.preferred_encrypt);
+      extension.preferred_id.value_or(RtpHeaderExtensionId()).value(),
+      extension.preferred_encrypt);
 }
 }  // namespace
 
@@ -51,15 +56,21 @@ RtpCapabilities JavaToNativeRtpCapabilities(
       Java_RtpCapabilities_getHeaderExtensions(jni, j_capabilities);
   for (const JavaRef<jobject>& j_header_extension :
        Iterable(jni, j_header_extensions)) {
-    RtpHeaderExtensionCapability header_extension;
-    header_extension.uri = JavaToStdString(
+    std::string uri = JavaToStdString(
         jni, Java_HeaderExtensionCapability_getUri(jni, j_header_extension));
-    header_extension.preferred_id =
+    int id =
         Java_HeaderExtensionCapability_getPreferredId(jni, j_header_extension);
-    header_extension.preferred_encrypt =
+    bool preferred_encrypt =
         Java_HeaderExtensionCapability_getPreferredEncrypted(
             jni, j_header_extension);
-    capabilities.header_extensions.push_back(header_extension);
+    if (id == 0) {
+      capabilities.header_extensions.emplace_back(
+          uri, preferred_encrypt, RtpTransceiverDirection::kSendRecv);
+    } else {
+      capabilities.header_extensions.emplace_back(
+          uri, RtpHeaderExtensionId(id), preferred_encrypt,
+          RtpTransceiverDirection::kSendRecv);
+    }
   }
 
   // Convert codecs.
@@ -117,3 +128,5 @@ RtpCodecCapability JavaToNativeRtpCodecCapability(
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(RtpCapabilities)

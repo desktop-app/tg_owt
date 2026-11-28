@@ -18,8 +18,10 @@ namespace webrtc {
 namespace jni {
 
 static jlong JNI_Dav1dDecoder_CreateDecoder(JNIEnv* jni) {
-  return jlongFromPointer(webrtc::CreateDav1dDecoder().release());
+  return jlongFromPointer(CreateDav1dDecoder().release());
 }
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(Dav1dDecoder)

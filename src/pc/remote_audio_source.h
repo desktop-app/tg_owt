@@ -14,15 +14,15 @@
 #include <stdint.h>
 
 #include <list>
-#include <string>
+#include <optional>
 
-#include "absl/types/optional.h"
 #include "api/call/audio_sink.h"
 #include "api/media_stream_interface.h"
 #include "api/notifier.h"
 #include "api/task_queue/task_queue_base.h"
 #include "media/base/media_channel.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
@@ -49,10 +49,10 @@ class RemoteAudioSource : public Notifier<AudioSourceInterface> {
 
   // Register and unregister remote audio source with the underlying media
   // engine.
-  void Start(cricket::VoiceMediaReceiveChannelInterface* media_channel,
-             absl::optional<uint32_t> ssrc);
-  void Stop(cricket::VoiceMediaReceiveChannelInterface* media_channel,
-            absl::optional<uint32_t> ssrc);
+  void Start(VoiceMediaReceiveChannelInterface* media_channel,
+             std::optional<uint32_t> ssrc);
+  void Stop(VoiceMediaReceiveChannelInterface* media_channel,
+            std::optional<uint32_t> ssrc);
   void SetState(SourceState new_state);
 
   // MediaSourceInterface implementation.
@@ -60,6 +60,8 @@ class RemoteAudioSource : public Notifier<AudioSourceInterface> {
   bool remote() const override;
 
   // AudioSourceInterface implementation.
+  // SetVolume() may be called on any thread. The audio observers are notified
+  // on the main thread.
   void SetVolume(double volume) override;
   void RegisterAudioObserver(AudioObserver* observer) override;
   void UnregisterAudioObserver(AudioObserver* observer) override;
@@ -80,7 +82,7 @@ class RemoteAudioSource : public Notifier<AudioSourceInterface> {
   TaskQueueBase* const main_thread_;
   TaskQueueBase* const worker_thread_;
   const OnAudioChannelGoneAction on_audio_channel_gone_action_;
-  std::list<AudioObserver*> audio_observers_;
+  std::list<AudioObserver*> audio_observers_ RTC_GUARDED_BY(main_thread_);
   Mutex sink_lock_;
   std::list<AudioTrackSinkInterface*> sinks_;
   SourceState state_;

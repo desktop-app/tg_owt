@@ -10,25 +10,28 @@
 
 #include "logging/rtc_event_log/events/rtc_event_rtcp_packet_incoming.h"
 
+#include <cstdint>
+#include <memory>
+#include <span>
+
 #include "absl/memory/memory.h"
+#include "api/rtc_event_log/rtc_event.h"
 
 namespace webrtc {
 
 RtcEventRtcpPacketIncoming::RtcEventRtcpPacketIncoming(
-    rtc::ArrayView<const uint8_t> packet)
+    std::span<const uint8_t> packet)
     : packet_(packet.data(), packet.size()) {}
 
 RtcEventRtcpPacketIncoming::RtcEventRtcpPacketIncoming(
     const RtcEventRtcpPacketIncoming& other)
-    : RtcEvent(other.timestamp_us_),
-      packet_(other.packet_.data(), other.packet_.size()) {}
+    : RtcEvent(other), packet_(other.packet_.data(), other.packet_.size()) {}
 
 RtcEventRtcpPacketIncoming::~RtcEventRtcpPacketIncoming() = default;
 
 std::unique_ptr<RtcEventRtcpPacketIncoming> RtcEventRtcpPacketIncoming::Copy()
     const {
-  return absl::WrapUnique<RtcEventRtcpPacketIncoming>(
-      new RtcEventRtcpPacketIncoming(*this));
+  return absl::WrapUnique(new RtcEventRtcpPacketIncoming(*this));
 }
 
 }  // namespace webrtc

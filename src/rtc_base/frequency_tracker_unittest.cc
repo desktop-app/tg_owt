@@ -10,10 +10,11 @@
 
 #include "rtc_base/frequency_tracker.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <optional>
 
-#include "absl/types/optional.h"
 #include "api/units/frequency.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
@@ -34,7 +35,7 @@ TEST(FrequencyTrackerTest, ReturnsNulloptInitially) {
   Timestamp now = Timestamp::Seconds(12'345);
   FrequencyTracker stats(kWindow);
 
-  EXPECT_EQ(stats.Rate(now), absl::nullopt);
+  EXPECT_EQ(stats.Rate(now), std::nullopt);
 }
 
 TEST(FrequencyTrackerTest, ReturnsNulloptAfterSingleDataPoint) {
@@ -44,7 +45,7 @@ TEST(FrequencyTrackerTest, ReturnsNulloptAfterSingleDataPoint) {
   stats.Update(now);
   now += TimeDelta::Millis(10);
 
-  EXPECT_EQ(stats.Rate(now), absl::nullopt);
+  EXPECT_EQ(stats.Rate(now), std::nullopt);
 }
 
 TEST(FrequencyTrackerTest, ReturnsRateAfterTwoMeasurements) {
@@ -70,13 +71,13 @@ TEST(FrequencyTrackerTest, MeasuresConstantRate) {
   stats.Update(now);
   Frequency last_error = Frequency::PlusInfinity();
   for (TimeDelta i = TimeDelta::Zero(); i < kWindow; i += kInterval) {
-    SCOPED_TRACE(i);
+    SCOPED_TRACE(ToString(i));
     now += kInterval;
     stats.Update(now);
 
     // Until window is full, rate is measured over a smaller window and might
     // look larger than the constant rate.
-    absl::optional<Frequency> rate = stats.Rate(now);
+    std::optional<Frequency> rate = stats.Rate(now);
     ASSERT_GE(rate, kConstantRate);
 
     // Expect the estimation error to decrease as the window is extended.
@@ -88,7 +89,7 @@ TEST(FrequencyTrackerTest, MeasuresConstantRate) {
   // Once window is full, rate measurment should be stable.
   for (TimeDelta i = TimeDelta::Zero(); i < kInterval;
        i += TimeDelta::Millis(1)) {
-    SCOPED_TRACE(i);
+    SCOPED_TRACE(ToString(i));
     EXPECT_EQ(stats.Rate(now + i), kConstantRate);
   }
 }
@@ -123,20 +124,20 @@ TEST(FrequencyTrackerTest, IncreasingThenDecreasingRate) {
 
   stats.Update(kLargeSize, now);
   for (TimeDelta i = TimeDelta::Zero(); i < kWindow; i += kLargeInterval) {
-    SCOPED_TRACE(i);
+    SCOPED_TRACE(ToString(i));
     now += kLargeInterval;
     stats.Update(kLargeSize, now);
   }
-  absl::optional<Frequency> last_rate = stats.Rate(now);
+  std::optional<Frequency> last_rate = stats.Rate(now);
   EXPECT_EQ(last_rate, kLargeSize / kLargeInterval);
 
   // Decrease rate with smaller measurments.
   for (TimeDelta i = TimeDelta::Zero(); i < kWindow; i += kLargeInterval) {
-    SCOPED_TRACE(i);
+    SCOPED_TRACE(ToString(i));
     now += kLargeInterval;
     stats.Update(kSmallSize, now);
 
-    absl::optional<Frequency> rate = stats.Rate(now);
+    std::optional<Frequency> rate = stats.Rate(now);
     EXPECT_LT(rate, last_rate);
 
     last_rate = rate;
@@ -145,11 +146,11 @@ TEST(FrequencyTrackerTest, IncreasingThenDecreasingRate) {
 
   // Increase rate with more frequent measurments.
   for (TimeDelta i = TimeDelta::Zero(); i < kWindow; i += kSmallInterval) {
-    SCOPED_TRACE(i);
+    SCOPED_TRACE(ToString(i));
     now += kSmallInterval;
     stats.Update(kSmallSize, now);
 
-    absl::optional<Frequency> rate = stats.Rate(now);
+    std::optional<Frequency> rate = stats.Rate(now);
     EXPECT_GE(rate, last_rate);
 
     last_rate = rate;
@@ -174,17 +175,17 @@ TEST(FrequencyTrackerTest, ResetAfterSilence) {
 
   now += kWindow + kEpsilon;
   // Silence over window size should trigger auto reset for coming sample.
-  EXPECT_EQ(pixel_rate.Rate(now), absl::nullopt);
+  EXPECT_EQ(pixel_rate.Rate(now), std::nullopt);
   pixel_rate.Update(kPixels, now);
   // Single measurment after reset is not enough to estimate the rate.
-  EXPECT_EQ(pixel_rate.Rate(now), absl::nullopt);
+  EXPECT_EQ(pixel_rate.Rate(now), std::nullopt);
 
   // Manual reset, add the same check again.
   pixel_rate.Reset();
-  EXPECT_EQ(pixel_rate.Rate(now), absl::nullopt);
+  EXPECT_EQ(pixel_rate.Rate(now), std::nullopt);
   now += kInterval;
   pixel_rate.Update(kPixels, now);
-  EXPECT_EQ(pixel_rate.Rate(now), absl::nullopt);
+  EXPECT_EQ(pixel_rate.Rate(now), std::nullopt);
 }
 
 TEST(FrequencyTrackerTest, ReturnsNulloptWhenOverflows) {
@@ -196,7 +197,7 @@ TEST(FrequencyTrackerTest, ReturnsNulloptWhenOverflows) {
   now += kEpsilon;
   stats.Update(very_large_number, now);
 
-  EXPECT_EQ(stats.Rate(now), absl::nullopt);
+  EXPECT_EQ(stats.Rate(now), std::nullopt);
 }
 
 }  // namespace

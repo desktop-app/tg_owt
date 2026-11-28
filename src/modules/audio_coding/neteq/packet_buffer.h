@@ -11,7 +11,11 @@
 #ifndef MODULES_AUDIO_CODING_NETEQ_PACKET_BUFFER_H_
 #define MODULES_AUDIO_CODING_NETEQ_PACKET_BUFFER_H_
 
-#include "absl/types/optional.h"
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+
+#include "api/field_trials_view.h"
 #include "modules/audio_coding/neteq/decoder_database.h"
 #include "modules/audio_coding/neteq/packet.h"
 #include "modules/include/module_common_types_public.h"  // IsNewerTimestamp
@@ -22,12 +26,22 @@ class DecoderDatabase;
 class StatisticsCalculator;
 class TickTimer;
 
+struct SmartFlushingConfig {
+  // When calculating the flushing threshold, the maximum between the target
+  // level and this value is used.
+  int target_level_threshold_ms = 600;
+  // A smart flush is triggered when the packet buffer contains a multiple of
+  // the target level.
+  double target_level_multiplier = 1.0;
+};
+
 // This is the actual buffer holding the packets before decoding.
 class PacketBuffer {
  public:
   enum BufferReturnCodes {
     kOK = 0,
     kFlushed,
+    kPartialFlush,
     kNotFound,
     kBufferEmpty,
     kInvalidPacket,
@@ -36,7 +50,8 @@ class PacketBuffer {
 
   // Constructor creates a buffer which can hold a maximum of
   // `max_number_of_packets` packets.
-  PacketBuffer(size_t max_number_of_packets,
+  PacketBuffer(const FieldTrialsView& field_trials,
+               size_t max_number_of_packets,
                const TickTimer* tick_timer,
                StatisticsCalculator* stats);
 
@@ -49,6 +64,15 @@ class PacketBuffer {
   // Flushes the buffer and deletes all packets in it.
   virtual void Flush();
 
+  // Partial flush. Flush packets but leave some packets behind.
+  virtual void PartialFlush(int target_level_ms,
+                            size_t sample_rate,
+                            size_t last_decoded_length);
+
+  // Changes the maximum number of packets allowed in the buffer.
+  // If the buffer currently contains more packets, it will be flushed.
+  virtual void SetMaxNumberOfPackets(size_t max_number_of_packets);
+
   // Returns true for an empty buffer.
   virtual bool Empty() const;
 
@@ -56,7 +80,10 @@ class PacketBuffer {
   // the packet object.
   // Returns PacketBuffer::kOK on success, PacketBuffer::kFlushed if the buffer
   // was flushed due to overfilling.
-  virtual int InsertPacket(Packet&& packet);
+  virtual int InsertPacket(Packet&& packet,
+                           size_t last_decoded_length,
+                           size_t sample_rate,
+                           int target_level_ms);
 
   // Gets the timestamp for the first packet in the buffer and writes it to the
   // output variable `next_timestamp`.
@@ -78,7 +105,7 @@ class PacketBuffer {
 
   // Extracts the first packet in the buffer and returns it.
   // Returns an empty optional if the buffer is empty.
-  virtual absl::optional<Packet> GetNextPacket();
+  virtual std::optional<Packet> GetNextPacket();
 
   // Discards the first packet in the buffer. The packet is deleted.
   // Returns PacketBuffer::kBufferEmpty if the buffer is empty,
@@ -102,6 +129,9 @@ class PacketBuffer {
   // Returns the number of packets in the buffer, including duplicates and
   // redundant packets.
   virtual size_t NumPacketsInBuffer() const;
+
+  // TGCALLS PATCH: Opus DRED. The capacity: a buffer this full is flushed.
+  size_t MaxNumberOfPackets() const { return max_number_of_packets_; }
 
   // Returns the number of samples in the buffer, including samples carried in
   // duplicate and redundant packets.
@@ -134,6 +164,7 @@ class PacketBuffer {
  private:
   void LogPacketDiscarded(int codec_level);
 
+  std::optional<SmartFlushingConfig> smart_flushing_config_;
   size_t max_number_of_packets_;
   PacketList buffer_;
   const TickTimer* tick_timer_;

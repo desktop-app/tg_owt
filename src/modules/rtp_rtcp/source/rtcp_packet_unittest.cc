@@ -10,18 +10,25 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
 #include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
+namespace webrtc {
 namespace {
 
 using ::testing::_;
 using ::testing::MockFunction;
-using ::webrtc::rtcp::ReceiverReport;
-using ::webrtc::rtcp::ReportBlock;
 
-const uint32_t kSenderSsrc = 0x12345678;
+using rtcp::ReceiverReport;
+using rtcp::ReportBlock;
+
+constexpr uint32_t kSenderSsrc = 0x12345678;
 
 TEST(RtcpPacketTest, BuildWithTooSmallBuffer) {
   ReportBlock rb;
@@ -33,10 +40,12 @@ TEST(RtcpPacketTest, BuildWithTooSmallBuffer) {
   const size_t kReportBlockLength = 24;
 
   // No packet.
-  MockFunction<void(rtc::ArrayView<const uint8_t>)> callback;
+  MockFunction<void(std::span<const uint8_t>)> callback;
   EXPECT_CALL(callback, Call(_)).Times(0);
   const size_t kBufferSize = kRrLength + kReportBlockLength - 1;
   EXPECT_FALSE(rr.Build(kBufferSize, callback.AsStdFunction()));
 }
 
 }  // namespace
+
+}  // namespace webrtc

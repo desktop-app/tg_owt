@@ -10,41 +10,40 @@
 
 #include "rtc_base/openssl_utility.h"
 
-#include "absl/strings/string_view.h"
-#if defined(WEBRTC_WIN)
-// Must be included first before openssl headers.
-#include "rtc_base/win32.h"  // NOLINT
-#endif                       // WEBRTC_WIN
-
-#ifdef OPENSSL_IS_BORINGSSL
-#include <openssl/pool.h>
-#endif
-#ifdef OPENSSL_IS_BORINGSSL
-#include <openssl/bytestring.h>
-#endif
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/ssl.h>
+#include <openssl/ssl3.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
-#include <stddef.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
 
 #include "absl/algorithm/container.h"
-#include "rtc_base/arraysize.h"
+#include "absl/strings/string_view.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/openssl.h"
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/string_encode.h"
+#include "rtc_base/strings/string_builder.h"
+
+#ifdef OPENSSL_IS_BORINGSSL
+#include <openssl/bytestring.h>
+#include <openssl/pool.h>
+#endif
+
 #ifndef WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS
 #include "rtc_base/ssl_roots.h"
 #endif  // WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS
 
-namespace rtc {
+namespace webrtc {
 namespace openssl {
 
 // Holds various helper methods.
@@ -81,6 +80,8 @@ constexpr absl::string_view kDistrustedSpkiSha256[] = {
 // Returns the hex SHA-256 of `cert_der`'s SubjectPublicKeyInfo, or nullopt
 // on parse failure.
 std::optional<std::string> GetSpkiSha256(std::span<const uint8_t> cert_der) {
+  unsigned char digest[EVP_MAX_MD_SIZE];
+  unsigned int digest_len = 0;
 #ifdef OPENSSL_IS_BORINGSSL
   // Extract SubjectPublicKeyInfo without re-encoding.
   CBS cbs;
@@ -108,8 +109,10 @@ std::optional<std::string> GetSpkiSha256(std::span<const uint8_t> cert_der) {
       !CBS_get_asn1_element(&tbs_certificate, &spki, CBS_ASN1_SEQUENCE)) {
     return std::nullopt;
   }
-  const uint8_t* spki_data = CBS_data(&spki);
-  size_t spki_len = CBS_len(&spki);
+  if (EVP_Digest(CBS_data(&spki), CBS_len(&spki), digest, &digest_len,
+                 EVP_sha256(), nullptr) != 1) {
+    return std::nullopt;
+  }
 #else   // OPENSSL_IS_BORINGSSL
   const unsigned char* cert_ptr = cert_der.data();
   X509* x509 = d2i_X509(nullptr, &cert_ptr,
@@ -123,18 +126,14 @@ std::optional<std::string> GetSpkiSha256(std::span<const uint8_t> cert_der) {
   if (spki_len <= 0) {
     return std::nullopt;
   }
-#endif  // !defined(OPENSSL_IS_BORINGSSL)
-
-  unsigned char digest[EVP_MAX_MD_SIZE];
-  unsigned int digest_len = 0;
   bool ok = EVP_Digest(spki_data, spki_len, digest, &digest_len, EVP_sha256(),
                        nullptr) == 1;
-#ifndef OPENSSL_IS_BORINGSSL
   OPENSSL_free(spki_data);
-#endif
   if (!ok) {
     return std::nullopt;
   }
+#endif  // !defined(OPENSSL_IS_BORINGSSL)
+
   return hex_encode(
       absl::string_view(reinterpret_cast<const char*>(digest), digest_len));
 }
@@ -142,7 +141,8 @@ std::optional<std::string> GetSpkiSha256(std::span<const uint8_t> cert_der) {
 // TODO(crbug.com/webrtc/11710): When OS certificate verification is available,
 // and we don't need VerifyPeerCertMatchesHost, don't compile this in order to
 // avoid a dependency on OpenSSL X509 objects (see crbug.com/webrtc/11410).
-void LogCertificates(SSL* ssl, X509* certificate) {
+void LogCertificates([[maybe_unused]] SSL* ssl,
+                     [[maybe_unused]] X509* certificate) {
 // Logging certificates is extremely verbose. So it is disabled by default.
 #ifdef LOG_CERTIFICATES
   BIO* mem = BIO_new(BIO_s_mem());
@@ -340,6 +340,37 @@ bool IsDistrustedCertificate(std::span<const uint8_t> cert_der) {
   return absl::c_linear_search(kDistrustedSpkiSha256, *spki_sha256);
 }
 
+#ifdef OPENSSL_IS_BORINGSSL
+bool ContainsDistrustedCertificate(const STACK_OF(CRYPTO_BUFFER) * chain) {
+  for (size_t i = 0; i < sk_CRYPTO_BUFFER_num(chain); ++i) {
+    const CRYPTO_BUFFER* cert = sk_CRYPTO_BUFFER_value(chain, i);
+    if (IsDistrustedCertificate(std::span<const uint8_t>(
+            CRYPTO_BUFFER_data(cert), CRYPTO_BUFFER_len(cert)))) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
+bool ContainsDistrustedCertificate(const STACK_OF(X509) * chain) {
+  for (int i = 0; i < static_cast<int>(sk_X509_num(chain)); ++i) {
+    unsigned char* der = nullptr;
+    int der_len = i2d_X509(sk_X509_value(chain, i), &der);
+    if (der_len <= 0) {
+      // Fail closed, consistent with IsDistrustedCertificate().
+      return true;
+    }
+    bool distrusted = IsDistrustedCertificate(
+        std::span<const uint8_t>(der, static_cast<size_t>(der_len)));
+    OPENSSL_free(der);
+    if (distrusted) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void LogSSLErrors(absl::string_view prefix) {
   char error_buf[200];
   unsigned long err;  // NOLINT
@@ -350,10 +381,40 @@ void LogSSLErrors(absl::string_view prefix) {
   }
 }
 
+void SSLInfoCallback(const SSL* ssl, int where, int ret) {
+  switch (where) {
+    case SSL_CB_LOOP:
+    case SSL_CB_READ:
+    case SSL_CB_WRITE:
+      return;
+    default:
+      break;
+  }
+  StringBuilder ss;
+  ss << SSL_state_string_long(ssl);
+  if (ret == 0) {
+    RTC_LOG(LS_ERROR) << "Error during " << ss.str() << "\n";
+    return;
+  }
+  // See SSL_alert_type_string_long.
+  int severity_class = where >> 8;
+  switch (severity_class) {
+    case SSL3_AL_WARNING:
+    case SSL3_AL_FATAL:
+      ss << " " << SSL_alert_type_string_long(ret);
+      ss << " " << SSL_alert_desc_string_long(ret);
+      RTC_LOG(LS_WARNING) << ss.str();
+      break;
+    default:
+      RTC_LOG(LS_INFO) << ss.str();
+      break;
+  }
+}
+
 #ifndef WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS
 bool LoadBuiltinSSLRootCertificates(SSL_CTX* ctx) {
   int count_of_added_certs = 0;
-  for (size_t i = 0; i < arraysize(kSSLCertCertificateList); i++) {
+  for (size_t i = 0; i < std::size(kSSLCertCertificateList); i++) {
     const unsigned char* cert_buffer = kSSLCertCertificateList[i];
     size_t cert_buffer_len = kSSLCertCertificateSizeList[i];
     X509* cert = d2i_X509(nullptr, &cert_buffer,
@@ -380,4 +441,4 @@ CRYPTO_BUFFER_POOL* GetBufferPool() {
 #endif
 
 }  // namespace openssl
-}  // namespace rtc
+}  // namespace webrtc

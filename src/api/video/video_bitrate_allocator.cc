@@ -10,29 +10,23 @@
 
 #include "api/video/video_bitrate_allocator.h"
 
+#include <cstdint>
+
+#include "api/units/data_rate.h"
+#include "api/video/video_bitrate_allocation.h"
+
 namespace webrtc {
 
 VideoBitrateAllocationParameters::VideoBitrateAllocationParameters(
     uint32_t total_bitrate_bps,
     uint32_t framerate)
     : total_bitrate(DataRate::BitsPerSec(total_bitrate_bps)),
-      stable_bitrate(DataRate::BitsPerSec(total_bitrate_bps)),
       framerate(static_cast<double>(framerate)) {}
 
 VideoBitrateAllocationParameters::VideoBitrateAllocationParameters(
     DataRate total_bitrate,
     double framerate)
-    : total_bitrate(total_bitrate),
-      stable_bitrate(total_bitrate),
-      framerate(framerate) {}
-
-VideoBitrateAllocationParameters::VideoBitrateAllocationParameters(
-    DataRate total_bitrate,
-    DataRate stable_bitrate,
-    double framerate)
-    : total_bitrate(total_bitrate),
-      stable_bitrate(stable_bitrate),
-      framerate(framerate) {}
+    : total_bitrate(total_bitrate), framerate(framerate) {}
 
 VideoBitrateAllocationParameters::~VideoBitrateAllocationParameters() = default;
 
@@ -40,7 +34,6 @@ VideoBitrateAllocation VideoBitrateAllocator::GetAllocation(
     uint32_t total_bitrate_bps,
     uint32_t framerate) {
   return Allocate({DataRate::BitsPerSec(total_bitrate_bps),
-                   DataRate::BitsPerSec(total_bitrate_bps),
                    static_cast<double>(framerate)});
 }
 
@@ -49,6 +42,6 @@ VideoBitrateAllocation VideoBitrateAllocator::Allocate(
   return GetAllocation(parameters.total_bitrate.bps(), parameters.framerate);
 }
 
-void VideoBitrateAllocator::SetLegacyConferenceMode(bool enabled) {}
+void VideoBitrateAllocator::SetLegacyConferenceMode(bool /* enabled */) {}
 
 }  // namespace webrtc

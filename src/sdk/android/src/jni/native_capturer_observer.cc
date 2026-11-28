@@ -10,9 +10,12 @@
 
 #include "sdk/android/src/jni/native_capturer_observer.h"
 
-#include "rtc_base/logging.h"
+#include <jni.h>
+
+#include "api/scoped_refptr.h"
 #include "sdk/android/generated_video_jni/NativeCapturerObserver_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/android_video_track_source.h"
 
 namespace webrtc {
@@ -20,10 +23,12 @@ namespace jni {
 
 ScopedJavaLocalRef<jobject> CreateJavaNativeCapturerObserver(
     JNIEnv* env,
-    rtc::scoped_refptr<AndroidVideoTrackSource> native_source) {
+    scoped_refptr<AndroidVideoTrackSource> native_source) {
   return Java_NativeCapturerObserver_Constructor(
       env, NativeToJavaPointer(native_source.release()));
 }
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(NativeCapturerObserver)

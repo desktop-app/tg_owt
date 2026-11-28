@@ -10,8 +10,13 @@
 
 #include "common_video/h265/h265_sps_parser.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <vector>
+
 #include "common_video/h265/h265_common.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/bit_buffer.h"
 #include "rtc_base/buffer.h"
 #include "test/gtest.h"
@@ -34,9 +39,9 @@ void WriteSps(uint16_t width,
               uint32_t max_num_sublayer_minus1,
               bool sub_layer_ordering_info_present_flag,
               bool long_term_ref_pics_present_flag,
-              rtc::Buffer* out_buffer) {
+              Buffer* out_buffer) {
   uint8_t rbsp[kSpsBufferMaxSize] = {0};
-  rtc::BitBufferWriter writer(rbsp, kSpsBufferMaxSize);
+  BitBufferWriter writer(rbsp, kSpsBufferMaxSize);
   // sps_video_parameter_set_id
   writer.WriteBits(0, 4);
   // sps_max_sub_layers_minus1
@@ -365,7 +370,7 @@ void WriteSps(uint16_t width,
   }
 
   out_buffer->Clear();
-  H265::WriteRbsp(rbsp, byte_count, out_buffer);
+  H265::WriteRbsp(std::span(rbsp, byte_count), out_buffer);
 }
 
 class H265SpsParserTest : public ::testing::Test {
@@ -389,8 +394,7 @@ TEST_F(H265SpsParserTest, TestSampleSPSHdLandscape) {
                             0x02, 0x80, 0x80, 0x2d, 0x16, 0x59, 0x59, 0xa4,
                             0x93, 0x2b, 0x80, 0x40, 0x00, 0x00, 0x03, 0x00,
                             0x40, 0x00, 0x00, 0x07, 0x82};
-  absl::optional<H265SpsParser::SpsState> sps =
-      H265SpsParser::ParseSps(buffer, arraysize(buffer));
+  std::optional<H265SpsParser::SpsState> sps = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps.has_value());
   EXPECT_EQ(1280u, sps->width);
   EXPECT_EQ(720u, sps->height);
@@ -418,8 +422,7 @@ TEST_F(H265SpsParserTest, TestSampleSPSVerticalCropLandscape) {
                             0x05, 0x02, 0x01, 0x09, 0xf2, 0xe5, 0x95, 0x9a,
                             0x49, 0x32, 0xb8, 0x04, 0x00, 0x00, 0x03, 0x00,
                             0x04, 0x00, 0x00, 0x03, 0x00, 0x78, 0x20};
-  absl::optional<H265SpsParser::SpsState> sps =
-      H265SpsParser::ParseSps(buffer, arraysize(buffer));
+  std::optional<H265SpsParser::SpsState> sps = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps.has_value());
   EXPECT_EQ(640u, sps->width);
   EXPECT_EQ(260u, sps->height);
@@ -446,18 +449,16 @@ TEST_F(H265SpsParserTest, TestSampleSPSHorizontalAndVerticalCrop) {
                             0x08, 0x48, 0x04, 0x27, 0x72, 0xe5, 0x95, 0x9a,
                             0x49, 0x32, 0xb8, 0x04, 0x00, 0x00, 0x03, 0x00,
                             0x04, 0x00, 0x00, 0x03, 0x00, 0x78, 0x20};
-  absl::optional<H265SpsParser::SpsState> sps =
-      H265SpsParser::ParseSps(buffer, arraysize(buffer));
+  std::optional<H265SpsParser::SpsState> sps = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps.has_value());
   EXPECT_EQ(260u, sps->width);
   EXPECT_EQ(260u, sps->height);
 }
 
 TEST_F(H265SpsParserTest, TestSyntheticSPSQvgaLandscape) {
-  rtc::Buffer buffer;
+  Buffer buffer;
   WriteSps(320u, 180u, 1, 0, 1, 0, &buffer);
-  absl::optional<H265SpsParser::SpsState> sps =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> sps = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps.has_value());
   EXPECT_EQ(320u, sps->width);
   EXPECT_EQ(180u, sps->height);
@@ -465,10 +466,9 @@ TEST_F(H265SpsParserTest, TestSyntheticSPSQvgaLandscape) {
 }
 
 TEST_F(H265SpsParserTest, TestSyntheticSPSWeirdResolution) {
-  rtc::Buffer buffer;
+  Buffer buffer;
   WriteSps(156u, 122u, 2, 0, 1, 0, &buffer);
-  absl::optional<H265SpsParser::SpsState> sps =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> sps = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps.has_value());
   EXPECT_EQ(156u, sps->width);
   EXPECT_EQ(122u, sps->height);
@@ -476,10 +476,9 @@ TEST_F(H265SpsParserTest, TestSyntheticSPSWeirdResolution) {
 }
 
 TEST_F(H265SpsParserTest, TestLog2MaxSubLayersMinus1) {
-  rtc::Buffer buffer;
+  Buffer buffer;
   WriteSps(320u, 180u, 1, 0, 1, 0, &buffer);
-  absl::optional<H265SpsParser::SpsState> sps =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> sps = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps.has_value());
   EXPECT_EQ(320u, sps->width);
   EXPECT_EQ(180u, sps->height);
@@ -487,8 +486,7 @@ TEST_F(H265SpsParserTest, TestLog2MaxSubLayersMinus1) {
   EXPECT_EQ(0u, sps->sps_max_sub_layers_minus1);
 
   WriteSps(320u, 180u, 1, 6, 1, 0, &buffer);
-  absl::optional<H265SpsParser::SpsState> sps1 =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> sps1 = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps1.has_value());
   EXPECT_EQ(320u, sps1->width);
   EXPECT_EQ(180u, sps1->height);
@@ -496,16 +494,15 @@ TEST_F(H265SpsParserTest, TestLog2MaxSubLayersMinus1) {
   EXPECT_EQ(6u, sps1->sps_max_sub_layers_minus1);
 
   WriteSps(320u, 180u, 1, 7, 1, 0, &buffer);
-  absl::optional<H265SpsParser::SpsState> result =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> result =
+      H265SpsParser::ParseSps(buffer);
   EXPECT_FALSE(result.has_value());
 }
 
 TEST_F(H265SpsParserTest, TestSubLayerOrderingInfoPresentFlag) {
-  rtc::Buffer buffer;
+  Buffer buffer;
   WriteSps(320u, 180u, 1, 6, 1, 0, &buffer);
-  absl::optional<H265SpsParser::SpsState> sps =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> sps = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps.has_value());
   EXPECT_EQ(320u, sps->width);
   EXPECT_EQ(180u, sps->height);
@@ -513,8 +510,7 @@ TEST_F(H265SpsParserTest, TestSubLayerOrderingInfoPresentFlag) {
   EXPECT_EQ(6u, sps->sps_max_sub_layers_minus1);
 
   WriteSps(320u, 180u, 1, 6, 1, 0, &buffer);
-  absl::optional<H265SpsParser::SpsState> sps1 =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> sps1 = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps1.has_value());
   EXPECT_EQ(320u, sps1->width);
   EXPECT_EQ(180u, sps1->height);
@@ -523,10 +519,9 @@ TEST_F(H265SpsParserTest, TestSubLayerOrderingInfoPresentFlag) {
 }
 
 TEST_F(H265SpsParserTest, TestLongTermRefPicsPresentFlag) {
-  rtc::Buffer buffer;
+  Buffer buffer;
   WriteSps(320u, 180u, 1, 0, 1, 0, &buffer);
-  absl::optional<H265SpsParser::SpsState> sps =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> sps = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps.has_value());
   EXPECT_EQ(320u, sps->width);
   EXPECT_EQ(180u, sps->height);
@@ -534,8 +529,7 @@ TEST_F(H265SpsParserTest, TestLongTermRefPicsPresentFlag) {
   EXPECT_EQ(0u, sps->long_term_ref_pics_present_flag);
 
   WriteSps(320u, 180u, 1, 6, 1, 1, &buffer);
-  absl::optional<H265SpsParser::SpsState> sps1 =
-      H265SpsParser::ParseSps(buffer.data(), buffer.size());
+  std::optional<H265SpsParser::SpsState> sps1 = H265SpsParser::ParseSps(buffer);
   ASSERT_TRUE(sps1.has_value());
   EXPECT_EQ(320u, sps1->width);
   EXPECT_EQ(180u, sps1->height);

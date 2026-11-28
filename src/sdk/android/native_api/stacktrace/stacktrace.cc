@@ -13,21 +13,23 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <linux/futex.h>
-#include <sys/ptrace.h>
-#include <sys/ucontext.h>
-#include <syscall.h>
-#include <ucontext.h>
+#include <signal.h>
+#include <sys/syscall.h>  // IWYU pragma: keep
 #include <unistd.h>
 #include <unwind.h>
 
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <vector>
 
 // ptrace.h is polluting the namespace. Clean up to avoid conflicts with rtc.
 #if defined(DS)
 #undef DS
 #endif
 
-#include "absl/base/attributes.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/synchronization/mutex.h"
@@ -46,7 +48,7 @@ constexpr int kSignal = SIGURG;
 // Note: This class is only meant for use within this file, and for the
 // simplified use case of a single Wait() and a single Signal(), followed by
 // discarding the object (never reused).
-// This is a replacement of rtc::Event that is async-safe and doesn't use
+// This is a replacement of webrtc::Event that is async-safe and doesn't use
 // pthread api. This is necessary since signal handlers cannot allocate memory
 // or use pthread api. This class is ported from Chromium.
 class AsyncSafeWaitableEvent {
@@ -266,7 +268,7 @@ std::vector<StackTraceElement> GetStackTrace() {
 
 std::string StackTraceToString(
     const std::vector<StackTraceElement>& stack_trace) {
-  rtc::StringBuilder string_builder;
+  StringBuilder string_builder;
 
   for (size_t i = 0; i < stack_trace.size(); ++i) {
     const StackTraceElement& stack_trace_element = stack_trace[i];

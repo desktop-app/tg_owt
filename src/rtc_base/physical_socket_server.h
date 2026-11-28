@@ -11,11 +11,15 @@
 #ifndef RTC_BASE_PHYSICAL_SOCKET_SERVER_H_
 #define RTC_BASE_PHYSICAL_SOCKET_SERVER_H_
 
+#include <cstddef>
+
 #include "api/async_dns_resolver.h"
+#include "api/transport/ecn_marking.h"
 #include "api/units/time_delta.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/net_helpers.h"
 #include "rtc_base/socket.h"
 #include "rtc_base/socket_address.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 
 #if defined(WEBRTC_POSIX)
 #if defined(WEBRTC_LINUX)
@@ -23,7 +27,7 @@
 #include <sys/epoll.h>
 
 #define WEBRTC_USE_EPOLL 1
-#elif defined(WEBRTC_FUCHSIA)
+#elif defined(WEBRTC_FUCHSIA) || defined(WEBRTC_MAC)
 // Fuchsia implements select and poll but not epoll, and testing shows that poll
 // is faster than select.
 #include <poll.h>
@@ -31,7 +35,7 @@
 #define WEBRTC_USE_POLL 1
 #else
 // On other POSIX systems, use select by default.
-#endif  // WEBRTC_LINUX, WEBRTC_FUCHSIA
+#endif  // WEBRTC_LINUX, WEBRTC_FUCHSIA, WEBRTC_MAC
 #endif  // WEBRTC_POSIX
 
 #include <array>
@@ -51,7 +55,9 @@
 typedef int SOCKET;
 #endif  // WEBRTC_POSIX
 
-namespace rtc {
+namespace webrtc {
+
+class Signaler;
 
 // Event constants for the Dispatcher class.
 enum DispatcherEvent {
@@ -61,8 +67,6 @@ enum DispatcherEvent {
   DE_CLOSE = 0x0008,
   DE_ACCEPT = 0x0010,
 };
-
-class Signaler;
 
 class Dispatcher {
  public:
@@ -92,8 +96,9 @@ class RTC_EXPORT PhysicalSocketServer : public SocketServer {
   virtual Socket* WrapSocket(SOCKET s);
 
   // SocketServer:
-  bool Wait(webrtc::TimeDelta max_wait_duration, bool process_io) override;
+  bool Wait(TimeDelta max_wait_duration, bool process_io) override;
   void WakeUp() override;
+  bool CanCreateSockets() const override { return true; }
 
   void Add(Dispatcher* dispatcher);
   void Remove(Dispatcher* dispatcher);
@@ -102,20 +107,16 @@ class RTC_EXPORT PhysicalSocketServer : public SocketServer {
  private:
   // The number of events to process with one call to "epoll_wait".
   static constexpr size_t kNumEpollEvents = 128;
-  // A local historical definition of "foreverness", in milliseconds.
-  static constexpr int kForeverMs = -1;
-
-  static int ToCmsWait(webrtc::TimeDelta max_wait_duration);
 
 #if defined(WEBRTC_POSIX)
-  bool WaitSelect(int cmsWait, bool process_io);
+  bool WaitSelect(TimeDelta timeout, bool process_io);
 
 #if defined(WEBRTC_USE_EPOLL)
   void AddEpoll(Dispatcher* dispatcher, uint64_t key);
   void RemoveEpoll(Dispatcher* dispatcher);
   void UpdateEpoll(Dispatcher* dispatcher, uint64_t key);
-  bool WaitEpoll(int cmsWait);
-  bool WaitPollOneDispatcher(int cmsWait, Dispatcher* dispatcher);
+  bool WaitEpoll(TimeDelta timeout);
+  bool WaitPollOneDispatcher(TimeDelta timeout, Dispatcher* dispatcher);
 
   // This array is accessed in isolation by a thread calling into Wait().
   // It's useless to use a SequenceChecker to guard it because a socket
@@ -125,10 +126,7 @@ class RTC_EXPORT PhysicalSocketServer : public SocketServer {
   const int epoll_fd_ = INVALID_SOCKET;
 
 #elif defined(WEBRTC_USE_POLL)
-  void AddPoll(Dispatcher* dispatcher, uint64_t key);
-  void RemovePoll(Dispatcher* dispatcher);
-  void UpdatePoll(Dispatcher* dispatcher, uint64_t key);
-  bool WaitPoll(int cmsWait, bool process_io);
+  bool WaitPoll(TimeDelta timeout, bool process_io);
 
 #endif  // WEBRTC_USE_EPOLL, WEBRTC_USE_POLL
 #endif  // WEBRTC_POSIX
@@ -160,7 +158,7 @@ class RTC_EXPORT PhysicalSocketServer : public SocketServer {
   bool waiting_ = false;
 };
 
-class PhysicalSocket : public Socket, public sigslot::has_slots<> {
+class PhysicalSocket : public Socket {
  public:
   PhysicalSocket(PhysicalSocketServer* ss, SOCKET s = INVALID_SOCKET);
   ~PhysicalSocket() override;
@@ -224,9 +222,10 @@ class PhysicalSocket : public Socket, public sigslot::has_slots<> {
   int DoReadFromSocket(void* buffer,
                        size_t length,
                        SocketAddress* out_addr,
-                       int64_t* timestamp);
+                       int64_t* timestamp,
+                       EcnMarking* ecn);
 
-  void OnResolveResult(const webrtc::AsyncDnsResolverResult& resolver);
+  void OnResolveResult(const AsyncDnsResolverResult& resolver);
 
   void UpdateLastError();
   void MaybeRemapSendError();
@@ -242,17 +241,19 @@ class PhysicalSocket : public Socket, public sigslot::has_slots<> {
   SOCKET s_;
   bool udp_;
   int family_ = 0;
-  mutable webrtc::Mutex mutex_;
+  mutable Mutex mutex_;
   int error_ RTC_GUARDED_BY(mutex_);
   ConnState state_;
-  std::unique_ptr<webrtc::AsyncDnsResolverInterface> resolver_;
+  std::unique_ptr<AsyncDnsResolverInterface> resolver_;
+  uint8_t dscp_ = 0;  // 6bit.
+  uint8_t ecn_send_options_ = 0;  // 2bits.
+  bool read_ecn_ = false;
 
-#if !defined(NDEBUG)
+#if RTC_DCHECK_IS_ON
   std::string dbg_addr_;
 #endif
 
  private:
-  const bool read_scm_timestamp_experiment_;
   uint8_t enabled_events_ = 0;
 };
 
@@ -305,6 +306,7 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
 #endif
 };
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // RTC_BASE_PHYSICAL_SOCKET_SERVER_H_

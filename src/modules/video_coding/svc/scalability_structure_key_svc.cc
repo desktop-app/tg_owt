@@ -10,21 +10,17 @@
 #include "modules/video_coding/svc/scalability_structure_key_svc.h"
 
 #include <bitset>
-#include <utility>
+#include <cstdint>
+#include <optional>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/transport/rtp/dependency_descriptor.h"
 #include "api/video/video_bitrate_allocation.h"
 #include "common_video/generic_frame_descriptor/generic_frame_info.h"
 #include "modules/video_coding/svc/scalable_video_controller.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/logging.h"
 
 namespace webrtc {
-
-constexpr int ScalabilityStructureKeySvc::kMaxNumSpatialLayers;
-constexpr int ScalabilityStructureKeySvc::kMaxNumTemporalLayers;
 
 ScalabilityStructureKeySvc::ScalabilityStructureKeySvc(int num_spatial_layers,
                                                        int num_temporal_layers)
@@ -60,7 +56,8 @@ bool ScalabilityStructureKeySvc::TemporalLayerIsActive(int tid) const {
     return false;
   }
   for (int sid = 0; sid < num_spatial_layers_; ++sid) {
-    if (DecodeTargetIsActive(sid, tid)) {
+    if (DecodeTargetIsActive(sid, tid) &&
+        (tid == 0 || can_reference_t0_frame_for_spatial_id_[sid])) {
       return true;
     }
   }
@@ -90,8 +87,8 @@ std::vector<ScalableVideoController::LayerFrameConfig>
 ScalabilityStructureKeySvc::KeyframeConfig() {
   std::vector<LayerFrameConfig> configs;
   configs.reserve(num_spatial_layers_);
-  absl::optional<int> spatial_dependency_buffer_id;
-  spatial_id_is_enabled_.reset();
+  std::optional<int> spatial_dependency_buffer_id;
+  can_reference_t0_frame_for_spatial_id_.reset();
   // Disallow temporal references cross T0 on higher temporal layers.
   can_reference_t1_frame_for_spatial_id_.reset();
   for (int sid = 0; sid < num_spatial_layers_; ++sid) {
@@ -109,7 +106,6 @@ ScalabilityStructureKeySvc::KeyframeConfig() {
     }
     config.Update(BufferIndex(sid, /*tid=*/0));
 
-    spatial_id_is_enabled_.set(sid);
     spatial_dependency_buffer_id = BufferIndex(sid, /*tid=*/0);
   }
   return configs;
@@ -123,9 +119,10 @@ ScalabilityStructureKeySvc::T0Config() {
   can_reference_t1_frame_for_spatial_id_.reset();
   for (int sid = 0; sid < num_spatial_layers_; ++sid) {
     if (!DecodeTargetIsActive(sid, /*tid=*/0)) {
-      spatial_id_is_enabled_.reset(sid);
+      can_reference_t0_frame_for_spatial_id_.reset(sid);
       continue;
     }
+    RTC_DCHECK(can_reference_t0_frame_for_spatial_id_[sid]);
     configs.emplace_back();
     configs.back().Id(kDeltaT0).S(sid).T(0).ReferenceAndUpdate(
         BufferIndex(sid, /*tid=*/0));
@@ -138,7 +135,8 @@ ScalabilityStructureKeySvc::T1Config() {
   std::vector<LayerFrameConfig> configs;
   configs.reserve(num_spatial_layers_);
   for (int sid = 0; sid < num_spatial_layers_; ++sid) {
-    if (!DecodeTargetIsActive(sid, /*tid=*/1)) {
+    if (!DecodeTargetIsActive(sid, /*tid=*/1) ||
+        !can_reference_t0_frame_for_spatial_id_[sid]) {
       continue;
     }
     configs.emplace_back();
@@ -156,7 +154,8 @@ ScalabilityStructureKeySvc::T2Config(FramePattern pattern) {
   std::vector<LayerFrameConfig> configs;
   configs.reserve(num_spatial_layers_);
   for (int sid = 0; sid < num_spatial_layers_; ++sid) {
-    if (!DecodeTargetIsActive(sid, /*tid=*/2)) {
+    if (!DecodeTargetIsActive(sid, /*tid=*/2) ||
+        !can_reference_t0_frame_for_spatial_id_[sid]) {
       continue;
     }
     configs.emplace_back();
@@ -172,22 +171,35 @@ ScalabilityStructureKeySvc::T2Config(FramePattern pattern) {
 }
 
 ScalabilityStructureKeySvc::FramePattern
+ScalabilityStructureKeySvc::T0OrKeyPattern() const {
+  for (int sid = 0; sid < num_spatial_layers_; ++sid) {
+    if (DecodeTargetIsActive(sid, /*tid=*/0) &&
+        !can_reference_t0_frame_for_spatial_id_[sid]) {
+      // A keyframe is required to initialize any active spatial layer that
+      // does not yet have a T0 reference frame.
+      return kKey;
+    }
+  }
+  return kDeltaT0;
+}
+
+ScalabilityStructureKeySvc::FramePattern
 ScalabilityStructureKeySvc::NextPattern(FramePattern last_pattern) const {
   switch (last_pattern) {
     case kNone:
       return kKey;
     case kDeltaT2B:
-      return kDeltaT0;
+      return T0OrKeyPattern();
     case kDeltaT2A:
       if (TemporalLayerIsActive(1)) {
         return kDeltaT1;
       }
-      return kDeltaT0;
+      return T0OrKeyPattern();
     case kDeltaT1:
       if (TemporalLayerIsActive(2)) {
         return kDeltaT2B;
       }
-      return kDeltaT0;
+      return T0OrKeyPattern();
     case kDeltaT0:
     case kKey:
       if (TemporalLayerIsActive(2)) {
@@ -196,7 +208,7 @@ ScalabilityStructureKeySvc::NextPattern(FramePattern last_pattern) const {
       if (TemporalLayerIsActive(1)) {
         return kDeltaT1;
       }
-      return kDeltaT0;
+      return T0OrKeyPattern();
   }
   RTC_DCHECK_NOTREACHED();
   return kNone;
@@ -231,6 +243,11 @@ ScalabilityStructureKeySvc::NextFrameConfig(bool restart) {
   return {};
 }
 
+void ScalabilityStructureKeySvc::OnFrameDropped(
+    const LayerFrameConfig& config) {
+  last_pattern_ = static_cast<FramePattern>(config.Id());
+}
+
 GenericFrameInfo ScalabilityStructureKeySvc::OnEncodeDone(
     const LayerFrameConfig& config) {
   // When encoder drops all frames for a temporal unit, it is better to reuse
@@ -238,6 +255,9 @@ GenericFrameInfo ScalabilityStructureKeySvc::OnEncodeDone(
   // pattern defered here from the `NextFrameConfig`.
   // In particular creating VP9 references rely on this behavior.
   last_pattern_ = static_cast<FramePattern>(config.Id());
+  if (config.TemporalId() == 0) {
+    can_reference_t0_frame_for_spatial_id_.set(config.SpatialId());
+  }
   if (config.TemporalId() == 1) {
     can_reference_t1_frame_for_spatial_id_.set(config.SpatialId());
   }
@@ -272,7 +292,7 @@ void ScalabilityStructureKeySvc::OnRatesUpdated(
     // Enable/disable spatial layers independetely.
     bool active = bitrates.GetBitrate(sid, /*tid=*/0) > 0;
     SetDecodeTargetIsActive(sid, /*tid=*/0, active);
-    if (!spatial_id_is_enabled_[sid] && active) {
+    if (!can_reference_t0_frame_for_spatial_id_[sid] && active) {
       // Key frame is required to reenable any spatial layer.
       last_pattern_ = kNone;
     }

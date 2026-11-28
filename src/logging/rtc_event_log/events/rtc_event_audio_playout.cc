@@ -10,23 +10,17 @@
 
 #include "logging/rtc_event_log/events/rtc_event_audio_playout.h"
 
+#include <cstdint>
+#include <memory>
+
 #include "absl/memory/memory.h"
 
 namespace webrtc {
 
-constexpr RtcEventDefinition<RtcEventAudioPlayout,
-                             LoggedAudioPlayoutEvent,
-                             uint32_t>
-    RtcEventAudioPlayout::definition_;
-
 RtcEventAudioPlayout::RtcEventAudioPlayout(uint32_t ssrc) : ssrc_(ssrc) {}
 
-RtcEventAudioPlayout::RtcEventAudioPlayout(const RtcEventAudioPlayout& other)
-    : RtcEvent(other.timestamp_us_), ssrc_(other.ssrc_) {}
-
 std::unique_ptr<RtcEventAudioPlayout> RtcEventAudioPlayout::Copy() const {
-  return absl::WrapUnique<RtcEventAudioPlayout>(
-      new RtcEventAudioPlayout(*this));
+  return absl::WrapUnique(new RtcEventAudioPlayout(*this));
 }
 
 }  // namespace webrtc

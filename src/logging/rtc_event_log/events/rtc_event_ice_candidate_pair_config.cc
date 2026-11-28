@@ -10,7 +10,11 @@
 
 #include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.h"
 
+#include <cstdint>
+#include <memory>
+
 #include "absl/memory/memory.h"
+#include "api/candidate.h"
 
 namespace webrtc {
 
@@ -47,19 +51,11 @@ RtcEventIceCandidatePairConfig::RtcEventIceCandidatePairConfig(
       candidate_pair_id_(candidate_pair_id),
       candidate_pair_desc_(candidate_pair_desc) {}
 
-RtcEventIceCandidatePairConfig::RtcEventIceCandidatePairConfig(
-    const RtcEventIceCandidatePairConfig& other)
-    : RtcEvent(other.timestamp_us_),
-      type_(other.type_),
-      candidate_pair_id_(other.candidate_pair_id_),
-      candidate_pair_desc_(other.candidate_pair_desc_) {}
-
 RtcEventIceCandidatePairConfig::~RtcEventIceCandidatePairConfig() = default;
 
 std::unique_ptr<RtcEventIceCandidatePairConfig>
 RtcEventIceCandidatePairConfig::Copy() const {
-  return absl::WrapUnique<RtcEventIceCandidatePairConfig>(
-      new RtcEventIceCandidatePairConfig(*this));
+  return absl::WrapUnique(new RtcEventIceCandidatePairConfig(*this));
 }
 
 }  // namespace webrtc

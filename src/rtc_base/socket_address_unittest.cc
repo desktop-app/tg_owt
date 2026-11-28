@@ -8,17 +8,17 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#if defined(WEBRTC_POSIX)
-#include <netinet/in.h>  // for sockaddr_in
-#endif
-
-#include <string.h>
-
-#include "rtc_base/ip_address.h"
 #include "rtc_base/socket_address.h"
+
+#include <cstring>
+#include <string>
+
+#include "absl/strings/str_cat.h"
+#include "rtc_base/ip_address.h"
+#include "rtc_base/net_helpers.h"
 #include "test/gtest.h"
 
-namespace rtc {
+namespace webrtc {
 
 const in6_addr kTestV6Addr = {
     {{0x20, 0x01, 0x0d, 0xb8, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
@@ -334,6 +334,31 @@ TEST(SocketAddressTest, TestToSensitiveString) {
   EXPECT_EQ(kTestV6AddrFullAnonymizedString, addr_v6.ToSensitiveString());
 }
 
+TEST(SocketAddressTest, SensitiveMatchesToSensitiveString) {
+  SocketAddress resolved_hostname("webrtc.org", 80);
+  resolved_hostname.SetResolvedIP(IPAddress(0x01020304));
+  const struct {
+    SocketAddress address;
+    std::string expected;
+  } test_cases[] = {
+      // A hostname that is an IP literal must be anonymized too.
+      {SocketAddress("1.2.3.4", 5678), "1.2.3.x:5678"},
+      {SocketAddress(IPAddress(0x01020304), 5678), "1.2.3.x:5678"},
+      {SocketAddress(kTestV6AddrString, 5678), kTestV6AddrFullAnonymizedString},
+      {SocketAddress(IPAddress(kTestV6Addr), 5678),
+       kTestV6AddrFullAnonymizedString},
+      {SocketAddress("a.b.com", 5678), "a.b.com:5678"},
+      {SocketAddress("1fdd3ec8-cb3d-4d1a-a4b4-38d3cd1f6b5b.local", 54321),
+       "1fdd3ec8-cb3d-4d1a-a4b4-38d3cd1f6b5b.local:54321"},
+      {resolved_hostname, "webrtc.org:80"},
+      {SocketAddress(), ":0"},
+  };
+  for (const auto& [address, expected] : test_cases) {
+    EXPECT_EQ(address.ToSensitiveString(), expected);
+    EXPECT_EQ(absl::StrCat(SocketAddress::Sensitive(address)), expected);
+  }
+}
+
 TEST(SocketAddressTest, TestToSensitiveNameAndAddressString) {
   SocketAddress ipv4OnlyLiteral("1.2.3.4", 5678);
   EXPECT_EQ("1.2.3.x:5678", ipv4OnlyLiteral.ToSensitiveNameAndAddressString());
@@ -363,4 +388,4 @@ TEST(SocketAddressTest, TestToSensitiveNameAndAddressString) {
             hostAndIpv6.ToSensitiveNameAndAddressString());
 }
 
-}  // namespace rtc
+}  // namespace webrtc

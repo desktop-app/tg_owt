@@ -11,13 +11,15 @@
 #ifndef RTC_BASE_SOCKET_ADDRESS_H_
 #define RTC_BASE_SOCKET_ADDRESS_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
+#include "absl/base/attributes.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#ifdef WEBRTC_UNIT_TEST
-#include <ostream>  // no-presubmit-check TODO(webrtc:8982)
-#endif              // WEBRTC_UNIT_TEST
 #include "rtc_base/ip_address.h"
+#include "rtc_base/net_helpers.h"
 #include "rtc_base/system/rtc_export.h"
 
 #undef SetPort
@@ -25,7 +27,7 @@
 struct sockaddr_in;
 struct sockaddr_storage;
 
-namespace rtc {
+namespace webrtc {
 
 // Records an IP address and port.
 class RTC_EXPORT SocketAddress {
@@ -126,19 +128,36 @@ class RTC_EXPORT SocketAddress {
   // Same as ToString but anonymizes it by hiding the last part.
   std::string ToSensitiveString() const;
 
+  // Stringifies (see AbslStringify) to the same string as ToSensitiveString(),
+  // without creating temporary strings, e.g. when appending to a StringBuilder:
+  //   sb << SocketAddress::Sensitive(address);
+  // Must not outlive the SocketAddress.
+  class Sensitive {
+   public:
+    explicit Sensitive(
+        const SocketAddress& address ABSL_ATTRIBUTE_LIFETIME_BOUND)
+        : address_(address) {}
+
+    template <typename Sink>
+    friend void AbslStringify(Sink& sink, const Sensitive& sensitive) {
+      sensitive.AppendTo(sink);
+    }
+
+   private:
+    template <typename Sink>
+    void AppendTo(Sink& sink) const {
+      address_.AppendSensitiveTo(sink);
+    }
+
+    const SocketAddress& address_;
+  };
+
   // Returns sensitive description of address in a form which both includes
   // resolved and unresolved addresses based on their availability.
   std::string ToSensitiveNameAndAddressString() const;
 
   // Parses hostname:port and [hostname]:port.
   bool FromString(absl::string_view str);
-
-#ifdef WEBRTC_UNIT_TEST
-  inline std::ostream& operator<<(  // no-presubmit-check TODO(webrtc:8982)
-      std::ostream& os) {           // no-presubmit-check TODO(webrtc:8982)
-    return os << HostAsURIString() << ":" << port();
-  }
-#endif  // WEBRTC_UNIT_TEST
 
   // Determines whether this represents a missing / any IP address.
   // That is, 0.0.0.0 or ::.
@@ -157,6 +176,9 @@ class RTC_EXPORT SocketAddress {
 
   // Determines whether the hostname has been resolved to an IP.
   bool IsUnresolvedIP() const;
+
+  // Returns the IP Address type as an enum.
+  IPAddressType GetIPAddressType() const;
 
   // Determines whether this address is identical to the given one.
   bool operator==(const SocketAddress& addr) const;
@@ -193,6 +215,20 @@ class RTC_EXPORT SocketAddress {
   size_t ToSockAddrStorage(sockaddr_storage* saddr) const;
 
  private:
+  // Appends the same string as ToSensitiveString() to `sink`. See Sensitive.
+  template <typename Sink>
+  void AppendSensitiveTo(Sink& sink) const {
+    // Same as HostAsSensitiveURIString() followed by ":" and the port.
+    if (!literal_ && !hostname_.empty()) {
+      sink.Append(hostname_);
+    } else if (ip_.family() == AF_INET6) {
+      absl::Format(&sink, "[%v]", IPAddress::Sensitive(ip_));
+    } else {
+      AbslStringify(sink, IPAddress::Sensitive(ip_));
+    }
+    absl::Format(&sink, ":%d", port_);
+  }
+
   std::string hostname_;
   IPAddress ip_;
   uint16_t port_;
@@ -204,6 +240,7 @@ RTC_EXPORT bool SocketAddressFromSockAddrStorage(const sockaddr_storage& saddr,
                                                  SocketAddress* out);
 SocketAddress EmptySocketAddressWithFamily(int family);
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // RTC_BASE_SOCKET_ADDRESS_H_

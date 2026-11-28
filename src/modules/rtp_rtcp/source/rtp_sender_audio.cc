@@ -10,46 +10,32 @@
 
 #include "modules/rtp_rtcp/source/rtp_sender_audio.h"
 
-#include <string.h>
-
+#include <cstdint>
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/match.h"
-#include "absl/types/optional.h"
-#include "api/audio_codecs/audio_format.h"
+#include "absl/strings/string_view.h"
 #include "api/rtp_headers.h"
 #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/absolute_capture_time_sender.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
+#include "modules/rtp_rtcp/source/dtmf_queue.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
-#include "modules/rtp_rtcp/source/time_util.h"
+#include "modules/rtp_rtcp/source/rtp_sender.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
-#include "rtc_base/trace_event.h"
-#include "system_wrappers/include/ntp_time.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
-
-namespace {
-[[maybe_unused]] const char* FrameTypeToString(AudioFrameType frame_type) {
-  switch (frame_type) {
-    case AudioFrameType::kEmptyFrame:
-      return "empty";
-    case AudioFrameType::kAudioFrameSpeech:
-      return "audio_speech";
-    case AudioFrameType::kAudioFrameCN:
-      return "audio_cn";
-  }
-  RTC_CHECK_NOTREACHED();
-}
-
-}  // namespace
 
 RTPSenderAudio::RTPSenderAudio(Clock* clock, RTPSender* rtp_sender)
     : clock_(clock),
@@ -63,8 +49,8 @@ RTPSenderAudio::~RTPSenderAudio() {}
 int32_t RTPSenderAudio::RegisterAudioPayload(absl::string_view payload_name,
                                              const int8_t payload_type,
                                              const uint32_t frequency,
-                                             const size_t channels,
-                                             const uint32_t rate) {
+                                             const size_t /* channels */,
+                                             const uint32_t /* rate */) {
   if (absl::EqualsIgnoreCase(payload_name, "cn")) {
     MutexLock lock(&send_audio_mutex_);
     //  we can have multiple CNG payload types
@@ -93,7 +79,7 @@ int32_t RTPSenderAudio::RegisterAudioPayload(absl::string_view payload_name,
     return 0;
   } else if (payload_name == "audio") {
     MutexLock lock(&send_audio_mutex_);
-    encoder_rtp_timestamp_frequency_ = rtc::dchecked_cast<int>(frequency);
+    encoder_rtp_timestamp_frequency_ = dchecked_cast<int>(frequency);
     return 0;
   }
   return 0;
@@ -145,8 +131,6 @@ bool RTPSenderAudio::MarkerBit(AudioFrameType frame_type, int8_t payload_type) {
 bool RTPSenderAudio::SendAudio(const RtpAudioFrame& frame) {
   RTC_DCHECK_GE(frame.payload_id, 0);
   RTC_DCHECK_LE(frame.payload_id, 127);
-  TRACE_EVENT_ASYNC_STEP1("webrtc", "Audio", frame.rtp_timestamp, "Send",
-                          "type", FrameTypeToString(frame.type));
 
   // From RFC 4733:
   // A source has wide latitude as to how often it sends event updates. A
@@ -155,7 +139,7 @@ bool RTPSenderAudio::SendAudio(const RtpAudioFrame& frame) {
   // updates, with a value of 50 ms RECOMMENDED.
   constexpr int kDtmfIntervalTimeMs = 50;
   uint32_t dtmf_payload_freq = 0;
-  absl::optional<AbsoluteCaptureTime> absolute_capture_time;
+  std::optional<AbsoluteCaptureTime> absolute_capture_time;
   {
     MutexLock lock(&send_audio_mutex_);
     dtmf_payload_freq = dtmf_payload_freq_;
@@ -261,9 +245,9 @@ bool RTPSenderAudio::SendAudio(const RtpAudioFrame& frame) {
   packet->SetTimestamp(frame.rtp_timestamp);
   packet->set_capture_time(clock_->CurrentTime());
   // Set audio level extension, if included.
-  packet->SetExtension<AudioLevel>(
-      frame.type == AudioFrameType::kAudioFrameSpeech,
-      frame.audio_level_dbov.value_or(127));
+  packet->SetExtension<AudioLevelExtension>(
+      AudioLevel(frame.type == AudioFrameType::kAudioFrameSpeech,
+                 frame.audio_level_dbov.value_or(127)));
 
   if (absolute_capture_time.has_value()) {
     // It also checks that extension was registered during SDP negotiation. If
@@ -271,17 +255,12 @@ bool RTPSenderAudio::SendAudio(const RtpAudioFrame& frame) {
     packet->SetExtension<AbsoluteCaptureTimeExtension>(*absolute_capture_time);
   }
 
-  uint8_t* payload = packet->AllocatePayload(frame.payload.size());
-  RTC_CHECK(payload);
-  memcpy(payload, frame.payload.data(), frame.payload.size());
+  packet->SetPayload(frame.payload);
 
   {
     MutexLock lock(&send_audio_mutex_);
     last_payload_type_ = frame.payload_id;
   }
-  TRACE_EVENT_ASYNC_END2("webrtc", "Audio", frame.rtp_timestamp, "timestamp",
-                         packet->Timestamp(), "seqnum",
-                         packet->SequenceNumber());
   packet->set_packet_type(RtpPacketMediaType::kAudio);
   packet->set_allow_retransmission(true);
   std::vector<std::unique_ptr<RtpPacketToSend>> packets(1);

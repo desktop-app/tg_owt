@@ -10,18 +10,25 @@
 
 #include "sdk/android/src/jni/pc/media_stream.h"
 
+#include <jni.h>
+
 #include <memory>
 
+#include "api/media_stream_interface.h"
+#include "api/scoped_refptr.h"
+#include "pc/media_stream_observer.h"
 #include "sdk/android/generated_peerconnection_jni/MediaStream_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/src/jni/jvm.h"
 
 namespace webrtc {
 namespace jni {
 
 JavaMediaStream::JavaMediaStream(
     JNIEnv* env,
-    rtc::scoped_refptr<MediaStreamInterface> media_stream)
+    scoped_refptr<MediaStreamInterface> media_stream)
     : j_media_stream_(
           env,
           Java_MediaStream_Constructor(env,
@@ -46,12 +53,12 @@ JavaMediaStream::JavaMediaStream(
              MediaStreamInterface* media_stream) {
         OnVideoTrackRemovedFromStream(video_track, media_stream);
       }));
-  for (rtc::scoped_refptr<AudioTrackInterface> track :
+  for (scoped_refptr<AudioTrackInterface> track :
        media_stream->GetAudioTracks()) {
     Java_MediaStream_addNativeAudioTrack(env, j_media_stream_,
                                          jlongFromPointer(track.release()));
   }
-  for (rtc::scoped_refptr<VideoTrackInterface> track :
+  for (scoped_refptr<VideoTrackInterface> track :
        media_stream->GetVideoTracks()) {
     Java_MediaStream_addNativeVideoTrack(env, j_media_stream_,
                                          jlongFromPointer(track.release()));
@@ -113,7 +120,7 @@ static jboolean JNI_MediaStream_AddAudioTrackToNativeStream(
     jlong pointer,
     jlong j_audio_track_pointer) {
   return reinterpret_cast<MediaStreamInterface*>(pointer)->AddTrack(
-      rtc::scoped_refptr<AudioTrackInterface>(
+      scoped_refptr<AudioTrackInterface>(
           reinterpret_cast<AudioTrackInterface*>(j_audio_track_pointer)));
 }
 
@@ -122,7 +129,7 @@ static jboolean JNI_MediaStream_AddVideoTrackToNativeStream(
     jlong pointer,
     jlong j_video_track_pointer) {
   return reinterpret_cast<MediaStreamInterface*>(pointer)->AddTrack(
-      rtc::scoped_refptr<VideoTrackInterface>(
+      scoped_refptr<VideoTrackInterface>(
           reinterpret_cast<VideoTrackInterface*>(j_video_track_pointer)));
 }
 
@@ -130,7 +137,7 @@ static jboolean JNI_MediaStream_RemoveAudioTrack(JNIEnv* jni,
                                                  jlong pointer,
                                                  jlong j_audio_track_pointer) {
   return reinterpret_cast<MediaStreamInterface*>(pointer)->RemoveTrack(
-      rtc::scoped_refptr<AudioTrackInterface>(
+      scoped_refptr<AudioTrackInterface>(
           reinterpret_cast<AudioTrackInterface*>(j_audio_track_pointer)));
 }
 
@@ -138,7 +145,7 @@ static jboolean JNI_MediaStream_RemoveVideoTrack(JNIEnv* jni,
                                                  jlong pointer,
                                                  jlong j_video_track_pointer) {
   return reinterpret_cast<MediaStreamInterface*>(pointer)->RemoveTrack(
-      rtc::scoped_refptr<VideoTrackInterface>(
+      scoped_refptr<VideoTrackInterface>(
           reinterpret_cast<VideoTrackInterface*>(j_video_track_pointer)));
 }
 
@@ -150,3 +157,5 @@ static ScopedJavaLocalRef<jstring> JNI_MediaStream_GetId(JNIEnv* jni,
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(MediaStream)

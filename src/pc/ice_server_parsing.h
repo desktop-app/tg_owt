@@ -11,6 +11,7 @@
 #ifndef PC_ICE_SERVER_PARSING_H_
 #define PC_ICE_SERVER_PARSING_H_
 
+#include <cstddef>
 #include <vector>
 
 #include "api/peer_connection_interface.h"
@@ -21,6 +22,10 @@
 
 namespace webrtc {
 
+// STUN servers are limited to 32 in accordance with
+// https://w3c.github.io/webrtc-pc/#dom-rtcconfiguration-iceservers
+inline constexpr size_t kMaxStunServers = 32;
+
 // Parses the URLs for each server in `servers` to build `stun_servers` and
 // `turn_servers`. Can return SYNTAX_ERROR if the URL is malformed, or
 // INVALID_PARAMETER if a TURN server is missing `username` or `password`.
@@ -29,13 +34,15 @@ namespace webrtc {
 // PeerConnection through RTCConfiguration.
 RTC_EXPORT RTCError
 ParseIceServersOrError(const PeerConnectionInterface::IceServers& servers,
-                       cricket::ServerAddresses* stun_servers,
-                       std::vector<cricket::RelayServerConfig>* turn_servers);
+                       ServerAddresses* stun_servers,
+                       std::vector<RelayServerConfig>* turn_servers);
 
-[[deprecated("use ParseIceServersOrError")]] RTC_EXPORT RTCErrorType
-ParseIceServers(const PeerConnectionInterface::IceServers& servers,
-                cricket::ServerAddresses* stun_servers,
-                std::vector<cricket::RelayServerConfig>* turn_servers);
+// Calls `ParseIceServersOrError` to extract ice server information from the
+// `configuration` and then validates the extracted configuration.
+RTC_EXPORT RTCError ParseAndValidateIceServersFromConfiguration(
+    const PeerConnectionInterface::RTCConfiguration& configuration,
+    ServerAddresses& stun_servers,
+    std::vector<RelayServerConfig>& turn_servers);
 
 }  // namespace webrtc
 

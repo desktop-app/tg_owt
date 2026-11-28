@@ -15,15 +15,12 @@
 #include <utility>
 
 #include "api/field_trials_view.h"
+#include "api/scoped_refptr.h"
 #include "p2p/base/ice_credentials_iterator.h"
 #include "p2p/base/transport_description.h"
 #include "rtc_base/rtc_certificate.h"
 
-namespace rtc {
-class SSLIdentity;
-}
-
-namespace cricket {
+namespace webrtc {
 
 struct TransportOptions {
   bool ice_restart = false;
@@ -31,6 +28,9 @@ struct TransportOptions {
   // If true, ICE renomination is supported and will be used if it is also
   // supported by the remote side.
   bool enable_ice_renomination = false;
+  // If true, SPED (STUN Protocol for Embedding DTLS) is supported and will
+  // be used if it is also supported by the remote side.
+  bool dtls_handshake_in_stun = false;
 };
 
 // Creates transport descriptions according to the supplied configuration.
@@ -39,17 +39,16 @@ struct TransportOptions {
 class TransportDescriptionFactory {
  public:
   // Default ctor; use methods below to set configuration.
-  explicit TransportDescriptionFactory(
-      const webrtc::FieldTrialsView& field_trials);
+  explicit TransportDescriptionFactory(const FieldTrialsView& field_trials);
   ~TransportDescriptionFactory();
 
   // The certificate to use when setting up DTLS.
-  const rtc::scoped_refptr<rtc::RTCCertificate>& certificate() const {
+  const scoped_refptr<RTCCertificate>& certificate() const {
     return certificate_;
   }
 
   // Specifies the certificate to use
-  void set_certificate(rtc::scoped_refptr<rtc::RTCCertificate> certificate) {
+  void set_certificate(scoped_refptr<RTCCertificate> certificate) {
     certificate_ = std::move(certificate);
   }
 
@@ -72,7 +71,7 @@ class TransportDescriptionFactory {
       const TransportDescription* current_description,
       IceCredentialsIterator* ice_credentials) const;
 
-  const webrtc::FieldTrialsView& trials() const { return field_trials_; }
+  const FieldTrialsView& trials() const { return field_trials_; }
   // Functions for disabling encryption - test only!
   // In insecure mode, the connection will accept a description without
   // fingerprint, and will generate SDP even if certificate is not set.
@@ -85,10 +84,11 @@ class TransportDescriptionFactory {
   bool SetSecurityInfo(TransportDescription* description,
                        ConnectionRole role) const;
   bool insecure_ = false;
-  rtc::scoped_refptr<rtc::RTCCertificate> certificate_;
-  const webrtc::FieldTrialsView& field_trials_;
+  scoped_refptr<RTCCertificate> certificate_;
+  const FieldTrialsView& field_trials_;
 };
 
-}  // namespace cricket
+}  //  namespace webrtc
+
 
 #endif  // P2P_BASE_TRANSPORT_DESCRIPTION_FACTORY_H_

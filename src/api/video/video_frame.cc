@@ -11,8 +11,17 @@
 #include "api/video/video_frame.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <optional>
 #include <utility>
 
+#include "api/rtp_packet_infos.h"
+#include "api/scoped_refptr.h"
+#include "api/units/timestamp.h"
+#include "api/video/color_space.h"
+#include "api/video/video_content_type.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_rotation.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/time_utils.h"
 
@@ -84,7 +93,7 @@ VideoFrame::UpdateRect VideoFrame::UpdateRect::ScaleWithFrame(
   // Check if update rect is out of the cropped area.
   if (offset_x + width < crop_x || offset_x > crop_x + crop_width ||
       offset_y + height < crop_y || offset_y > crop_y + crop_width) {
-    return {0, 0, 0, 0};
+    return {.offset_x = 0, .offset_y = 0, .width = 0, .height = 0};
   }
 
   int x = offset_x - crop_x;
@@ -154,7 +163,7 @@ VideoFrame::UpdateRect VideoFrame::UpdateRect::ScaleWithFrame(
     y = 0;
   }
 
-  return {x, y, w, h};
+  return {.offset_x = x, .offset_y = y, .width = w, .height = h};
 }
 
 VideoFrame::Builder::Builder() = default;
@@ -164,20 +173,20 @@ VideoFrame::Builder::~Builder() = default;
 VideoFrame VideoFrame::Builder::build() {
   RTC_CHECK(video_frame_buffer_ != nullptr);
   return VideoFrame(id_, video_frame_buffer_, timestamp_us_,
-                    capture_time_identifier_, reference_time_, timestamp_rtp_,
+                    presentation_timestamp_, reference_time_, timestamp_rtp_,
                     ntp_time_ms_, rotation_, color_space_, render_parameters_,
-                    update_rect_, packet_infos_);
+                    update_rect_, packet_infos_, repeat_mode_, content_type_);
 }
 
 VideoFrame::Builder& VideoFrame::Builder::set_video_frame_buffer(
-    const rtc::scoped_refptr<VideoFrameBuffer>& buffer) {
+    const scoped_refptr<VideoFrameBuffer>& buffer) {
   video_frame_buffer_ = buffer;
   return *this;
 }
 
 VideoFrame::Builder& VideoFrame::Builder::set_timestamp_ms(
     int64_t timestamp_ms) {
-  timestamp_us_ = timestamp_ms * rtc::kNumMicrosecsPerMillisec;
+  timestamp_us_ = timestamp_ms * kNumMicrosecsPerMillisec;
   return *this;
 }
 
@@ -187,15 +196,21 @@ VideoFrame::Builder& VideoFrame::Builder::set_timestamp_us(
   return *this;
 }
 
-VideoFrame::Builder& VideoFrame::Builder::set_capture_time_identifier(
-    const absl::optional<Timestamp>& capture_time_identifier) {
-  capture_time_identifier_ = capture_time_identifier;
+VideoFrame::Builder& VideoFrame::Builder::set_presentation_timestamp(
+    const std::optional<Timestamp>& presentation_timestamp) {
+  presentation_timestamp_ = presentation_timestamp;
   return *this;
 }
 
 VideoFrame::Builder& VideoFrame::Builder::set_reference_time(
-    const absl::optional<Timestamp>& reference_time) {
+    const std::optional<Timestamp>& reference_time) {
   reference_time_ = reference_time;
+  return *this;
+}
+
+VideoFrame::Builder& VideoFrame::Builder::set_rtp_timestamp(
+    uint32_t rtp_timestamp) {
+  timestamp_rtp_ = rtp_timestamp;
   return *this;
 }
 
@@ -216,15 +231,14 @@ VideoFrame::Builder& VideoFrame::Builder::set_rotation(VideoRotation rotation) {
 }
 
 VideoFrame::Builder& VideoFrame::Builder::set_color_space(
-    const absl::optional<ColorSpace>& color_space) {
+    const std::optional<ColorSpace>& color_space) {
   color_space_ = color_space;
   return *this;
 }
 
 VideoFrame::Builder& VideoFrame::Builder::set_color_space(
     const ColorSpace* color_space) {
-  color_space_ =
-      color_space ? absl::make_optional(*color_space) : absl::nullopt;
+  color_space_ = color_space ? std::make_optional(*color_space) : std::nullopt;
   return *this;
 }
 
@@ -234,7 +248,7 @@ VideoFrame::Builder& VideoFrame::Builder::set_id(uint16_t id) {
 }
 
 VideoFrame::Builder& VideoFrame::Builder::set_update_rect(
-    const absl::optional<VideoFrame::UpdateRect>& update_rect) {
+    const std::optional<VideoFrame::UpdateRect>& update_rect) {
   update_rect_ = update_rect;
   return *this;
 }
@@ -245,57 +259,46 @@ VideoFrame::Builder& VideoFrame::Builder::set_packet_infos(
   return *this;
 }
 
-VideoFrame::VideoFrame(const rtc::scoped_refptr<VideoFrameBuffer>& buffer,
-                       webrtc::VideoRotation rotation,
+VideoFrame::Builder& VideoFrame::Builder::set_repeat_mode(
+    RepeatMode repeat_mode) {
+  repeat_mode_ = repeat_mode;
+  return *this;
+}
+
+VideoFrame::Builder& VideoFrame::Builder::set_is_repeat_frame(
+    bool is_repeat_frame) {
+  repeat_mode_ =
+      is_repeat_frame ? RepeatMode::kQualityConvergence : RepeatMode::kNone;
+  return *this;
+}
+
+VideoFrame::Builder& VideoFrame::Builder::set_content_type(
+    VideoContentType content_type) {
+  content_type_ = content_type;
+  return *this;
+}
+
+VideoFrame::VideoFrame(const scoped_refptr<VideoFrameBuffer>& buffer,
+                       VideoRotation rotation,
                        int64_t timestamp_us)
     : video_frame_buffer_(buffer),
       timestamp_rtp_(0),
       ntp_time_ms_(0),
       timestamp_us_(timestamp_us),
-      rotation_(rotation) {}
+      rotation_(rotation),
+      repeat_mode_(RepeatMode::kNone) {}
 
-VideoFrame::VideoFrame(const rtc::scoped_refptr<VideoFrameBuffer>& buffer,
+VideoFrame::VideoFrame(const scoped_refptr<VideoFrameBuffer>& buffer,
                        uint32_t timestamp_rtp,
                        int64_t render_time_ms,
                        VideoRotation rotation)
     : video_frame_buffer_(buffer),
       timestamp_rtp_(timestamp_rtp),
       ntp_time_ms_(0),
-      timestamp_us_(render_time_ms * rtc::kNumMicrosecsPerMillisec),
-      rotation_(rotation) {
-  RTC_DCHECK(buffer);
-}
-
-VideoFrame::VideoFrame(uint16_t id,
-                       const rtc::scoped_refptr<VideoFrameBuffer>& buffer,
-                       int64_t timestamp_us,
-                       const absl::optional<Timestamp>& capture_time_identifier,
-                       const absl::optional<Timestamp>& reference_time,
-                       uint32_t timestamp_rtp,
-                       int64_t ntp_time_ms,
-                       VideoRotation rotation,
-                       const absl::optional<ColorSpace>& color_space,
-                       const RenderParameters& render_parameters,
-                       const absl::optional<UpdateRect>& update_rect,
-                       RtpPacketInfos packet_infos)
-    : id_(id),
-      video_frame_buffer_(buffer),
-      timestamp_rtp_(timestamp_rtp),
-      ntp_time_ms_(ntp_time_ms),
-      timestamp_us_(timestamp_us),
-      capture_time_identifier_(capture_time_identifier),
-      reference_time_(reference_time),
+      timestamp_us_(render_time_ms * kNumMicrosecsPerMillisec),
       rotation_(rotation),
-      color_space_(color_space),
-      render_parameters_(render_parameters),
-      update_rect_(update_rect),
-      packet_infos_(std::move(packet_infos)) {
-  if (update_rect_) {
-    RTC_DCHECK_GE(update_rect_->offset_x, 0);
-    RTC_DCHECK_GE(update_rect_->offset_y, 0);
-    RTC_DCHECK_LE(update_rect_->offset_x + update_rect_->width, width());
-    RTC_DCHECK_LE(update_rect_->offset_y + update_rect_->height, height());
-  }
+      repeat_mode_(RepeatMode::kNone) {
+  RTC_DCHECK(buffer);
 }
 
 VideoFrame::~VideoFrame() = default;
@@ -317,18 +320,18 @@ uint32_t VideoFrame::size() const {
   return width() * height();
 }
 
-rtc::scoped_refptr<VideoFrameBuffer> VideoFrame::video_frame_buffer() const {
+scoped_refptr<VideoFrameBuffer> VideoFrame::video_frame_buffer() const {
   return video_frame_buffer_;
 }
 
 void VideoFrame::set_video_frame_buffer(
-    const rtc::scoped_refptr<VideoFrameBuffer>& buffer) {
+    const scoped_refptr<VideoFrameBuffer>& buffer) {
   RTC_CHECK(buffer);
   video_frame_buffer_ = buffer;
 }
 
 int64_t VideoFrame::render_time_ms() const {
-  return timestamp_us() / rtc::kNumMicrosecsPerMillisec;
+  return timestamp_us() / kNumMicrosecsPerMillisec;
 }
 
 }  // namespace webrtc

@@ -11,24 +11,29 @@
 #include "rtc_base/operations_chain.h"
 
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "api/scoped_refptr.h"
+#include "api/units/time_delta.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/event.h"
-#include "rtc_base/gunit.h"
 #include "rtc_base/thread.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
+#include "test/wait_until.h"
 
-namespace rtc {
+namespace webrtc {
 
 using ::testing::ElementsAre;
 
 namespace {
 
-constexpr int kDefaultTimeout = 3000;
+constexpr TimeDelta kDefaultTimeout = TimeDelta::Millis(3000);
 
 }  // namespace
 
@@ -128,7 +133,8 @@ class OperationTrackerProxy {
     Event event;
     operations_chain_thread_->PostTask(
         [this, &event,
-         on_chain_empty_callback = std::move(on_chain_empty_callback)]() {
+         on_chain_empty_callback =
+             std::move(on_chain_empty_callback)]() mutable {
           operations_chain_->SetOnChainEmptyCallback(
               std::move(on_chain_empty_callback));
           event.Set();
@@ -246,8 +252,7 @@ TEST(OperationsChainTest, AsynchronousOperation) {
       operation_tracker_proxy.PostAsynchronousOperation(
           &unblock_async_operation_event);
   // This should not be signaled until we unblock the operation.
-  EXPECT_FALSE(
-      async_operation_completed_event->Wait(webrtc::TimeDelta::Zero()));
+  EXPECT_FALSE(async_operation_completed_event->Wait(TimeDelta::Zero()));
   // Unblock the operation and wait for it to complete.
   unblock_async_operation_event.Set();
   async_operation_completed_event->Wait(Event::kForever);
@@ -265,13 +270,13 @@ TEST(OperationsChainTest,
       operation_tracker.BindSynchronousOperation(&event0));
   // This should already be signaled. (If it wasn't, waiting wouldn't help,
   // because we'd be blocking the only thread that exists.)
-  EXPECT_TRUE(event0.Wait(webrtc::TimeDelta::Zero()));
+  EXPECT_TRUE(event0.Wait(TimeDelta::Zero()));
   // Chaining another operation should also execute immediately because the
   // chain should already be empty.
   Event event1;
   operations_chain->ChainOperation(
       operation_tracker.BindSynchronousOperation(&event1));
-  EXPECT_TRUE(event1.Wait(webrtc::TimeDelta::Zero()));
+  EXPECT_TRUE(event1.Wait(TimeDelta::Zero()));
 }
 
 TEST(OperationsChainTest, AsynchronousOperationBlocksSynchronousOperation) {
@@ -291,7 +296,7 @@ TEST(OperationsChainTest, AsynchronousOperationBlocksSynchronousOperation) {
   sync_operation_completed_event->Wait(Event::kForever);
   // The asynchronous avent should have blocked the synchronous event, meaning
   // this should already be signaled.
-  EXPECT_TRUE(async_operation_completed_event->Wait(webrtc::TimeDelta::Zero()));
+  EXPECT_TRUE(async_operation_completed_event->Wait(TimeDelta::Zero()));
 }
 
 TEST(OperationsChainTest, OperationsAreExecutedInOrder) {
@@ -386,14 +391,14 @@ TEST(OperationsChainTest, IsEmpty) {
   unblock_async_operation_event1.Set();
   async_operation_completed_event1->Wait(Event::kForever);
   EXPECT_FALSE(operation_tracker_proxy.IsEmpty());
-  // Completing the last evenet empties the chain.
+  // Completing the last event empties the chain.
   unblock_async_operation_event2.Set();
   async_operation_completed_event2->Wait(Event::kForever);
   EXPECT_TRUE(operation_tracker_proxy.IsEmpty());
 }
 
 TEST(OperationsChainTest, OnChainEmptyCallback) {
-  rtc::AutoThread main_thread;
+  test::RunLoop main_thread;
   OperationTrackerProxy operation_tracker_proxy;
   operation_tracker_proxy.Initialize()->Wait(Event::kForever);
 
@@ -411,7 +416,8 @@ TEST(OperationsChainTest, OnChainEmptyCallback) {
   // Completing the operation empties the chain, invoking the callback.
   unblock_async_operation_event0.Set();
   async_operation_completed_event0->Wait(Event::kForever);
-  EXPECT_TRUE_WAIT(1u == on_empty_callback_counter, kDefaultTimeout);
+  EXPECT_TRUE(WaitUntil([&] { return on_empty_callback_counter == 1u; },
+                        {.timeout = kDefaultTimeout}));
 
   // Chain multiple events.
   Event unblock_async_operation_event1;
@@ -423,16 +429,19 @@ TEST(OperationsChainTest, OnChainEmptyCallback) {
       operation_tracker_proxy.PostAsynchronousOperation(
           &unblock_async_operation_event2);
   // Again, the callback is not invoked until the operation has completed.
-  EXPECT_TRUE_WAIT(1u == on_empty_callback_counter, kDefaultTimeout);
+  EXPECT_TRUE(WaitUntil([&] { return on_empty_callback_counter == 1u; },
+                        {.timeout = kDefaultTimeout}));
   // Upon completing the first event, the chain is still not empty, so the
   // callback must not be invoked yet.
   unblock_async_operation_event1.Set();
   async_operation_completed_event1->Wait(Event::kForever);
-  EXPECT_TRUE_WAIT(1u == on_empty_callback_counter, kDefaultTimeout);
-  // Completing the last evenet empties the chain, invoking the callback.
+  EXPECT_TRUE(WaitUntil([&] { return on_empty_callback_counter == 1u; },
+                        {.timeout = kDefaultTimeout}));
+  // Completing the last event empties the chain, invoking the callback.
   unblock_async_operation_event2.Set();
   async_operation_completed_event2->Wait(Event::kForever);
-  EXPECT_TRUE_WAIT(2u == on_empty_callback_counter, kDefaultTimeout);
+  EXPECT_TRUE(WaitUntil([&] { return on_empty_callback_counter == 2u; },
+                        {.timeout = kDefaultTimeout}));
 }
 
 TEST(OperationsChainTest,
@@ -499,4 +508,4 @@ TEST(OperationsChainDeathTest,
 
 #endif  // RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
 
-}  // namespace rtc
+}  // namespace webrtc

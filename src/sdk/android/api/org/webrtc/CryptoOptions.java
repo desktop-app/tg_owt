@@ -21,12 +21,19 @@ public final class CryptoOptions {
   /**
    * SRTP Related Peer Connection Options.
    */
+  @SuppressWarnings("ClassCanBeStatic")
   public final class Srtp {
     /**
      * Enable GCM crypto suites from RFC 7714 for SRTP. GCM will only be used
      * if both sides enable it
      */
     private final boolean enableGcmCryptoSuites;
+    /**
+     * If set, GCM crypto suites are listed before kSrtpAes128CmSha1_80 in the
+     * SRTP cipher preference order, so GCM is selected whenever both peers
+     * support it. Otherwise GCM is offered last.
+     */
+    private final boolean preferGcmCryptoSuites;
     /**
      * If set to true, the (potentially insecure) crypto cipher
      * kSrtpAes128CmSha1_32 will be included in the list of supported ciphers
@@ -35,29 +42,47 @@ public final class CryptoOptions {
      */
     private final boolean enableAes128Sha1_32CryptoCipher;
     /**
+     * If set to true, the crypto cipher SRTP_AES128_CM_SHA1_80 will be
+     * included in the list of supported ciphers during negotiation.
+     */
+    private final boolean enableAes128Sha1_80CryptoCipher;
+    /**
      * If set to true, encrypted RTP header extensions as defined in RFC 6904
      * will be negotiated. They will only be used if both peers support them.
      */
     private final boolean enableEncryptedRtpHeaderExtensions;
 
-    private Srtp(boolean enableGcmCryptoSuites, boolean enableAes128Sha1_32CryptoCipher,
+    private Srtp(boolean enableGcmCryptoSuites, boolean preferGcmCryptoSuites,
+        boolean enableAes128Sha1_32CryptoCipher, boolean enableAes128Sha1_80CryptoCipher,
         boolean enableEncryptedRtpHeaderExtensions) {
       this.enableGcmCryptoSuites = enableGcmCryptoSuites;
+      this.preferGcmCryptoSuites = preferGcmCryptoSuites;
       this.enableAes128Sha1_32CryptoCipher = enableAes128Sha1_32CryptoCipher;
+      this.enableAes128Sha1_80CryptoCipher = enableAes128Sha1_80CryptoCipher;
       this.enableEncryptedRtpHeaderExtensions = enableEncryptedRtpHeaderExtensions;
     }
 
-    @CalledByNative("Srtp")
+    @CalledByNative
     public boolean getEnableGcmCryptoSuites() {
       return enableGcmCryptoSuites;
     }
 
-    @CalledByNative("Srtp")
+    @CalledByNative
+    public boolean getPreferGcmCryptoSuites() {
+      return preferGcmCryptoSuites;
+    }
+
+    @CalledByNative
     public boolean getEnableAes128Sha1_32CryptoCipher() {
       return enableAes128Sha1_32CryptoCipher;
     }
 
-    @CalledByNative("Srtp")
+    @CalledByNative
+    public boolean getEnableAes128Sha1_80CryptoCipher() {
+      return enableAes128Sha1_80CryptoCipher;
+    }
+
+    @CalledByNative
     public boolean getEnableEncryptedRtpHeaderExtensions() {
       return enableEncryptedRtpHeaderExtensions;
     }
@@ -66,6 +91,7 @@ public final class CryptoOptions {
   /**
    * Options to be used when the FrameEncryptor / FrameDecryptor APIs are used.
    */
+  @SuppressWarnings("ClassCanBeStatic")
   public final class SFrame {
     /**
      * If set all RtpSenders must have an FrameEncryptor attached to them before
@@ -78,7 +104,7 @@ public final class CryptoOptions {
       this.requireFrameEncryption = requireFrameEncryption;
     }
 
-    @CalledByNative("SFrame")
+    @CalledByNative
     public boolean getRequireFrameEncryption() {
       return requireFrameEncryption;
     }
@@ -87,10 +113,12 @@ public final class CryptoOptions {
   private final Srtp srtp;
   private final SFrame sframe;
 
-  private CryptoOptions(boolean enableGcmCryptoSuites, boolean enableAes128Sha1_32CryptoCipher,
+  private CryptoOptions(boolean enableGcmCryptoSuites, boolean preferGcmCryptoSuites,
+      boolean enableAes128Sha1_32CryptoCipher, boolean enableAes128Sha1_80CryptoCipher,
       boolean enableEncryptedRtpHeaderExtensions, boolean requireFrameEncryption) {
-    this.srtp = new Srtp(
-        enableGcmCryptoSuites, enableAes128Sha1_32CryptoCipher, enableEncryptedRtpHeaderExtensions);
+    this.srtp = new Srtp(enableGcmCryptoSuites, preferGcmCryptoSuites,
+        enableAes128Sha1_32CryptoCipher, enableAes128Sha1_80CryptoCipher,
+        enableEncryptedRtpHeaderExtensions);
     this.sframe = new SFrame(requireFrameEncryption);
   }
 
@@ -109,9 +137,13 @@ public final class CryptoOptions {
   }
 
   public static class Builder {
-    private boolean enableGcmCryptoSuites;
+    // Defaults mirror the native CryptoOptions struct in
+    // api/crypto/crypto_options.h.
+    private boolean enableGcmCryptoSuites = true;
+    private boolean preferGcmCryptoSuites;
     private boolean enableAes128Sha1_32CryptoCipher;
-    private boolean enableEncryptedRtpHeaderExtensions;
+    private boolean enableAes128Sha1_80CryptoCipher = true;
+    private boolean enableEncryptedRtpHeaderExtensions = true;
     private boolean requireFrameEncryption;
 
     private Builder() {}
@@ -121,8 +153,18 @@ public final class CryptoOptions {
       return this;
     }
 
+    public Builder setPreferGcmCryptoSuites(boolean preferGcmCryptoSuites) {
+      this.preferGcmCryptoSuites = preferGcmCryptoSuites;
+      return this;
+    }
+
     public Builder setEnableAes128Sha1_32CryptoCipher(boolean enableAes128Sha1_32CryptoCipher) {
       this.enableAes128Sha1_32CryptoCipher = enableAes128Sha1_32CryptoCipher;
+      return this;
+    }
+
+    public Builder setEnableAes128Sha1_80CryptoCipher(boolean enableAes128Sha1_80CryptoCipher) {
+      this.enableAes128Sha1_80CryptoCipher = enableAes128Sha1_80CryptoCipher;
       return this;
     }
 
@@ -138,7 +180,8 @@ public final class CryptoOptions {
     }
 
     public CryptoOptions createCryptoOptions() {
-      return new CryptoOptions(enableGcmCryptoSuites, enableAes128Sha1_32CryptoCipher,
+      return new CryptoOptions(enableGcmCryptoSuites, preferGcmCryptoSuites,
+          enableAes128Sha1_32CryptoCipher, enableAes128Sha1_80CryptoCipher,
           enableEncryptedRtpHeaderExtensions, requireFrameEncryption);
     }
   }

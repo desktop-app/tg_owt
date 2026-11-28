@@ -22,13 +22,13 @@
 //   };
 //
 //   void some_function() {
-//     scoped_refptr<MyFoo> foo = new MyFoo();
+//     scoped_refptr<MyFoo> foo = make_ref_counted<MyFoo>();
 //     foo->Method(param);
 //     // `foo` is released when this function returns
 //   }
 //
 //   void some_other_function() {
-//     scoped_refptr<MyFoo> foo = new MyFoo();
+//     scoped_refptr<MyFoo> foo = make_ref_counted<MyFoo>();
 //     ...
 //     foo = nullptr;  // explicitly releases `foo`
 //     ...
@@ -41,7 +41,7 @@
 // references between the two objects, like so:
 //
 //   {
-//     scoped_refptr<MyFoo> a = new MyFoo();
+//     scoped_refptr<MyFoo> a = make_ref_counted<MyFoo>();
 //     scoped_refptr<MyFoo> b;
 //
 //     b.swap(a);
@@ -52,7 +52,7 @@
 // object, simply use the assignment operator:
 //
 //   {
-//     scoped_refptr<MyFoo> a = new MyFoo();
+//     scoped_refptr<MyFoo> a = make_ref_counted<MyFoo>();
 //     scoped_refptr<MyFoo> b;
 //
 //     b = a;
@@ -63,38 +63,22 @@
 #ifndef API_SCOPED_REFPTR_H_
 #define API_SCOPED_REFPTR_H_
 
-#include <memory>
+#include <cstddef>
 #include <utility>
 
 #include "absl/base/nullability.h"
 
-// Compatibility shim for abseil versions that remove absl::Nonnull and
-// absl::Nullable.
-#if ABSL_LTS_RELEASE_VERSION > 20250512
-namespace absl {
-#ifdef absl_nonnull
-template<typename T>
-using Nonnull = T absl_nonnull;
-#endif // absl_nonnull
-
-#ifdef absl_nullable
-template<typename T>
-using Nullable = T absl_nullable;
-#endif // absl_nullable
-}
-#endif // ABSL_LTS_RELEASE_VERSION > 20250512
-
 namespace webrtc {
 
 template <class T>
-class scoped_refptr {
+class ABSL_NULLABILITY_COMPATIBLE scoped_refptr {
  public:
-  typedef T element_type;
+  using element_type = T;
 
   scoped_refptr() : ptr_(nullptr) {}
   scoped_refptr(std::nullptr_t) : ptr_(nullptr) {}  // NOLINT(runtime/explicit)
 
-  explicit scoped_refptr(T* p) : ptr_(p) {
+  explicit scoped_refptr(T* absl_nullable p) : ptr_(p) {
     if (ptr_)
       ptr_->AddRef();
   }
@@ -137,7 +121,7 @@ class scoped_refptr {
     return retVal;
   }
 
-  scoped_refptr<T>& operator=(T* p) {
+  scoped_refptr<T>& operator=(T* absl_nullable p) {
     // AddRef first so that self assignment should work
     if (p)
       p->AddRef();
@@ -167,7 +151,7 @@ class scoped_refptr {
     return *this;
   }
 
-  void swap(T** pp) noexcept {
+  void swap(T** absl_nonnull pp) noexcept {
     T* p = ptr_;
     ptr_ = *pp;
     *pp = p;
@@ -235,11 +219,5 @@ bool operator<(const scoped_refptr<T>& a, const scoped_refptr<U>& b) {
 
 }  // namespace webrtc
 
-namespace rtc {
-// Backwards compatible alias.
-// TODO(bugs.webrtc.org/15622): Deprecate and remove.
-template <typename T>
-using scoped_refptr = webrtc::scoped_refptr<T>;
-}  // namespace rtc
 
 #endif  // API_SCOPED_REFPTR_H_

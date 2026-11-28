@@ -27,15 +27,13 @@ rtc_library("file_wrapper") {
   ]
   deps = [
     "..:checks",
-    "..:criticalsection",
     "..:safe_conversions",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("file_wrapper_unittests") {
-    testonly = true
+  rtc_cc_test("file_wrapper_unittest") {
     sources = [ "file_wrapper_unittest.cc" ]
     deps = [
       ":file_wrapper",
@@ -56,6 +54,10 @@ rtc_source_set("inline") {
 
 rtc_source_set("unused") {
   sources = [ "unused.h" ]
+}
+
+rtc_source_set("plan_b_only") {
+  sources = [ "plan_b_only.h" ]
 }
 
 rtc_source_set("assume") {
@@ -98,7 +100,25 @@ if (is_mac || is_ios) {
   }
 }
 
-rtc_source_set("warn_current_thread_is_deadlocked") {
+# Function to query uninjectable system time.
+# Visibility is limited to webrtc low level system utilities that can't use
+# injectable clock.
+rtc_library("system_time") {
+  visibility = [
+    "..:rtc_task_queue_stdlib",
+    "..:threading",
+  ]
+  sources = [
+    "system_time.cc",
+    "system_time.h",
+  ]
+  deps = [
+    "..:timeutils",
+    "../../api/units:timestamp",
+  ]
+}
+
+rtc_library("warn_current_thread_is_deadlocked") {
   sources = [ "warn_current_thread_is_deadlocked.h" ]
   deps = []
   if (is_android && !build_with_chromium) {

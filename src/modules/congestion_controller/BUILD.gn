@@ -8,17 +8,8 @@
 
 import("../../webrtc.gni")
 
-config("bwe_test_logging") {
-  if (rtc_enable_bwe_test_logging) {
-    defines = [ "BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=1" ]
-  } else {
-    defines = [ "BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=0" ]
-  }
-}
-
 rtc_library("congestion_controller") {
   visibility = [ "*" ]
-  configs += [ ":bwe_test_logging" ]
   sources = [
     "include/receive_side_congestion_controller.h",
     "receive_side_congestion_controller.cc",
@@ -27,45 +18,89 @@ rtc_library("congestion_controller") {
   ]
 
   deps = [
+    "..:module_api",
     "../../api:rtp_parameters",
-    "../../api/transport:network_control",
+    "../../api:sequence_checker",
+    "../../api/environment",
     "../../api/units:data_rate",
+    "../../api/units:data_size",
     "../../api/units:time_delta",
     "../../api/units:timestamp",
     "../../rtc_base:logging",
     "../../rtc_base:macromagic",
+    "../../rtc_base/containers:flat_map",
+    "../../rtc_base/experiments:field_trial_parser",
+    "../../rtc_base/experiments:rfc8888_congestion_control_feedback_experiment",
     "../../rtc_base/synchronization:mutex",
-    "../pacing",
+    "../../system_wrappers",
     "../remote_bitrate_estimator",
+    "../remote_bitrate_estimator:congestion_control_feedback_generator",
+    "../remote_bitrate_estimator:transport_sequence_number_feedback_generator",
     "../rtp_rtcp:rtp_rtcp_format",
+    "rtp:congestion_controller_feedback_stats",
+    "//third_party/abseil-cpp/absl/base:nullability",
   ]
 }
 
-if (rtc_include_tests && !build_with_chromium) {
-  rtc_library("congestion_controller_unittests") {
-    testonly = true
+rtc_library("ect1_policy") {
+  visibility = [ "*" ]
+  sources = [
+    "ect1_policy.cc",
+    "ect1_policy.h",
+  ]
 
-    sources = [
-      "receive_side_congestion_controller_unittest.cc",
-      "remb_throttler_unittest.cc",
-    ]
+  deps = [
+    "../../api/units:time_delta",
+    "../../api/units:timestamp",
+    "../../rtc_base:logging",
+  ]
+}
+
+if (rtc_include_tests) {
+  rtc_cc_test("receive_side_congestion_controller_unittest") {
+    sources = [ "receive_side_congestion_controller_unittest.cc" ]
     deps = [
       ":congestion_controller",
+      "../../api:field_trials",
+      "../../api:rtp_header_extension_id",
+      "../../api:rtp_parameters",
       "../../api/test/network_emulation",
       "../../api/test/network_emulation:create_cross_traffic",
       "../../api/units:data_rate",
       "../../api/units:data_size",
       "../../api/units:time_delta",
       "../../api/units:timestamp",
+      "../../rtc_base:buffer",
       "../../system_wrappers",
+      "../../system_wrappers:metrics",
+      "../../test:create_test_environment",
+      "../../test:create_test_field_trials",
       "../../test:test_support",
       "../../test/scenario",
-      "../pacing",
+      "../remote_bitrate_estimator",
       "../rtp_rtcp:rtp_rtcp_format",
-      "goog_cc:estimators",
-      "goog_cc:goog_cc_unittests",
-      "pcc:pcc_unittests",
-      "rtp:congestion_controller_unittests",
+    ]
+  }
+
+  rtc_cc_test("remb_throttler_unittest") {
+    sources = [ "remb_throttler_unittest.cc" ]
+    deps = [
+      ":congestion_controller",
+      "../../api/units:data_rate",
+      "../../api/units:time_delta",
+      "../../api/units:timestamp",
+      "../../system_wrappers",
+      "../../test:test_support",
+    ]
+  }
+
+  rtc_cc_test("ect1_policy_unittest") {
+    sources = [ "ect1_policy_unittest.cc" ]
+    deps = [
+      ":ect1_policy",
+      "../../api/units:time_delta",
+      "../../api/units:timestamp",
+      "../../test:test_support",
     ]
   }
 }

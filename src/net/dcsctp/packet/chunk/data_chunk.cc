@@ -9,17 +9,18 @@
  */
 #include "net/dcsctp/packet/chunk/data_chunk.h"
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
-#include <type_traits>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/packet/bounded_byte_reader.h"
 #include "net/dcsctp/packet/bounded_byte_writer.h"
 #include "net/dcsctp/packet/chunk/data_common.h"
+#include "net/dcsctp/packet/data.h"
+#include "net/dcsctp/public/types.h"
 #include "rtc_base/strings/string_builder.h"
 
 namespace dcsctp {
@@ -41,12 +42,11 @@ namespace dcsctp {
 //  /                 User Data (seq n of Stream S)                 /
 //  \                                                               \
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int DataChunk::kType;
 
-absl::optional<DataChunk> DataChunk::Parse(rtc::ArrayView<const uint8_t> data) {
-  absl::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
+std::optional<DataChunk> DataChunk::Parse(std::span<const uint8_t> data) {
+  std::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
   if (!reader.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   uint8_t flags = reader->Load8<1>();
@@ -86,7 +86,7 @@ void DataChunk::SerializeTo(std::vector<uint8_t>& out) const {
 }
 
 std::string DataChunk::ToString() const {
-  rtc::StringBuilder sb;
+  webrtc::StringBuilder sb;
   sb << "DATA, type=" << (options().is_unordered ? "unordered" : "ordered")
      << "::"
      << (*options().is_beginning && *options().is_end ? "complete"

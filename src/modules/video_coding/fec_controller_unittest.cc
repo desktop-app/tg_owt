@@ -10,14 +10,13 @@
 
 #include "api/fec_controller.h"
 
-#include <stdint.h>
-
+#include <cstdint>
 #include <vector>
 
-#include "api/environment/environment_factory.h"
 #include "modules/include/module_fec_types.h"
 #include "modules/video_coding/fec_controller_default.h"
 #include "system_wrappers/include/clock.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -32,8 +31,8 @@ class ProtectionBitrateCalculatorTest : public ::testing::Test {
 
   class ProtectionCallback : public VCMProtectionCallback {
    public:
-    int ProtectionRequest(const FecProtectionParams* delta_params,
-                          const FecProtectionParams* key_params,
+    int ProtectionRequest(const FecProtectionParams* /* delta_params */,
+                          const FecProtectionParams* /* key_params */,
                           uint32_t* sent_video_rate_bps,
                           uint32_t* sent_nack_rate_bps,
                           uint32_t* sent_fec_rate_bps) override {
@@ -42,7 +41,6 @@ class ProtectionBitrateCalculatorTest : public ::testing::Test {
       *sent_fec_rate_bps = fec_rate_bps_;
       return 0;
     }
-    void SetRetransmissionMode(int retransmission_mode) {}
 
     uint32_t fec_rate_bps_ = 0;
     uint32_t nack_rate_bps_ = 0;
@@ -52,7 +50,8 @@ class ProtectionBitrateCalculatorTest : public ::testing::Test {
   // a special case (e.g. frame rate in media optimization).
   ProtectionBitrateCalculatorTest()
       : clock_(1000),
-        fec_controller_(CreateEnvironment(&clock_), &protection_callback_) {}
+        fec_controller_(CreateTestEnvironment({.time = &clock_}),
+                        &protection_callback_) {}
 
   SimulatedClock clock_;
   ProtectionCallback protection_callback_;

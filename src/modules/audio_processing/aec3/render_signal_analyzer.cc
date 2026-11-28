@@ -10,13 +10,18 @@
 
 #include "modules/audio_processing/aec3/render_signal_analyzer.h"
 
-#include <math.h>
-
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <optional>
+#include <span>
 #include <utility>
-#include <vector>
 
-#include "api/array_view.h"
+#include "api/audio/echo_canceller3_config.h"
+#include "modules/audio_processing/aec3/aec3_common.h"
+#include "modules/audio_processing/aec3/block.h"
+#include "modules/audio_processing/aec3/render_buffer.h"
 #include "rtc_base/checks.h"
 
 namespace webrtc {
@@ -27,7 +32,7 @@ constexpr size_t kCounterThreshold = 5;
 // Identifies local bands with narrow characteristics.
 void IdentifySmallNarrowBandRegions(
     const RenderBuffer& render_buffer,
-    const absl::optional<size_t>& delay_partitions,
+    const std::optional<size_t>& delay_partitions,
     std::array<size_t, kFftLengthBy2 - 1>* narrow_band_counters) {
   RTC_DCHECK(narrow_band_counters);
 
@@ -38,7 +43,7 @@ void IdentifySmallNarrowBandRegions(
 
   std::array<size_t, kFftLengthBy2 - 1> channel_counters;
   channel_counters.fill(0);
-  rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>> X2 =
+  std::span<const std::array<float, kFftLengthBy2Plus1>> X2 =
       render_buffer.Spectrum(*delay_partitions);
   for (size_t ch = 0; ch < X2.size(); ++ch) {
     for (size_t k = 1; k < kFftLengthBy2; ++k) {
@@ -56,20 +61,20 @@ void IdentifySmallNarrowBandRegions(
 // Identifies whether the signal has a single strong narrow-band component.
 void IdentifyStrongNarrowBandComponent(const RenderBuffer& render_buffer,
                                        int strong_peak_freeze_duration,
-                                       absl::optional<int>* narrow_peak_band,
+                                       std::optional<int>* narrow_peak_band,
                                        size_t* narrow_peak_counter) {
   RTC_DCHECK(narrow_peak_band);
   RTC_DCHECK(narrow_peak_counter);
   if (*narrow_peak_band &&
       ++(*narrow_peak_counter) >
           static_cast<size_t>(strong_peak_freeze_duration)) {
-    *narrow_peak_band = absl::nullopt;
+    *narrow_peak_band = std::nullopt;
   }
 
   const Block& x_latest = render_buffer.GetBlock(0);
   float max_peak_level = 0.f;
   for (int channel = 0; channel < x_latest.NumChannels(); ++channel) {
-    rtc::ArrayView<const float, kFftLengthBy2Plus1> X2_latest =
+    std::span<const float, kFftLengthBy2Plus1> X2_latest =
         render_buffer.Spectrum(0)[channel];
 
     // Identify the spectral peak.
@@ -125,7 +130,7 @@ RenderSignalAnalyzer::~RenderSignalAnalyzer() = default;
 
 void RenderSignalAnalyzer::Update(
     const RenderBuffer& render_buffer,
-    const absl::optional<size_t>& delay_partitions) {
+    const std::optional<size_t>& delay_partitions) {
   // Identify bands of narrow nature.
   IdentifySmallNarrowBandRegions(render_buffer, delay_partitions,
                                  &narrow_band_counters_);

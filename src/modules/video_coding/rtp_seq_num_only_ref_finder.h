@@ -11,22 +11,25 @@
 #ifndef MODULES_VIDEO_CODING_RTP_SEQ_NUM_ONLY_REF_FINDER_H_
 #define MODULES_VIDEO_CODING_RTP_SEQ_NUM_ONLY_REF_FINDER_H_
 
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <memory>
 #include <set>
 #include <utility>
 
-#include "absl/container/inlined_vector.h"
+#include "api/field_trials_view.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
 #include "modules/video_coding/rtp_frame_reference_finder.h"
 #include "rtc_base/numerics/sequence_number_unwrapper.h"
+#include "rtc_base/numerics/sequence_number_util.h"
 
 namespace webrtc {
 
 class RtpSeqNumOnlyRefFinder {
  public:
-  RtpSeqNumOnlyRefFinder() = default;
+  explicit RtpSeqNumOnlyRefFinder(
+      const FieldTrialsView* field_trials = nullptr);
 
   RtpFrameReferenceFinder::ReturnVector ManageFrame(
       std::unique_ptr<RtpFrameObject> frame);
@@ -63,6 +66,9 @@ class RtpSeqNumOnlyRefFinder {
   // Unwrapper used to unwrap generic RTP streams. In a generic stream we derive
   // a picture id from the packet sequence number.
   SeqNumUnwrapper<uint16_t> rtp_seq_num_unwrapper_;
+
+  // TODO(bugs.webrtc.org/560293075): Remove after rollout.
+  const bool set_spatial_index_to_zero_by_default_;
 };
 
 }  // namespace webrtc

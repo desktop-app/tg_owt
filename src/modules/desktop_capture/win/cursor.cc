@@ -10,7 +10,9 @@
 
 #include "modules/desktop_capture/win/cursor.h"
 
-#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <memory>
 
 #include "modules/desktop_capture/desktop_frame.h"
@@ -28,13 +30,13 @@ namespace {
 
 #define RGBA(r, g, b, a)                                   \
   ((((a) << 24) & 0xff000000) | (((b) << 16) & 0xff0000) | \
-   (((g) << 8) & 0xff00) | ((r)&0xff))
+   (((g) << 8) & 0xff00) | ((r) & 0xff))
 
 #else  // !defined(WEBRTC_ARCH_LITTLE_ENDIAN)
 
 #define RGBA(r, g, b, a)                                   \
   ((((r) << 24) & 0xff000000) | (((g) << 16) & 0xff0000) | \
-   (((b) << 8) & 0xff00) | ((a)&0xff))
+   (((b) << 8) & 0xff00) | ((a) & 0xff))
 
 #endif  // !defined(WEBRTC_ARCH_LITTLE_ENDIAN)
 
@@ -154,7 +156,7 @@ MouseCursor* CreateMouseCursorFromHCursor(HDC dc, HCURSOR cursor) {
 
   uint32_t* mask_plane = mask_data.get();
   std::unique_ptr<DesktopFrame> image(
-      new BasicDesktopFrame(DesktopSize(width, height)));
+      new BasicDesktopFrame(DesktopSize(width, height), FOURCC_ARGB));
   bool has_alpha = false;
 
   if (is_color) {

@@ -10,12 +10,14 @@
 
 #include "modules/video_coding/codecs/test/encoded_video_frame_producer.h"
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "api/test/create_frame_generator.h"
 #include "api/test/frame_generator_interface.h"
-#include "api/transport/rtp/dependency_descriptor.h"
+#include "api/video/encoded_image.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_frame_type.h"
 #include "api/video_codecs/video_encoder.h"
@@ -35,9 +37,14 @@ class EncoderCallback : public EncodedImageCallback {
  private:
   Result OnEncodedImage(const EncodedImage& encoded_image,
                         const CodecSpecificInfo* codec_specific_info) override {
-    output_frames_.push_back({encoded_image, *codec_specific_info});
+    output_frames_.push_back({.encoded_image = encoded_image,
+                              .codec_specific_info = *codec_specific_info});
     return Result(Result::Error::OK);
   }
+
+  void OnFrameDropped(uint32_t /*rtp_timestamp*/,
+                      int /*spatial_id*/,
+                      bool /*is_end_of_temporal_unit*/) override {}
 
   std::vector<EncodedVideoFrameProducer::EncodedFrame>& output_frames_;
 };
@@ -49,7 +56,7 @@ EncodedVideoFrameProducer::Encode() {
   std::unique_ptr<test::FrameGeneratorInterface> frame_buffer_generator =
       test::CreateSquareFrameGenerator(
           resolution_.Width(), resolution_.Height(),
-          test::FrameGeneratorInterface::OutputType::kI420, absl::nullopt);
+          test::FrameGeneratorInterface::OutputType::kI420, std::nullopt);
 
   std::vector<EncodedFrame> encoded_frames;
   EncoderCallback encoder_callback(encoded_frames);
@@ -61,8 +68,8 @@ EncodedVideoFrameProducer::Encode() {
     VideoFrame frame =
         VideoFrame::Builder()
             .set_video_frame_buffer(frame_buffer_generator->NextFrame().buffer)
-            .set_timestamp_rtp(rtp_timestamp_)
-            .set_capture_time_identifier(capture_time_identifier_)
+            .set_rtp_timestamp(rtp_timestamp_)
+            .set_presentation_timestamp(presentation_timestamp_)
             .build();
     rtp_timestamp_ += rtp_tick;
     RTC_CHECK_EQ(encoder_.Encode(frame, &next_frame_type_),

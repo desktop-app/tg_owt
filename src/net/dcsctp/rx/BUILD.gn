@@ -10,80 +10,71 @@ import("../../../webrtc.gni")
 
 rtc_library("data_tracker") {
   deps = [
-    "../../../api:array_view",
     "../../../rtc_base:checks",
     "../../../rtc_base:logging",
-    "../../../rtc_base:stringutils",
+    "../common:internal_types",
     "../common:sequence_numbers",
     "../packet:chunk",
-    "../packet:data",
     "../public:socket",
     "../timer",
+    "//third_party/abseil-cpp/absl/algorithm:container",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   sources = [
     "data_tracker.cc",
     "data_tracker.h",
   ]
-  absl_deps = [
-    "//third_party/abseil-cpp/absl/algorithm:container",
-    "//third_party/abseil-cpp/absl/strings",
-    "//third_party/abseil-cpp/absl/types:optional",
-  ]
 }
 
 rtc_source_set("reassembly_streams") {
   deps = [
-    "../../../api:array_view",
     "../common:sequence_numbers",
     "../packet:chunk",
     "../packet:data",
     "../public:socket",
     "../public:types",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   sources = [ "reassembly_streams.h" ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 }
 
 rtc_library("interleaved_reassembly_streams") {
   deps = [
     ":reassembly_streams",
-    "../../../api:array_view",
     "../../../rtc_base:checks",
     "../../../rtc_base:logging",
+    "../common:internal_types",
     "../common:sequence_numbers",
     "../packet:chunk",
     "../packet:data",
+    "../public:socket",
     "../public:types",
+    "//third_party/abseil-cpp/absl/algorithm:container",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   sources = [
     "interleaved_reassembly_streams.cc",
     "interleaved_reassembly_streams.h",
   ]
-  absl_deps = [
-    "//third_party/abseil-cpp/absl/algorithm:container",
-    "//third_party/abseil-cpp/absl/strings",
-    "//third_party/abseil-cpp/absl/types:optional",
-  ]
 }
+
 rtc_library("traditional_reassembly_streams") {
   deps = [
     ":reassembly_streams",
-    "../../../api:array_view",
     "../../../rtc_base:checks",
     "../../../rtc_base:logging",
+    "../common:internal_types",
     "../common:sequence_numbers",
     "../packet:chunk",
     "../packet:data",
+    "../public:socket",
     "../public:types",
+    "//third_party/abseil-cpp/absl/algorithm:container",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   sources = [
     "traditional_reassembly_streams.cc",
     "traditional_reassembly_streams.h",
-  ]
-  absl_deps = [
-    "//third_party/abseil-cpp/absl/algorithm:container",
-    "//third_party/abseil-cpp/absl/strings",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -92,7 +83,6 @@ rtc_library("reassembly_queue") {
     ":interleaved_reassembly_streams",
     ":reassembly_streams",
     ":traditional_reassembly_streams",
-    "../../../api:array_view",
     "../../../rtc_base:checks",
     "../../../rtc_base:logging",
     "../../../rtc_base:stringutils",
@@ -101,18 +91,14 @@ rtc_library("reassembly_queue") {
     "../common:sequence_numbers",
     "../packet:chunk",
     "../packet:data",
-    "../packet:parameter",
     "../public:socket",
     "../public:types",
+    "//third_party/abseil-cpp/absl/functional:any_invocable",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   sources = [
     "reassembly_queue.cc",
     "reassembly_queue.h",
-  ]
-  absl_deps = [
-    "//third_party/abseil-cpp/absl/functional:any_invocable",
-    "//third_party/abseil-cpp/absl/strings",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -126,25 +112,90 @@ if (rtc_include_tests) {
       ":reassembly_queue",
       ":reassembly_streams",
       ":traditional_reassembly_streams",
-      "../../../api:array_view",
-      "../../../api/task_queue:task_queue",
-      "../../../rtc_base:checks",
-      "../../../rtc_base:gunit_helpers",
+      "../../../api/task_queue",
+      "../../../api/units:time_delta",
+      "../../../api/units:timestamp",
       "../../../test:test_support",
       "../common:handover_testing",
+      "../common:internal_types",
       "../common:sequence_numbers",
       "../packet:chunk",
       "../packet:data",
+      "../public:socket",
       "../public:types",
       "../testing:data_generator",
       "../timer",
     ]
-    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
     sources = [
       "data_tracker_test.cc",
       "interleaved_reassembly_streams_test.cc",
       "reassembly_queue_test.cc",
       "traditional_reassembly_streams_test.cc",
     ]
+  }
+
+  rtc_cc_test("data_tracker_test") {
+    deps = [
+      ":data_tracker",
+      "../../../api/task_queue",
+      "../../../api/units:time_delta",
+      "../../../api/units:timestamp",
+      "../../../test:test_support",
+      "../common:handover_testing",
+      "../common:internal_types",
+      "../packet:chunk",
+      "../public:socket",
+      "../timer",
+    ]
+    sources = [ "data_tracker_test.cc" ]
+  }
+
+  rtc_cc_test("interleaved_reassembly_streams_test") {
+    deps = [
+      ":interleaved_reassembly_streams",
+      ":reassembly_streams",
+      "../../../test:test_support",
+      "../common:handover_testing",
+      "../common:internal_types",
+      "../common:sequence_numbers",
+      "../packet:chunk",
+      "../packet:data",
+      "../public:socket",
+      "../public:types",
+      "../testing:data_generator",
+    ]
+    sources = [ "interleaved_reassembly_streams_test.cc" ]
+  }
+
+  rtc_cc_test("reassembly_queue_test") {
+    deps = [
+      ":reassembly_queue",
+      "../../../test:test_support",
+      "../common:handover_testing",
+      "../common:internal_types",
+      "../packet:chunk",
+      "../packet:data",
+      "../public:socket",
+      "../public:types",
+      "../testing:data_generator",
+    ]
+    sources = [ "reassembly_queue_test.cc" ]
+  }
+
+  rtc_cc_test("traditional_reassembly_streams_test") {
+    deps = [
+      ":reassembly_streams",
+      ":traditional_reassembly_streams",
+      "../../../test:test_support",
+      "../common:handover_testing",
+      "../common:internal_types",
+      "../common:sequence_numbers",
+      "../packet:chunk",
+      "../packet:data",
+      "../public:socket",
+      "../public:types",
+      "../testing:data_generator",
+    ]
+    sources = [ "traditional_reassembly_streams_test.cc" ]
   }
 }

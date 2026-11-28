@@ -9,18 +9,17 @@
  */
 #include "net/dcsctp/packet/chunk/init_ack_chunk.h"
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/packet/bounded_byte_reader.h"
 #include "net/dcsctp/packet/bounded_byte_writer.h"
 #include "net/dcsctp/packet/parameter/parameter.h"
-#include "net/dcsctp/packet/tlv_trait.h"
 #include "rtc_base/strings/string_format.h"
 
 namespace dcsctp {
@@ -44,13 +43,11 @@ namespace dcsctp {
 //  /              Optional/Variable-Length Parameters              /
 //  \                                                               \
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int InitAckChunk::kType;
 
-absl::optional<InitAckChunk> InitAckChunk::Parse(
-    rtc::ArrayView<const uint8_t> data) {
-  absl::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
+std::optional<InitAckChunk> InitAckChunk::Parse(std::span<const uint8_t> data) {
+  std::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
   if (!reader.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   VerificationTag initiate_tag(reader->Load32<4>());
@@ -58,17 +55,17 @@ absl::optional<InitAckChunk> InitAckChunk::Parse(
   uint16_t nbr_outbound_streams = reader->Load16<12>();
   uint16_t nbr_inbound_streams = reader->Load16<14>();
   TSN initial_tsn(reader->Load32<16>());
-  absl::optional<Parameters> parameters =
+  std::optional<Parameters> parameters =
       Parameters::Parse(reader->variable_data());
   if (!parameters.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return InitAckChunk(initiate_tag, a_rwnd, nbr_outbound_streams,
                       nbr_inbound_streams, initial_tsn, *std::move(parameters));
 }
 
 void InitAckChunk::SerializeTo(std::vector<uint8_t>& out) const {
-  rtc::ArrayView<const uint8_t> parameters = parameters_.data();
+  std::span<const uint8_t> parameters = parameters_.data();
   BoundedByteWriter<kHeaderSize> writer = AllocateTLV(out, parameters.size());
 
   writer.Store32<4>(*initiate_tag_);
@@ -80,7 +77,7 @@ void InitAckChunk::SerializeTo(std::vector<uint8_t>& out) const {
 }
 
 std::string InitAckChunk::ToString() const {
-  return rtc::StringFormat("INIT_ACK, initiate_tag=0x%0x, initial_tsn=%u",
-                           *initiate_tag(), *initial_tsn());
+  return webrtc::StringFormat("INIT_ACK, initiate_tag=0x%0x, initial_tsn=%u",
+                              *initiate_tag(), *initial_tsn());
 }
 }  // namespace dcsctp

@@ -11,9 +11,18 @@
 #include "api/video/frame_buffer.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <span>
+#include <utility>
 
 #include "absl/algorithm/container.h"
 #include "absl/container/inlined_vector.h"
+#include "api/field_trials_view.h"
+#include "api/video/encoded_frame.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/sequence_number_util.h"
 
@@ -37,7 +46,7 @@ bool ValidReferences(const EncodedFrame& frame) {
 // Since FrameBuffer::FrameInfo is private it can't be used in the function
 // signature, hence the FrameIteratorT type.
 template <typename FrameIteratorT>
-rtc::ArrayView<const int64_t> GetReferences(const FrameIteratorT& it) {
+std::span<const int64_t> GetReferences(const FrameIteratorT& it) {
   return {it->second.encoded_frame->references,
           std::min<size_t>(it->second.encoded_frame->num_references,
                            EncodedFrame::kMaxFrameReferences)};
@@ -62,12 +71,10 @@ bool IsLastFrameInTemporalUnit(const FrameIteratorT& it) {
 FrameBuffer::FrameBuffer(int max_size,
                          int max_decode_history,
                          const FieldTrialsView& field_trials)
-    : legacy_frame_id_jump_behavior_(
-          !field_trials.IsDisabled("WebRTC-LegacyFrameIdJumpBehavior")),
-      max_size_(max_size),
-      decoded_frame_history_(max_decode_history) {}
+    : max_size_(max_size), decoded_frame_history_(max_decode_history) {}
 
 bool FrameBuffer::InsertFrame(std::unique_ptr<EncodedFrame> frame) {
+  new_continuous_temporal_units_.clear();
   if (!ValidReferences(*frame)) {
     RTC_DLOG(LS_WARNING) << "Frame " << frame->Id()
                          << " has invalid references, dropping frame.";
@@ -75,7 +82,7 @@ bool FrameBuffer::InsertFrame(std::unique_ptr<EncodedFrame> frame) {
   }
 
   if (frame->Id() <= decoded_frame_history_.GetLastDecodedFrameId()) {
-    if (legacy_frame_id_jump_behavior_ && frame->is_keyframe() &&
+    if (frame->is_keyframe() &&
         AheadOf(frame->RtpTimestamp(),
                 *decoded_frame_history_.GetLastDecodedFrameTimestamp())) {
       RTC_DLOG(LS_WARNING)
@@ -100,7 +107,8 @@ bool FrameBuffer::InsertFrame(std::unique_ptr<EncodedFrame> frame) {
   }
 
   const int64_t frame_id = frame->Id();
-  auto insert_res = frames_.emplace(frame_id, FrameInfo{std::move(frame)});
+  auto insert_res =
+      frames_.emplace(frame_id, FrameInfo{.encoded_frame = std::move(frame)});
   if (!insert_res.second) {
     // Frame has already been inserted.
     return false;
@@ -148,17 +156,21 @@ void FrameBuffer::DropNextDecodableTemporalUnit() {
   FindNextAndLastDecodableTemporalUnit();
 }
 
-absl::optional<int64_t> FrameBuffer::LastContinuousFrameId() const {
+std::optional<int64_t> FrameBuffer::LastContinuousFrameId() const {
   return last_continuous_frame_id_;
 }
 
-absl::optional<int64_t> FrameBuffer::LastContinuousTemporalUnitFrameId() const {
+std::optional<int64_t> FrameBuffer::LastContinuousTemporalUnitFrameId() const {
   return last_continuous_temporal_unit_frame_id_;
 }
 
-absl::optional<FrameBuffer::DecodabilityInfo>
+std::optional<FrameBuffer::DecodabilityInfo>
 FrameBuffer::DecodableTemporalUnitsInfo() const {
   return decodable_temporal_units_info_;
+}
+
+std::span<const uint32_t> FrameBuffer::NewContinuousTemporalUnits() const {
+  return new_continuous_temporal_units_;
 }
 
 int FrameBuffer::GetTotalNumberOfContinuousTemporalUnits() const {
@@ -200,6 +212,7 @@ void FrameBuffer::PropagateContinuity(const FrameIterator& frame_it) {
         }
         if (IsLastFrameInTemporalUnit(it)) {
           num_continuous_temporal_units_++;
+          new_continuous_temporal_units_.push_back(GetTimestamp(it));
           if (last_continuous_temporal_unit_frame_id_ < GetFrameId(it)) {
             last_continuous_temporal_unit_frame_id_ = GetFrameId(it);
           }
@@ -252,7 +265,8 @@ void FrameBuffer::FindNextAndLastDecodableTemporalUnit() {
 
       if (temporal_unit_decodable) {
         if (!next_decodable_temporal_unit_) {
-          next_decodable_temporal_unit_ = {first_frame_it, last_frame_it};
+          next_decodable_temporal_unit_ = {.first_frame = first_frame_it,
+                                           .last_frame = last_frame_it};
         }
 
         last_decodable_temporal_unit_timestamp = GetTimestamp(first_frame_it);
@@ -275,6 +289,7 @@ void FrameBuffer::Clear() {
   last_continuous_frame_id_.reset();
   last_continuous_temporal_unit_frame_id_.reset();
   decoded_frame_history_.Clear();
+  new_continuous_temporal_units_.clear();
 }
 
 }  // namespace webrtc

@@ -8,36 +8,45 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#if defined(WEBRTC_POSIX)
-#include <netinet/in.h>
-#include <sys/socket.h>
+#include "rtc_base/ip_address.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
 
 #include "absl/strings/string_view.h"
+#include "rtc_base/byte_order.h"
+#include "rtc_base/net_helpers.h"
+#include "rtc_base/string_utils.h"
+
+#if defined(WEBRTC_POSIX)
 #ifdef OPENBSD
 #include <netinet/in_systm.h>
 #endif
 #include <netdb.h>
 #endif
 
-#include "rtc_base/byte_order.h"
-#include "rtc_base/ip_address.h"
-#include "rtc_base/net_helpers.h"
-#include "rtc_base/string_utils.h"
-
-#if defined(WEBRTC_WIN)
-#include "rtc_base/win32.h"
-#endif  // WEBRTC_WIN
-
-namespace rtc {
+namespace webrtc {
 
 // Prefixes used for categorizing IPv6 addresses.
+// V4 mapped addresses are defined in RFC 4291 section 2.5.5.
 static const in6_addr kV4MappedPrefix = {
     {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0}}};
+// 6to4 is defined in RFC 3056
 static const in6_addr k6To4Prefix = {{{0x20, 0x02, 0}}};
+// TEREDO is defined in RFC 8190.
 static const in6_addr kTeredoPrefix = {{{0x20, 0x01, 0x00, 0x00}}};
+// V4 compatible addresses are defined in RFC 4291 section 2.5.5.
 static const in6_addr kV4CompatibilityPrefix = {{{0}}};
+// 6bone is no longer in use, see RFC 5156
 static const in6_addr k6BonePrefix = {{{0x3f, 0xfe, 0}}};
+// Unique Local Address with the L bit set, defined in RFC 4193 section 3.1
 static const in6_addr kPrivateNetworkPrefix = {{{0xFD}}};
+// The NAT64 prefix is defined in RFC 6052 section 2.1
+static const in6_addr kNat64Prefix = {
+    {{0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0}}};
 
 static bool IPIsHelper(const IPAddress& ip,
                        const in6_addr& tomatch,
@@ -140,36 +149,48 @@ std::string IPAddress::ToString() const {
   if (family_ == AF_INET6) {
     src = &u_.ip6;
   }
-  if (!rtc::inet_ntop(family_, src, buf, sizeof(buf))) {
+  if (!inet_ntop(family_, src, buf, sizeof(buf))) {
     return std::string();
   }
   return std::string(buf);
 }
 
 std::string IPAddress::ToSensitiveString() const {
-  switch (family_) {
+  return std::string(Sensitive(*this).view());
+}
+
+IPAddress::Sensitive::Sensitive(const IPAddress& ip) {
+  switch (ip.family()) {
     case AF_INET: {
-      std::string address = ToString();
-      size_t find_pos = address.rfind('.');
-      if (find_pos == std::string::npos)
-        return std::string();
-      address.resize(find_pos);
-      address += ".x";
-      return address;
+      in_addr addr = ip.ipv4_address();
+      if (!webrtc::inet_ntop(AF_INET, &addr, buffer_.data(), buffer_.size())) {
+        return;
+      }
+      // Replace the last part with "x".
+      size_t find_pos = absl::string_view(buffer_.data()).rfind('.');
+      if (find_pos == absl::string_view::npos) {
+        return;
+      }
+      buffer_[find_pos + 1] = 'x';
+      length_ = find_pos + 2;
+      return;
     }
     case AF_INET6: {
-      std::string result;
-      result.resize(INET6_ADDRSTRLEN);
-      in6_addr addr = ipv6_address();
-      size_t len = snprintf(&(result[0]), result.size(), "%x:%x:%x:x:x:x:x:x",
-                            (addr.s6_addr[0] << 8) + addr.s6_addr[1],
-                            (addr.s6_addr[2] << 8) + addr.s6_addr[3],
-                            (addr.s6_addr[4] << 8) + addr.s6_addr[5]);
-      result.resize(len);
-      return result;
+      in6_addr addr = ip.ipv6_address();
+      int len = snprintf(buffer_.data(), buffer_.size(), "%x:%x:%x:x:x:x:x:x",
+                         (addr.s6_addr[0] << 8) + addr.s6_addr[1],
+                         (addr.s6_addr[2] << 8) + addr.s6_addr[3],
+                         (addr.s6_addr[4] << 8) + addr.s6_addr[5]);
+      if (len > 0) {
+        length_ = static_cast<size_t>(len);
+      }
+      return;
     }
   }
-  return std::string();
+}
+
+absl::string_view IPAddress::Sensitive::view() const {
+  return absl::string_view(buffer_.data(), length_);
 }
 
 IPAddress IPAddress::Normalized() const {
@@ -181,6 +202,35 @@ IPAddress IPAddress::Normalized() const {
   }
   in_addr addr = ExtractMappedAddress(u_.ip6);
   return IPAddress(addr);
+}
+
+IPAddress IPAddress::NormalizeWithCheckForEmbeddedIPv4Address() const {
+  if (family_ != AF_INET6) {
+    return *this;
+  }
+  if (IPIsV4Mapped(*this) || IPIsV4Compatibility(*this) || IPIsNat64(*this)) {
+    in_addr addr = ExtractMappedAddress(u_.ip6);
+    return IPAddress(addr);
+  }
+  // TODO: crbug.com/497635018 - consider whether 6to4 addresses that map
+  // to "local" IPv4 networks should be considered "local".
+  // Enabling this mapping breaks downstream testing.
+  // if (IPIs6To4(*this)) {
+  //  in_addr addr;
+  //  ::memcpy(&addr.s_addr, &u_.ip6.s6_addr[2], sizeof(addr.s_addr));
+  //  return IPAddress(addr);
+  //}
+  if (IPIsTeredo(*this)) {
+    in_addr addr;
+    ::memcpy(&addr.s_addr, &u_.ip6.s6_addr[12], sizeof(addr.s_addr));
+    addr.s_addr = ~addr.s_addr;
+    return IPAddress(addr);
+  }
+  if (IPIsIsatap(*this)) {
+    in_addr addr = ExtractMappedAddress(u_.ip6);
+    return IPAddress(addr);
+  }
+  return *this;
 }
 
 IPAddress IPAddress::AsIPv6Address() const {
@@ -212,7 +262,7 @@ std::string InterfaceAddress::ToString() const {
   std::string result = IPAddress::ToString();
 
   if (family() == AF_INET6)
-    result += "|flags:0x" + rtc::ToHex(ipv6_flags());
+    result += "|flags:0x" + ToHex(ipv6_flags());
 
   return result;
 }
@@ -229,12 +279,13 @@ static bool IPIsPrivateNetworkV6(const IPAddress& ip) {
 }
 
 bool IPIsPrivateNetwork(const IPAddress& ip) {
-  switch (ip.family()) {
+  IPAddress normalized = ip.NormalizeWithCheckForEmbeddedIPv4Address();
+  switch (normalized.family()) {
     case AF_INET: {
-      return IPIsPrivateNetworkV4(ip);
+      return IPIsPrivateNetworkV4(normalized);
     }
     case AF_INET6: {
-      return IPIsPrivateNetworkV6(ip);
+      return IPIsPrivateNetworkV6(normalized);
     }
   }
   return false;
@@ -246,8 +297,9 @@ static bool IPIsSharedNetworkV4(const IPAddress& ip) {
 }
 
 bool IPIsSharedNetwork(const IPAddress& ip) {
-  if (ip.family() == AF_INET) {
-    return IPIsSharedNetworkV4(ip);
+  IPAddress normalized = ip.NormalizeWithCheckForEmbeddedIPv4Address();
+  if (normalized.family() == AF_INET) {
+    return IPIsSharedNetworkV4(normalized);
   }
   return false;
 }
@@ -279,9 +331,9 @@ bool IPFromString(absl::string_view str, IPAddress* out) {
     return false;
   }
   in_addr addr;
-  if (rtc::inet_pton(AF_INET, str, &addr) == 0) {
+  if (inet_pton(AF_INET, str, &addr) == 0) {
     in6_addr addr6;
-    if (rtc::inet_pton(AF_INET6, str, &addr6) == 0) {
+    if (inet_pton(AF_INET6, str, &addr6) == 0) {
       *out = IPAddress();
       return false;
     }
@@ -324,12 +376,13 @@ static bool IPIsLoopbackV6(const IPAddress& ip) {
 }
 
 bool IPIsLoopback(const IPAddress& ip) {
-  switch (ip.family()) {
+  IPAddress normalized = ip.NormalizeWithCheckForEmbeddedIPv4Address();
+  switch (normalized.family()) {
     case AF_INET: {
-      return IPIsLoopbackV4(ip);
+      return IPIsLoopbackV4(normalized);
     }
     case AF_INET6: {
-      return IPIsLoopbackV6(ip);
+      return IPIsLoopbackV6(normalized);
     }
   }
   return false;
@@ -345,12 +398,13 @@ bool IPIsUnspec(const IPAddress& ip) {
 }
 
 size_t HashIP(const IPAddress& ip) {
-  switch (ip.family()) {
+  IPAddress normalized = ip.Normalized();
+  switch (normalized.family()) {
     case AF_INET: {
-      return ip.ipv4_address().s_addr;
+      return normalized.ipv4_address().s_addr;
     }
     case AF_INET6: {
-      in6_addr v6addr = ip.ipv6_address();
+      in6_addr v6addr = normalized.ipv6_address();
       const uint32_t* v6_as_ints =
           reinterpret_cast<const uint32_t*>(&v6addr.s6_addr);
       return v6_as_ints[0] ^ v6_as_ints[1] ^ v6_as_ints[2] ^ v6_as_ints[3];
@@ -464,11 +518,21 @@ bool IPIsHelper(const IPAddress& ip, const in6_addr& tomatch, int length) {
 }
 
 bool IPIs6Bone(const IPAddress& ip) {
-  return IPIsHelper(ip, k6BonePrefix, 16);
+  return ip.family() == AF_INET6 && IPIsHelper(ip, k6BonePrefix, 16);
 }
 
 bool IPIs6To4(const IPAddress& ip) {
-  return IPIsHelper(ip, k6To4Prefix, 16);
+  return ip.family() == AF_INET6 && IPIsHelper(ip, k6To4Prefix, 16);
+}
+
+bool IPIsIsatap(const IPAddress& ip) {
+  if (ip.family() != AF_INET6) {
+    return false;
+  }
+  in6_addr addr = ip.ipv6_address();
+  return (addr.s6_addr[8] == 0x00 || addr.s6_addr[8] == 0x02) &&
+         addr.s6_addr[9] == 0x00 && addr.s6_addr[10] == 0x5E &&
+         addr.s6_addr[11] == 0xFE;
 }
 
 static bool IPIsLinkLocalV4(const IPAddress& ip) {
@@ -483,12 +547,13 @@ static bool IPIsLinkLocalV6(const IPAddress& ip) {
 }
 
 bool IPIsLinkLocal(const IPAddress& ip) {
-  switch (ip.family()) {
+  IPAddress normalized = ip.NormalizeWithCheckForEmbeddedIPv4Address();
+  switch (normalized.family()) {
     case AF_INET: {
-      return IPIsLinkLocalV4(ip);
+      return IPIsLinkLocalV4(normalized);
     }
     case AF_INET6: {
-      return IPIsLinkLocalV6(ip);
+      return IPIsLinkLocalV6(normalized);
     }
   }
   return false;
@@ -503,28 +568,43 @@ bool IPIsMacBased(const IPAddress& ip) {
           addr.s6_addr[12] == 0xFE);
 }
 
+bool IPIsNat64(const IPAddress& ip) {
+  return ip.family() == AF_INET6 && IPIsHelper(ip, kNat64Prefix, 96);
+}
+
 bool IPIsSiteLocal(const IPAddress& ip) {
   // Can't use the helper because the prefix is 10 bits.
+  if (ip.family() != AF_INET6) {
+    return false;
+  }
   in6_addr addr = ip.ipv6_address();
   return addr.s6_addr[0] == 0xFE && (addr.s6_addr[1] & 0xC0) == 0xC0;
 }
 
 bool IPIsULA(const IPAddress& ip) {
   // Can't use the helper because the prefix is 7 bits.
+  if (ip.family() != AF_INET6) {
+    return false;
+  }
   in6_addr addr = ip.ipv6_address();
   return (addr.s6_addr[0] & 0xFE) == 0xFC;
 }
 
 bool IPIsTeredo(const IPAddress& ip) {
-  return IPIsHelper(ip, kTeredoPrefix, 32);
+  return ip.family() == AF_INET6 && IPIsHelper(ip, kTeredoPrefix, 32);
 }
 
 bool IPIsV4Compatibility(const IPAddress& ip) {
-  return IPIsHelper(ip, kV4CompatibilityPrefix, 96);
+  if (ip.family() != AF_INET6 || !IPIsHelper(ip, kV4CompatibilityPrefix, 96)) {
+    return false;
+  }
+  in_addr v4 = ExtractMappedAddress(ip.ipv6_address());
+  uint32_t v4_h = NetworkToHost32(v4.s_addr);
+  return v4_h != 0 && v4_h != 1;
 }
 
 bool IPIsV4Mapped(const IPAddress& ip) {
-  return IPIsHelper(ip, kV4MappedPrefix, 96);
+  return ip.family() == AF_INET6 && IPIsHelper(ip, kV4MappedPrefix, 96);
 }
 
 int IPAddressPrecedence(const IPAddress& ip) {
@@ -554,22 +634,22 @@ int IPAddressPrecedence(const IPAddress& ip) {
 
 IPAddress GetLoopbackIP(int family) {
   if (family == AF_INET) {
-    return rtc::IPAddress(INADDR_LOOPBACK);
+    return IPAddress(INADDR_LOOPBACK);
   }
   if (family == AF_INET6) {
-    return rtc::IPAddress(in6addr_loopback);
+    return IPAddress(in6addr_loopback);
   }
-  return rtc::IPAddress();
+  return IPAddress();
 }
 
 IPAddress GetAnyIP(int family) {
   if (family == AF_INET) {
-    return rtc::IPAddress(INADDR_ANY);
+    return IPAddress(INADDR_ANY);
   }
   if (family == AF_INET6) {
-    return rtc::IPAddress(in6addr_any);
+    return IPAddress(in6addr_any);
   }
-  return rtc::IPAddress();
+  return IPAddress();
 }
 
-}  // namespace rtc
+}  // namespace webrtc

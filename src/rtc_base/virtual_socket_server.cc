@@ -10,30 +10,39 @@
 
 #include "rtc_base/virtual_socket_server.h"
 
-#include <errno.h>
-#include <math.h>
-
+#include <algorithm>
+#include <cerrno>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <memory>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
+#include "api/transport/ecn_marking.h"
 #include "api/units/time_delta.h"
+#include "rtc_base/buffer.h"
+#include "rtc_base/byte_order.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/event.h"
-#include "rtc_base/fake_clock.h"
+#include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/physical_socket_server.h"
+#include "rtc_base/net_helpers.h"
+#include "rtc_base/socket.h"
+#include "rtc_base/socket_address.h"
 #include "rtc_base/socket_address_pair.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/time_utils.h"
 
-namespace rtc {
-
-using ::webrtc::MutexLock;
-using ::webrtc::TaskQueueBase;
-using ::webrtc::TimeDelta;
+namespace webrtc {
 
 #if defined(WEBRTC_WIN)
 const in_addr kInitialNextIPv4 = {{{0x01, 0, 0, 0}}};
@@ -61,19 +70,23 @@ const int NUM_SAMPLES = 1000;
 
 // Packets are passed between sockets as messages.  We copy the data just like
 // the kernel does.
-class Packet {
+class VirtualSocketPacket {
  public:
-  Packet(const char* data, size_t size, const SocketAddress& from)
-      : size_(size), consumed_(0), from_(from) {
+  VirtualSocketPacket(const char* data,
+                      size_t size,
+                      EcnMarking ecn,
+                      const SocketAddress& from)
+      : size_(size), consumed_(0), ecn_(ecn), from_(from) {
     RTC_DCHECK(nullptr != data);
     data_ = new char[size_];
     memcpy(data_, data, size_);
   }
 
-  ~Packet() { delete[] data_; }
+  ~VirtualSocketPacket() { delete[] data_; }
 
   const char* data() const { return data_ + consumed_; }
   size_t size() const { return size_ - consumed_; }
+  EcnMarking ecn() const { return ecn_; }
   const SocketAddress& from() const { return from_; }
 
   // Remove the first size bytes from the data.
@@ -85,6 +98,7 @@ class Packet {
  private:
   char* data_;
   size_t size_, consumed_;
+  EcnMarking ecn_;
   SocketAddress from_;
 };
 
@@ -98,11 +112,11 @@ VirtualSocket::VirtualSocket(VirtualSocketServer* server, int family, int type)
       bound_(false),
       was_any_(false) {
   RTC_DCHECK((type_ == SOCK_DGRAM) || (type_ == SOCK_STREAM));
-  server->SignalReadyToSend.connect(this,
-                                    &VirtualSocket::OnSocketServerReadyToSend);
+  server->SubscribeReadyToSend(this, [this] { OnSocketServerReadyToSend(); });
 }
 
 VirtualSocket::~VirtualSocket() {
+  // TODO: issues.webrtc.org/465197113 - consider if it's worth unsubscribing.
   Close();
 }
 
@@ -160,7 +174,7 @@ void VirtualSocket::SafetyBlock::SetNotAlive() {
     for (const SocketAddress& remote_addr : *listen_queue_) {
       server->Disconnect(remote_addr);
     }
-    listen_queue_ = absl::nullopt;
+    listen_queue_ = std::nullopt;
   }
 
   // Cancel potential connects
@@ -192,7 +206,7 @@ void VirtualSocket::SafetyBlock::PostSignalReadEvent() {
   }
 
   pending_read_signal_event_ = true;
-  rtc::scoped_refptr<SafetyBlock> safety(this);
+  scoped_refptr<SafetyBlock> safety(this);
   socket_.server_->msg_queue_->PostTask(
       [safety = std::move(safety)] { safety->MaybeSignalReadEvent(); });
 }
@@ -205,7 +219,7 @@ void VirtualSocket::SafetyBlock::MaybeSignalReadEvent() {
       return;
     }
   }
-  socket_.SignalReadEvent(&socket_);
+  socket_.NotifyReadEvent(&socket_);
 }
 
 int VirtualSocket::Close() {
@@ -263,11 +277,28 @@ int VirtualSocket::RecvFrom(void* pv,
                             size_t cb,
                             SocketAddress* paddr,
                             int64_t* timestamp) {
-  if (timestamp) {
-    *timestamp = -1;
+  Buffer payload;
+  payload.EnsureCapacity(cb);
+  ReceiveBuffer receive_buffer(payload);
+  int bytes_received = DoRecvFrom(receive_buffer);
+  if (bytes_received > 0) {
+    memcpy(pv, payload.data(), bytes_received);
   }
+  *paddr = receive_buffer.source_address;
+  return bytes_received;
+}
 
-  int data_read = safety_->RecvFrom(pv, cb, *paddr);
+int VirtualSocket::RecvFrom(ReceiveBuffer& buffer) {
+  static constexpr int BUF_SIZE = 64 * 1024;
+  buffer.payload.EnsureCapacity(BUF_SIZE);
+  return DoRecvFrom(buffer);
+}
+
+int VirtualSocket::DoRecvFrom(ReceiveBuffer& buffer) {
+  int data_read = safety_->RecvFrom(buffer);
+  if (options_map_[OPT_RECV_ECN] != 1) {
+    buffer.ecn = EcnMarking::kNotEct;
+  }
   if (data_read < 0) {
     error_ = EAGAIN;
     return -1;
@@ -284,9 +315,7 @@ int VirtualSocket::RecvFrom(void* pv,
   return data_read;
 }
 
-int VirtualSocket::SafetyBlock::RecvFrom(void* buffer,
-                                         size_t size,
-                                         SocketAddress& addr) {
+int VirtualSocket::SafetyBlock::RecvFrom(ReceiveBuffer& buffer) {
   MutexLock lock(&mutex_);
   // If we don't have a packet, then either error or wait for one to arrive.
   if (recv_buffer_.empty()) {
@@ -294,10 +323,11 @@ int VirtualSocket::SafetyBlock::RecvFrom(void* buffer,
   }
 
   // Return the packet at the front of the queue.
-  Packet& packet = *recv_buffer_.front();
-  size_t data_read = std::min(size, packet.size());
-  memcpy(buffer, packet.data(), data_read);
-  addr = packet.from();
+  VirtualSocketPacket& packet = *recv_buffer_.front();
+  size_t data_read = std::min(buffer.payload.capacity(), packet.size());
+  buffer.payload.SetData(packet.data(), data_read);
+  buffer.source_address = packet.from();
+  buffer.ecn = packet.ecn();
 
   if (data_read < packet.size()) {
     packet.Consume(data_read);
@@ -401,20 +431,21 @@ int VirtualSocket::SetOption(Option opt, int value) {
 }
 
 void VirtualSocket::PostPacket(TimeDelta delay,
-                               std::unique_ptr<Packet> packet) {
-  rtc::scoped_refptr<SafetyBlock> safety = safety_;
+                               std::unique_ptr<VirtualSocketPacket> packet) {
+  scoped_refptr<SafetyBlock> safety = safety_;
   VirtualSocket* socket = this;
   server_->msg_queue_->PostDelayedTask(
       [safety = std::move(safety), socket,
        packet = std::move(packet)]() mutable {
         if (safety->AddPacket(std::move(packet))) {
-          socket->SignalReadEvent(socket);
+          socket->NotifyReadEvent(socket);
         }
       },
       delay);
 }
 
-bool VirtualSocket::SafetyBlock::AddPacket(std::unique_ptr<Packet> packet) {
+bool VirtualSocket::SafetyBlock::AddPacket(
+    std::unique_ptr<VirtualSocketPacket> packet) {
   MutexLock lock(&mutex_);
   if (alive_) {
     recv_buffer_.push_back(std::move(packet));
@@ -429,7 +460,7 @@ void VirtualSocket::PostConnect(TimeDelta delay,
 
 void VirtualSocket::SafetyBlock::PostConnect(TimeDelta delay,
                                              const SocketAddress& remote_addr) {
-  rtc::scoped_refptr<SafetyBlock> safety(this);
+  scoped_refptr<SafetyBlock> safety(this);
 
   MutexLock lock(&mutex_);
   RTC_DCHECK(alive_);
@@ -445,10 +476,10 @@ void VirtualSocket::SafetyBlock::PostConnect(TimeDelta delay,
       case Signal::kNone:
         break;
       case Signal::kReadEvent:
-        safety->socket_.SignalReadEvent(&safety->socket_);
+        safety->socket_.NotifyReadEvent(&safety->socket_);
         break;
       case Signal::kConnectEvent:
-        safety->socket_.SignalConnectEvent(&safety->socket_);
+        safety->socket_.NotifyConnectEvent(&safety->socket_);
         break;
     }
   };
@@ -488,7 +519,7 @@ void VirtualSocket::PostDisconnect(TimeDelta delay) {
   // Posted task may outlive this. Use different name for `this` inside the task
   // to avoid accidental unsafe `this->safety_` instead of safe `safety`
   VirtualSocket* socket = this;
-  rtc::scoped_refptr<SafetyBlock> safety = safety_;
+  scoped_refptr<SafetyBlock> safety = safety_;
   auto task = [safety = std::move(safety), socket] {
     if (!safety->IsAlive()) {
       return;
@@ -500,7 +531,7 @@ void VirtualSocket::PostDisconnect(TimeDelta delay) {
     int error_to_signal = (socket->state_ == CS_CONNECTING) ? ECONNREFUSED : 0;
     socket->state_ = CS_CLOSED;
     socket->remote_addr_.Clear();
-    socket->SignalCloseEvent(socket, error_to_signal);
+    socket->NotifyCloseEvent(socket, error_to_signal);
   };
   server_->msg_queue_->PostDelayedTask(std::move(task), delay);
 }
@@ -557,9 +588,12 @@ int VirtualSocket::SendUdp(const void* pv,
       return result;
     }
   }
+  EcnMarking ecn = (options_map_[Socket::OPT_SEND_ECN] == 1)
+                       ? EcnMarking::kEct1
+                       : EcnMarking::kNotEct;
 
   // Send the data in a message to the appropriate socket.
-  return server_->SendUdp(this, static_cast<const char*>(pv), cb, addr);
+  return server_->SendUdp(this, static_cast<const char*>(pv), cb, ecn, addr);
 }
 
 int VirtualSocket::SendTcp(const void* pv, size_t cb) {
@@ -583,7 +617,7 @@ void VirtualSocket::OnSocketServerReadyToSend() {
   }
   if (type_ == SOCK_DGRAM) {
     ready_to_send_ = true;
-    SignalWriteEvent(this);
+    NotifyWriteEvent(this);
   } else {
     RTC_DCHECK(type_ == SOCK_STREAM);
     // This will attempt to empty the full send buffer, and will fire
@@ -615,7 +649,7 @@ void VirtualSocket::UpdateSend(size_t data_size) {
 void VirtualSocket::MaybeSignalWriteEvent(size_t capacity) {
   if (!ready_to_send_ && (send_buffer_.size() < capacity)) {
     ready_to_send_ = true;
-    SignalWriteEvent(this);
+    NotifyWriteEvent(this);
   }
 }
 
@@ -650,11 +684,8 @@ size_t VirtualSocket::PurgeNetworkPackets(int64_t cur_time) {
   return network_size_;
 }
 
-VirtualSocketServer::VirtualSocketServer() : VirtualSocketServer(nullptr) {}
-
-VirtualSocketServer::VirtualSocketServer(ThreadProcessingFakeClock* fake_clock)
-    : fake_clock_(fake_clock),
-      msg_queue_(nullptr),
+VirtualSocketServer::VirtualSocketServer()
+    : msg_queue_(nullptr),
       stop_on_idle_(false),
       next_ipv4_(kInitialNextIPv4),
       next_ipv6_(kInitialNextIPv6),
@@ -703,7 +734,7 @@ uint16_t VirtualSocketServer::GetNextPort() {
 
 void VirtualSocketServer::SetSendingBlocked(bool blocked) {
   {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     if (blocked == sending_blocked_) {
       // Unchanged; nothing to do.
       return;
@@ -713,7 +744,7 @@ void VirtualSocketServer::SetSendingBlocked(bool blocked) {
   if (!blocked) {
     // Sending was blocked, but is now unblocked. This signal gives sockets a
     // chance to fire SignalWriteEvent, and for TCP, send buffered data.
-    SignalReadyToSend();
+    NotifyReadyToSend();
   }
 }
 
@@ -725,8 +756,7 @@ void VirtualSocketServer::SetMessageQueue(Thread* msg_queue) {
   msg_queue_ = msg_queue;
 }
 
-bool VirtualSocketServer::Wait(webrtc::TimeDelta max_wait_duration,
-                               bool process_io) {
+bool VirtualSocketServer::Wait(TimeDelta max_wait_duration, bool process_io) {
   RTC_DCHECK_RUN_ON(msg_queue_);
   if (stop_on_idle_ && Thread::Current()->empty()) {
     return false;
@@ -744,8 +774,8 @@ void VirtualSocketServer::WakeUp() {
 }
 
 void VirtualSocketServer::SetAlternativeLocalAddress(
-    const rtc::IPAddress& address,
-    const rtc::IPAddress& alternative) {
+    const IPAddress& address,
+    const IPAddress& alternative) {
   alternative_address_mapping_[address] = alternative;
 }
 
@@ -753,14 +783,7 @@ bool VirtualSocketServer::ProcessMessagesUntilIdle() {
   RTC_DCHECK_RUN_ON(msg_queue_);
   stop_on_idle_ = true;
   while (!msg_queue_->empty()) {
-    if (fake_clock_) {
-      // If using a fake clock, advance it in millisecond increments until the
-      // queue is empty.
-      fake_clock_->AdvanceTime(webrtc::TimeDelta::Millis(1));
-    } else {
-      // Otherwise, run a normal message loop.
-      msg_queue_->ProcessMessages(Thread::kForever);
-    }
+    msg_queue_->ProcessMessages(Thread::kForever);
   }
   stop_on_idle_ = false;
   return !msg_queue_->IsQuitting();
@@ -778,7 +801,7 @@ bool VirtualSocketServer::CloseTcpConnections(
     return false;
   }
   // Signal the close event on the local connection first.
-  socket->SignalCloseEvent(socket, 0);
+  socket->NotifyCloseEvent(socket, 0);
 
   // Trigger the remote connection's close event.
   socket->Close();
@@ -952,9 +975,10 @@ bool VirtualSocketServer::Disconnect(const SocketAddress& local_addr,
 int VirtualSocketServer::SendUdp(VirtualSocket* socket,
                                  const char* data,
                                  size_t data_size,
+                                 EcnMarking ecn,
                                  const SocketAddress& remote_addr) {
   {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     ++sent_packets_;
     if (sending_blocked_) {
       socket->SetToBlocked();
@@ -1011,7 +1035,7 @@ int VirtualSocketServer::SendUdp(VirtualSocket* socket,
     // "Derivative Random Drop"); however, this algorithm is a more accurate
     // simulation of what a normal network would do.
     {
-      webrtc::MutexLock lock(&mutex_);
+      MutexLock lock(&mutex_);
       size_t packet_size = data_size + UDP_HEADER_SIZE;
       if (network_size + packet_size > network_capacity_) {
         RTC_LOG(LS_VERBOSE) << "Dropping packet: network capacity exceeded";
@@ -1020,7 +1044,7 @@ int VirtualSocketServer::SendUdp(VirtualSocket* socket,
     }
 
     AddPacketToNetwork(socket, recipient, cur_time, data, data_size,
-                       UDP_HEADER_SIZE, false);
+                       UDP_HEADER_SIZE, false, ecn);
 
     return static_cast<int>(data_size);
   }
@@ -1028,7 +1052,7 @@ int VirtualSocketServer::SendUdp(VirtualSocket* socket,
 
 void VirtualSocketServer::SendTcp(VirtualSocket* socket) {
   {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     ++sent_packets_;
     if (sending_blocked_) {
       // Eventually the socket's buffer will fill and VirtualSocket::SendTcp
@@ -1063,7 +1087,7 @@ void VirtualSocketServer::SendTcp(VirtualSocket* socket) {
       break;
 
     AddPacketToNetwork(socket, recipient, cur_time, socket->send_buffer_data(),
-                       data_size, TCP_HEADER_SIZE, true);
+                       data_size, TCP_HEADER_SIZE, true, EcnMarking::kNotEct);
     recipient->UpdateRecv(data_size);
     socket->UpdateSend(data_size);
   }
@@ -1083,7 +1107,8 @@ void VirtualSocketServer::AddPacketToNetwork(VirtualSocket* sender,
                                              const char* data,
                                              size_t data_size,
                                              size_t header_size,
-                                             bool ordered) {
+                                             bool ordered,
+                                             EcnMarking ecn) {
   RTC_DCHECK(msg_queue_);
   uint32_t send_delay = sender->AddPacket(cur_time, data_size + header_size);
 
@@ -1103,12 +1128,13 @@ void VirtualSocketServer::AddPacketToNetwork(VirtualSocket* sender,
   if (ordered) {
     ts = sender->UpdateOrderedDelivery(ts);
   }
-  recipient->PostPacket(TimeDelta::Millis(ts - cur_time),
-                        std::make_unique<Packet>(data, data_size, sender_addr));
+  recipient->PostPacket(
+      TimeDelta::Millis(ts - cur_time),
+      std::make_unique<VirtualSocketPacket>(data, data_size, ecn, sender_addr));
 }
 
 uint32_t VirtualSocketServer::SendDelay(uint32_t size) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   if (bandwidth_ == 0)
     return 0;
   else
@@ -1137,7 +1163,7 @@ void PrintFunction(std::vector<std::pair<double, double> >* f) {
 #endif  // <unused>
 
 void VirtualSocketServer::UpdateDelayDistribution() {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   delay_dist_ = CreateDistribution(delay_mean_, delay_stddev_, delay_samples_);
 }
 
@@ -1208,7 +1234,7 @@ struct FunctionDomainCmp {
 
 std::unique_ptr<VirtualSocketServer::Function> VirtualSocketServer::Accumulate(
     std::unique_ptr<Function> f) {
-  RTC_DCHECK(f->size() >= 1);
+  RTC_DCHECK(!f->empty());
   double v = 0;
   for (Function::size_type i = 0; i < f->size() - 1; ++i) {
     double dx = (*f)[i + 1].first - (*f)[i].first;
@@ -1251,7 +1277,7 @@ double VirtualSocketServer::Evaluate(const Function* f, double x) {
   if (iter == f->begin()) {
     return (*f)[0].second;
   } else if (iter == f->end()) {
-    RTC_DCHECK(f->size() >= 1);
+    RTC_DCHECK(!f->empty());
     return (*f)[f->size() - 1].second;
   } else if (iter->first == x) {
     return iter->second;
@@ -1324,42 +1350,42 @@ void VirtualSocketServer::SetDefaultSourceAddress(const IPAddress& from_addr) {
 }
 
 void VirtualSocketServer::set_bandwidth(uint32_t bandwidth) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   bandwidth_ = bandwidth;
 }
 void VirtualSocketServer::set_network_capacity(uint32_t capacity) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   network_capacity_ = capacity;
 }
 
 uint32_t VirtualSocketServer::send_buffer_capacity() const {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   return send_buffer_capacity_;
 }
 void VirtualSocketServer::set_send_buffer_capacity(uint32_t capacity) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   send_buffer_capacity_ = capacity;
 }
 
 uint32_t VirtualSocketServer::recv_buffer_capacity() const {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   return recv_buffer_capacity_;
 }
 void VirtualSocketServer::set_recv_buffer_capacity(uint32_t capacity) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   recv_buffer_capacity_ = capacity;
 }
 
 void VirtualSocketServer::set_delay_mean(uint32_t delay_mean) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   delay_mean_ = delay_mean;
 }
 void VirtualSocketServer::set_delay_stddev(uint32_t delay_stddev) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   delay_stddev_ = delay_stddev;
 }
 void VirtualSocketServer::set_delay_samples(uint32_t delay_samples) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   delay_samples_ = delay_samples;
 }
 
@@ -1367,18 +1393,18 @@ void VirtualSocketServer::set_drop_probability(double drop_prob) {
   RTC_DCHECK_GE(drop_prob, 0.0);
   RTC_DCHECK_LE(drop_prob, 1.0);
 
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   drop_prob_ = drop_prob;
 }
 
 void VirtualSocketServer::set_max_udp_payload(size_t payload_size) {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   max_udp_payload_ = payload_size;
 }
 
 uint32_t VirtualSocketServer::sent_packets() const {
-  webrtc::MutexLock lock(&mutex_);
+  MutexLock lock(&mutex_);
   return sent_packets_;
 }
 
-}  // namespace rtc
+}  // namespace webrtc

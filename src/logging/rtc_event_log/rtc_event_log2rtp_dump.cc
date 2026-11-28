@@ -8,30 +8,28 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdint.h>
-#include <string.h>
-
+#include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
-#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
-#include "api/array_view.h"
-#include "api/rtc_event_log/rtc_event_log.h"
 #include "api/rtp_headers.h"
+#include "logging/rtc_event_log/events/logged_rtp_rtcp.h"
 #include "logging/rtc_event_log/rtc_event_log_parser.h"
 #include "logging/rtc_event_log/rtc_event_processor.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/string_to_number.h"
 #include "test/rtp_file_reader.h"
 #include "test/rtp_file_writer.h"
 
@@ -76,25 +74,14 @@ using MediaType = webrtc::ParsedRtcEventLog::MediaType;
 // The empty string must be validated as true, because it is the default value
 // of the command-line flag. In this case, no value is written to the output
 // variable.
-absl::optional<uint32_t> ParseSsrc(absl::string_view str) {
-  // If the input string starts with 0x or 0X it indicates a hexadecimal number.
-  uint32_t ssrc;
-  auto read_mode = std::dec;
-  if (str.size() > 2 &&
-      (str.substr(0, 2) == "0x" || str.substr(0, 2) == "0X")) {
-    read_mode = std::hex;
-    str = str.substr(2);
-  }
-  std::stringstream ss(std::string{str});
-  ss >> read_mode >> ssrc;
-  if (str.empty() || (!ss.fail() && ss.eof()))
-    return ssrc;
-  return absl::nullopt;
+std::optional<uint32_t> ParseSsrc(absl::string_view str) {
+  // Set `base` to 0 to allow detection of the "0x" prefix in case hex is used.
+  return webrtc::StringToNumber<uint32_t>(str, 0);
 }
 
 bool ShouldSkipStream(MediaType media_type,
                       uint32_t ssrc,
-                      absl::optional<uint32_t> ssrc_filter) {
+                      std::optional<uint32_t> ssrc_filter) {
   if (!absl::GetFlag(FLAGS_audio) && media_type == MediaType::AUDIO)
     return true;
   if (!absl::GetFlag(FLAGS_video) && media_type == MediaType::VIDEO)
@@ -121,7 +108,7 @@ void ConvertRtpPacket(
   reconstructed_packet.SetTimestamp(incoming.rtp.header.timestamp);
   reconstructed_packet.SetSsrc(incoming.rtp.header.ssrc);
   if (incoming.rtp.header.numCSRCs > 0) {
-    reconstructed_packet.SetCsrcs(rtc::ArrayView<const uint32_t>(
+    reconstructed_packet.SetCsrcs(std::span<const uint32_t>(
         incoming.rtp.header.arrOfCSRCs, incoming.rtp.header.numCSRCs));
   }
 
@@ -135,10 +122,9 @@ void ConvertRtpPacket(
   if (incoming.rtp.header.extension.hasTransportSequenceNumber)
     reconstructed_packet.SetExtension<webrtc::TransportSequenceNumber>(
         incoming.rtp.header.extension.transportSequenceNumber);
-  if (incoming.rtp.header.extension.hasAudioLevel)
-    reconstructed_packet.SetExtension<webrtc::AudioLevel>(
-        incoming.rtp.header.extension.voiceActivity,
-        incoming.rtp.header.extension.audioLevel);
+  if (incoming.rtp.header.extension.audio_level())
+    reconstructed_packet.SetExtension<webrtc::AudioLevelExtension>(
+        *incoming.rtp.header.extension.audio_level());
   if (incoming.rtp.header.extension.hasVideoRotation)
     reconstructed_packet.SetExtension<webrtc::VideoOrientation>(
         incoming.rtp.header.extension.videoRotation);
@@ -152,14 +138,14 @@ void ConvertRtpPacket(
   RTC_DCHECK_EQ(reconstructed_packet.size(), incoming.rtp.header_length);
   RTC_DCHECK_EQ(reconstructed_packet.headers_size(),
                 incoming.rtp.header_length);
-  memcpy(packet->data, reconstructed_packet.data(),
-         reconstructed_packet.headers_size());
-  packet->length = reconstructed_packet.headers_size();
+  packet->buffer = reconstructed_packet.Buffer().Slice(
+      0, reconstructed_packet.headers_size());
   packet->original_length = incoming.rtp.total_length;
   packet->time_ms = incoming.log_time_ms();
   // Set padding bit.
-  if (incoming.rtp.header.paddingLength > 0)
-    packet->data[0] = packet->data[0] | 0x20;
+  if (incoming.rtp.header.paddingLength > 0) {
+    packet->buffer.AsMutableSpan()[0] |= 0x20;
+  }
 }
 
 }  // namespace
@@ -180,7 +166,7 @@ int main(int argc, char* argv[]) {
   std::string input_file = args[1];
   std::string output_file = args[2];
 
-  absl::optional<uint32_t> ssrc_filter;
+  std::optional<uint32_t> ssrc_filter;
   if (!absl::GetFlag(FLAGS_ssrc).empty()) {
     ssrc_filter = ParseSsrc(absl::GetFlag(FLAGS_ssrc));
     RTC_CHECK(ssrc_filter.has_value()) << "Failed to read SSRC filter flag.";
@@ -221,9 +207,7 @@ int main(int argc, char* argv[]) {
   auto handle_rtcp = [&rtp_writer, &rtcp_counter](
                          const webrtc::LoggedRtcpPacketIncoming& incoming) {
     webrtc::test::RtpPacket packet;
-    memcpy(packet.data, incoming.rtcp.raw_data.data(),
-           incoming.rtcp.raw_data.size());
-    packet.length = incoming.rtcp.raw_data.size();
+    packet.buffer.Set(incoming.rtcp.raw_data);
     // For RTCP packets the original_length should be set to 0 in the
     // RTPdump format.
     packet.original_length = 0;

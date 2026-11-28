@@ -11,8 +11,8 @@
 package org.webrtc;
 
 import androidx.annotation.Nullable;
-import java.util.Arrays;
 import java.util.List;
+import org.jni_zero.NativeMethods;
 
 public class SoftwareVideoEncoderFactory implements VideoEncoderFactory {
   private static final String TAG = "SoftwareVideoEncoderFactory";
@@ -20,22 +20,21 @@ public class SoftwareVideoEncoderFactory implements VideoEncoderFactory {
   private final long nativeFactory;
 
   public SoftwareVideoEncoderFactory() {
-    this.nativeFactory = nativeCreateFactory();
+    this.nativeFactory = SoftwareVideoEncoderFactoryJni.get().createFactory();
   }
 
   @Nullable
   @Override
   public VideoEncoder createEncoder(VideoCodecInfo info) {
-    long nativeEncoder = nativeCreateEncoder(nativeFactory, info);
-    if (nativeEncoder == 0) {
+    if (!SoftwareVideoEncoderFactoryJni.get().isSupported(nativeFactory, info)) {
       Logging.w(TAG, "Trying to create encoder for unsupported format. " + info);
       return null;
     }
 
     return new WrappedNativeVideoEncoder() {
       @Override
-      public long createNativeVideoEncoder() {
-        return nativeEncoder;
+      public long createNative(long webrtcEnvRef) {
+        return SoftwareVideoEncoderFactoryJni.get().create(nativeFactory, webrtcEnvRef, info);
       }
 
       @Override
@@ -47,12 +46,19 @@ public class SoftwareVideoEncoderFactory implements VideoEncoderFactory {
 
   @Override
   public VideoCodecInfo[] getSupportedCodecs() {
-    return nativeGetSupportedCodecs(nativeFactory).toArray(new VideoCodecInfo[0]);
+    return SoftwareVideoEncoderFactoryJni.get()
+        .getSupportedCodecs(nativeFactory)
+        .toArray(new VideoCodecInfo[0]);
   }
 
-  private static native long nativeCreateFactory();
+  @NativeMethods
+  interface Natives {
+    long createFactory();
 
-  private static native long nativeCreateEncoder(long factory, VideoCodecInfo videoCodecInfo);
+    boolean isSupported(long factory, VideoCodecInfo info);
 
-  private static native List<VideoCodecInfo> nativeGetSupportedCodecs(long factory);
+    long create(long factory, long webrtcEnvRef, VideoCodecInfo info);
+
+    List<VideoCodecInfo> getSupportedCodecs(long factory);
+  }
 }

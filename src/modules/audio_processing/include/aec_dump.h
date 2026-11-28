@@ -13,12 +13,12 @@
 
 #include <stdint.h>
 
+#include <optional>
 #include <string>
 
-#include "absl/base/attributes.h"
-#include "absl/types/optional.h"
+#include "api/audio/audio_processing.h"
+#include "api/audio/audio_view.h"
 #include "modules/audio_processing/include/audio_frame_view.h"
-#include "modules/audio_processing/include/audio_processing.h"
 
 namespace webrtc {
 
@@ -39,9 +39,6 @@ struct InternalAPMConfig {
   bool aec_drift_compensation_enabled = false;
   bool aec_extended_filter_enabled = false;
   int aec_suppression_level = 0;
-  bool aecm_enabled = false;
-  bool aecm_comfort_noise_enabled = false;
-  int aecm_routing_mode = 0;
   bool agc_enabled = false;
   int agc_mode = 0;
   bool agc_limiter_enabled = false;
@@ -53,6 +50,7 @@ struct InternalAPMConfig {
   bool pre_amplifier_enabled = false;
   float pre_amplifier_fixed_gain_factor = 1.f;
   std::string experiments_description = "";
+  std::string api_config_string = "";
 };
 
 // An interface for recording configuration and input/output streams
@@ -68,7 +66,7 @@ class AecDump {
   struct AudioProcessingState {
     int delay;
     int drift;
-    absl::optional<int> applied_input_volume;
+    std::optional<int> applied_input_volume;
     bool keypress;
   };
 
@@ -77,7 +75,7 @@ class AecDump {
   // Logs Event::Type INIT message.
   virtual void WriteInitMessage(const ProcessingConfig& api_format,
                                 int64_t time_now_ms) = 0;
-  ABSL_DEPRECATED("")
+  [[deprecated]]
   void WriteInitMessage(const ProcessingConfig& api_format) {
     WriteInitMessage(api_format, 0);
   }
@@ -87,8 +85,10 @@ class AecDump {
   // by a WriteCaptureStreamMessage call.
   virtual void AddCaptureStreamInput(
       const AudioFrameView<const float>& src) = 0;
+  virtual void AddCaptureStreamInput(MonoView<const float> channel) = 0;
   virtual void AddCaptureStreamOutput(
       const AudioFrameView<const float>& src) = 0;
+  virtual void AddCaptureStreamOutput(MonoView<const float> channel) = 0;
   virtual void AddCaptureStreamInput(const int16_t* const data,
                                      int num_channels,
                                      int samples_per_channel) = 0;
@@ -104,6 +104,9 @@ class AecDump {
                                         int samples_per_channel) = 0;
   virtual void WriteRenderStreamMessage(
       const AudioFrameView<const float>& src) = 0;
+  virtual void WriteRenderStreamMessage(const float* const* data,
+                                        int num_channels,
+                                        int samples_per_channel) = 0;
 
   virtual void WriteRuntimeSetting(
       const AudioProcessing::RuntimeSetting& runtime_setting) = 0;

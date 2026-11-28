@@ -10,20 +10,26 @@
 
 #include "modules/rtp_rtcp/source/rtp_format_video_generic.h"
 
-#include <string.h>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <variant>
 
-#include "absl/types/optional.h"
+#include "api/video/video_frame_type.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
+#include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/logging.h"
 
 namespace webrtc {
+namespace {
 
-static const size_t kGenericHeaderLength = 1;
-static const size_t kExtendedHeaderLength = 2;
+constexpr size_t kGenericHeaderLength = 1;
+constexpr size_t kExtendedHeaderLength = 2;
+
+}  // namespace
 
 RtpPacketizerGeneric::RtpPacketizerGeneric(
-    rtc::ArrayView<const uint8_t> payload,
+    std::span<const uint8_t> payload,
     PayloadSizeLimits limits,
     const RTPVideoHeader& rtp_video_header)
     : remaining_payload_(payload) {
@@ -34,9 +40,8 @@ RtpPacketizerGeneric::RtpPacketizerGeneric(
   current_packet_ = payload_sizes_.begin();
 }
 
-RtpPacketizerGeneric::RtpPacketizerGeneric(
-    rtc::ArrayView<const uint8_t> payload,
-    PayloadSizeLimits limits)
+RtpPacketizerGeneric::RtpPacketizerGeneric(std::span<const uint8_t> payload,
+                                           PayloadSizeLimits limits)
     : header_size_(0), remaining_payload_(payload) {
   payload_sizes_ = SplitAboutEqually(payload.size(), limits);
   current_packet_ = payload_sizes_.begin();
@@ -68,7 +73,7 @@ bool RtpPacketizerGeneric::NextPacket(RtpPacketToSend* packet) {
   memcpy(out_ptr + header_size_, remaining_payload_.data(),
          next_packet_payload_len);
 
-  remaining_payload_ = remaining_payload_.subview(next_packet_payload_len);
+  remaining_payload_ = remaining_payload_.subspan(next_packet_payload_len);
 
   ++current_packet_;
 
@@ -86,7 +91,7 @@ void RtpPacketizerGeneric::BuildHeader(const RTPVideoHeader& rtp_video_header) {
   if (rtp_video_header.frame_type == VideoFrameType::kVideoFrameKey) {
     header_[0] |= RtpFormatVideoGeneric::kKeyFrameBit;
   }
-  if (const auto* generic_header = absl::get_if<RTPVideoHeaderLegacyGeneric>(
+  if (const auto* generic_header = std::get_if<RTPVideoHeaderLegacyGeneric>(
           &rtp_video_header.video_type_header)) {
     // Store bottom 15 bits of the picture id. Only 15 bits are used for
     // compatibility with other packetizer implemenetations.

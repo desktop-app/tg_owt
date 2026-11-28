@@ -8,32 +8,42 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <map>
 #include <memory>
+#include <span>
 
 #include "api/audio/audio_frame.h"
+#include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/neteq/default_neteq_factory.h"
+#include "api/neteq/neteq.h"
 #include "api/rtp_headers.h"
-#include "modules/audio_coding/acm2/acm_receiver.h"
+#include "api/units/timestamp.h"
 #include "modules/audio_coding/codecs/pcm16b/pcm16b.h"
 #include "modules/audio_coding/include/audio_coding_module.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
-#include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 
 class TargetDelayTest : public ::testing::Test {
  protected:
   TargetDelayTest()
-      : receiver_(
-            acm2::AcmReceiver::Config(CreateBuiltinAudioDecoderFactory())) {}
+      : neteq_(
+            DefaultNetEqFactory().Create(CreateTestEnvironment(),
+                                         NetEq::Config(),
+                                         CreateBuiltinAudioDecoderFactory())) {}
 
-  ~TargetDelayTest() {}
+  ~TargetDelayTest() override {}
 
-  void SetUp() {
+  void SetUp() override {
     constexpr int pltype = 108;
     std::map<int, SdpAudioFormat> receive_codecs = {
         {pltype, {"L16", kSampleRateHz, 1}}};
-    receiver_.SetCodecs(receive_codecs);
+    neteq_->SetCodecs(receive_codecs);
 
     rtp_header_.payloadType = pltype;
     rtp_header_.timestamp = 0;
@@ -49,20 +59,20 @@ class TargetDelayTest : public ::testing::Test {
   }
 
   void OutOfRangeInput() {
-    EXPECT_EQ(-1, SetMinimumDelay(-1));
-    EXPECT_EQ(-1, SetMinimumDelay(10001));
+    EXPECT_FALSE(SetMinimumDelay(-1));
+    EXPECT_FALSE(SetMinimumDelay(10001));
   }
 
   void TargetDelayBufferMinMax() {
     const int kTargetMinDelayMs = kNum10msPerFrame * 10;
-    ASSERT_EQ(0, SetMinimumDelay(kTargetMinDelayMs));
+    ASSERT_TRUE(SetMinimumDelay(kTargetMinDelayMs));
     for (int m = 0; m < 30; ++m)  // Run enough iterations to fill the buffer.
       Run(true);
     int clean_optimal_delay = GetCurrentOptimalDelayMs();
     EXPECT_EQ(kTargetMinDelayMs, clean_optimal_delay);
 
     const int kTargetMaxDelayMs = 2 * (kNum10msPerFrame * 10);
-    ASSERT_EQ(0, SetMaximumDelay(kTargetMaxDelayMs));
+    ASSERT_TRUE(SetMaximumDelay(kTargetMaxDelayMs));
     for (int n = 0; n < 30; ++n)  // Run enough iterations to fill the buffer.
       Run(false);
 
@@ -83,9 +93,10 @@ class TargetDelayTest : public ::testing::Test {
   void Push() {
     rtp_header_.timestamp += kFrameSizeSamples;
     rtp_header_.sequenceNumber++;
-    ASSERT_EQ(0, receiver_.InsertPacket(rtp_header_,
-                                        rtc::ArrayView<const uint8_t>(
-                                            payload_, kFrameSizeSamples * 2)));
+    ASSERT_EQ(0, neteq_->InsertPacket(
+                     rtp_header_,
+                     std::span<const uint8_t>(payload_, kFrameSizeSamples * 2),
+                     Timestamp::MinusInfinity()));
   }
 
   // Pull audio equivalent to the amount of audio in one RTP packet.
@@ -93,7 +104,7 @@ class TargetDelayTest : public ::testing::Test {
     AudioFrame frame;
     bool muted;
     for (int k = 0; k < kNum10msPerFrame; ++k) {  // Pull one frame.
-      ASSERT_EQ(0, receiver_.GetAudio(-1, &frame, &muted));
+      ASSERT_EQ(NetEq::kOK, neteq_->GetAudio(&frame, &muted));
       ASSERT_FALSE(muted);
       // Had to use ASSERT_TRUE, ASSERT_EQ generated error.
       ASSERT_TRUE(kSampleRateHz == frame.sample_rate_hz_);
@@ -110,9 +121,9 @@ class TargetDelayTest : public ::testing::Test {
       }
 
       if (!clean) {
-        for (int m = 0; m < 10; ++m) {  // Long enough to trigger delay change.
+        for (int o = 0; o < 10; ++o) {  // Long enough to trigger delay change.
           Push();
-          for (int n = 0; n < kInterarrivalJitterPacket; ++n)
+          for (int p = 0; p < kInterarrivalJitterPacket; ++p)
             Pull();
         }
       }
@@ -120,20 +131,20 @@ class TargetDelayTest : public ::testing::Test {
   }
 
   int SetMinimumDelay(int delay_ms) {
-    return receiver_.SetMinimumDelay(delay_ms);
+    return neteq_->SetMinimumDelay(delay_ms);
   }
 
   int SetMaximumDelay(int delay_ms) {
-    return receiver_.SetMaximumDelay(delay_ms);
+    return neteq_->SetMaximumDelay(delay_ms);
   }
 
   int GetCurrentOptimalDelayMs() {
-    NetworkStatistics stats;
-    receiver_.GetNetworkStatistics(&stats);
-    return stats.preferredBufferSize;
+    NetEqNetworkStatistics neteq_stats;
+    neteq_->NetworkStatistics(&neteq_stats);
+    return neteq_stats.preferred_buffer_size_ms;
   }
 
-  acm2::AcmReceiver receiver_;
+  std::unique_ptr<NetEq> neteq_;
   RTPHeader rtp_header_;
   uint8_t payload_[kPayloadLenBytes];
 };

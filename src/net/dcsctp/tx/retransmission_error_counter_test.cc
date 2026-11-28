@@ -9,9 +9,10 @@
  */
 #include "net/dcsctp/tx/retransmission_error_counter.h"
 
+#include <optional>
+
 #include "net/dcsctp/public/dcsctp_options.h"
-#include "rtc_base/gunit.h"
-#include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace dcsctp {
 namespace {
@@ -74,7 +75,7 @@ TEST(RetransmissionErrorCounterTest, ClearingCounter) {
 
 TEST(RetransmissionErrorCounterTest, CanBeLimitless) {
   DcSctpOptions options;
-  options.max_retransmissions = absl::nullopt;
+  options.max_retransmissions = std::nullopt;
   RetransmissionErrorCounter counter("log: ", options);
   for (int i = 0; i < 100; ++i) {
     EXPECT_TRUE(counter.Increment("test"));

@@ -16,18 +16,18 @@ rtc_source_set("unit_base") {
   sources = [ "unit_base.h" ]
 
   deps = [
-    "../../rtc_base:checks",
-    "../../rtc_base:divide_round",
-    "../../rtc_base:safe_conversions",
+    "..:checks",
+    "..:divide_round",
+    "..:safe_conversions",
   ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("units_unittests") {
-    testonly = true
+  rtc_cc_test("unit_base_unittest") {
     sources = [ "unit_base_unittest.cc" ]
     deps = [
       ":unit_base",
+      "..:checks",
       "../../test:test_support",
     ]
   }

@@ -10,14 +10,21 @@
 
 #include "api/sequence_checker.h"
 
+#include <functional>
 #include <memory>
 #include <utility>
+#include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "api/function_view.h"
 #include "api/units/time_delta.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/event.h"
 #include "rtc_base/platform_thread.h"
+#include "rtc_base/synchronization/sequence_checker_internal.h"
+#include "rtc_base/system/unused.h"
 #include "rtc_base/task_queue_for_test.h"
+#include "rtc_base/thread_annotations.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -40,12 +47,12 @@ class CompileTimeTestForGuardedBy {
 
  private:
   int guarded_ RTC_GUARDED_BY(sequence_checker_);
-  ::webrtc::SequenceChecker sequence_checker_;
+  SequenceChecker sequence_checker_;
 };
 
-void RunOnDifferentThread(rtc::FunctionView<void()> run) {
-  rtc::Event thread_has_run_event;
-  rtc::PlatformThread::SpawnJoinable(
+void RunOnDifferentThread(FunctionView<void()> run) {
+  Event thread_has_run_event;
+  PlatformThread::SpawnJoinable(
       [&] {
         run();
         thread_has_run_event.Set();
@@ -100,9 +107,49 @@ TEST(SequenceCheckerTest, DetachFromTaskQueueAndUseOnThread) {
 }
 
 TEST(SequenceCheckerTest, MethodNotAllowedOnDifferentThreadInDebug) {
-  SequenceChecker sequence_checker;
+  SequenceChecker sequence_checker(SequenceChecker::kAttached);
   RunOnDifferentThread(
       [&] { EXPECT_EQ(sequence_checker.IsCurrent(), !RTC_DCHECK_IS_ON); });
+}
+
+TEST(SequenceCheckerTest, DefaultDetachedMethodAllowedOnDifferentThread) {
+  SequenceChecker sequence_checker;
+#if RTC_DCHECK_IS_ON
+  EXPECT_THAT(ExpectationToString(&sequence_checker),
+              HasSubstr("not attached"));
+#endif
+  RunOnDifferentThread([&] { EXPECT_TRUE(sequence_checker.IsCurrent()); });
+}
+
+TEST(SequenceCheckerTest, MoveSemanticsDetach) {
+  SequenceChecker sequence_checker;
+#if RTC_DCHECK_IS_ON
+  EXPECT_THAT(ExpectationToString(&sequence_checker),
+              HasSubstr("not attached"));
+#endif
+  EXPECT_TRUE(sequence_checker.IsCurrent());
+#if RTC_DCHECK_IS_ON
+  EXPECT_THAT(ExpectationToString(&sequence_checker),
+              HasSubstr("# Expected: TQ:"));
+#endif
+  // Moving away from `sequence_checker` will detach from the current
+  // context and the `moved_to` checker will alsy be detached.
+  SequenceChecker moved_to(std::move(sequence_checker));
+#if RTC_DCHECK_IS_ON
+  EXPECT_THAT(ExpectationToString(&sequence_checker),
+              HasSubstr("not attached"));
+  EXPECT_THAT(ExpectationToString(&moved_to), HasSubstr("not attached"));
+#endif
+  RTC_UNUSED(moved_to);
+}
+
+TEST(SequenceCheckerTest, VectorSupport) {
+  std::vector<SequenceChecker> checkers;
+  checkers.push_back(SequenceChecker());
+#if RTC_DCHECK_IS_ON
+  EXPECT_THAT(ExpectationToString(&checkers[0]), HasSubstr("not attached"));
+#endif
+  EXPECT_TRUE(checkers[0].IsCurrent());
 }
 
 #if RTC_DCHECK_IS_ON
@@ -119,7 +166,7 @@ TEST(SequenceCheckerTest, OnlyCurrentOnOneThread) {
 #endif
 
 TEST(SequenceCheckerTest, MethodNotAllowedOnDifferentTaskQueueInDebug) {
-  SequenceChecker sequence_checker;
+  SequenceChecker sequence_checker(SequenceChecker::kAttached);
   TaskQueueForTest queue;
   queue.SendTask(
       [&] { EXPECT_EQ(sequence_checker.IsCurrent(), !RTC_DCHECK_IS_ON); });
@@ -144,13 +191,13 @@ TEST(SequenceCheckerTest, ExpectationToString) {
 
   SequenceChecker sequence_checker(SequenceChecker::kDetached);
 
-  rtc::Event blocker;
+  Event blocker;
   queue1.PostTask([&blocker, &sequence_checker]() {
     (void)sequence_checker.IsCurrent();
     blocker.Set();
   });
 
-  blocker.Wait(rtc::Event::kForever);
+  blocker.Wait(Event::kForever);
 
 #if RTC_DCHECK_IS_ON
 
@@ -173,13 +220,13 @@ TEST(SequenceCheckerTest, InitiallyDetached) {
 
   SequenceChecker sequence_checker(SequenceChecker::kDetached);
 
-  rtc::Event blocker;
+  Event blocker;
   queue1.PostTask([&blocker, &sequence_checker]() {
     EXPECT_TRUE(sequence_checker.IsCurrent());
     blocker.Set();
   });
 
-  blocker.Wait(rtc::Event::kForever);
+  blocker.Wait(Event::kForever);
 
 #if RTC_DCHECK_IS_ON
   EXPECT_FALSE(sequence_checker.IsCurrent());
@@ -197,7 +244,7 @@ class TestAnnotations {
 
  private:
   bool test_var_ RTC_GUARDED_BY(&checker_);
-  SequenceChecker checker_;
+  SequenceChecker checker_{SequenceChecker::kAttached};
 };
 
 TEST(SequenceCheckerTest, TestAnnotations) {

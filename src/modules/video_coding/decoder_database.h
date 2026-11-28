@@ -15,12 +15,13 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 
-#include "absl/types/optional.h"
 #include "api/sequence_checker.h"
 #include "api/video/encoded_frame.h"
 #include "api/video_codecs/video_decoder.h"
 #include "modules/video_coding/generic_decoder.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
@@ -58,8 +59,8 @@ class VCMDecoderDatabase {
 
   SequenceChecker decoder_sequence_checker_;
 
-  absl::optional<uint8_t> current_payload_type_;
-  absl::optional<VCMGenericDecoder> current_decoder_
+  std::optional<uint8_t> current_payload_type_;
+  std::optional<VCMGenericDecoder> current_decoder_
       RTC_GUARDED_BY(decoder_sequence_checker_);
   // Initialization paramaters for decoders keyed by payload type.
   std::map<uint8_t, VideoDecoder::Settings> decoder_settings_;

@@ -42,6 +42,7 @@ public class Camera2CapturerTest {
     @Nullable CameraDevice cameraDevice; // Guarded by cameraDeviceLock
     boolean openSucceeded; // Guarded by cameraDeviceLock
 
+    @SuppressWarnings("ClassCanBeStatic")
     private class LooperThread extends Thread {
       final CountDownLatch startedSignal = new CountDownLatch(1);
       private Handler handler;
@@ -330,5 +331,13 @@ public class Camera2CapturerTest {
   @MediumTest
   public void testStartWhileCameraIsAlreadyOpenAndStop() throws InterruptedException {
     fixtures.startWhileCameraIsAlreadyOpenAndStop();
+  }
+
+  // This test that VideoCapturer.isCapturing() returns the correct value across the
+  // start -> stop -> restart -> stop lifecycle.
+  @Test
+  @MediumTest
+  public void testIsCapturing() throws InterruptedException {
+    fixtures.capturerReportsCapturingState();
   }
 }

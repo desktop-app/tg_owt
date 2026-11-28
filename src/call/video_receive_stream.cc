@@ -10,6 +10,18 @@
 
 #include "call/video_receive_stream.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <utility>
+
+#include "absl/functional/any_invocable.h"
+#include "api/call/transport.h"
+#include "api/rtp_headers.h"
+#include "api/rtp_packet_infos.h"
+#include "api/units/timestamp.h"
+#include "api/video_codecs/sdp_video_format.h"
 #include "rtc_base/strings/string_builder.h"
 
 namespace webrtc {
@@ -28,8 +40,7 @@ bool VideoReceiveStreamInterface::Decoder::operator==(
 }
 
 std::string VideoReceiveStreamInterface::Decoder::ToString() const {
-  char buf[1024];
-  rtc::SimpleStringBuilder ss(buf);
+  StringBuilder ss;
   ss << "{payload_type: " << payload_type;
   ss << ", payload_name: " << video_format.name;
   ss << ", codec_params: {";
@@ -40,19 +51,19 @@ std::string VideoReceiveStreamInterface::Decoder::ToString() const {
     }
     ss << it->first << ": " << it->second;
   }
-  ss << '}';
-  ss << '}';
+  ss << "}";
+  ss << "}";
 
-  return ss.str();
+  return ss.Release();
 }
 
 VideoReceiveStreamInterface::Stats::Stats() = default;
 VideoReceiveStreamInterface::Stats::~Stats() = default;
 
 std::string VideoReceiveStreamInterface::Stats::ToString(
-    int64_t time_ms) const {
-  char buf[2048];
-  rtc::SimpleStringBuilder ss(buf);
+    int64_t time_ms,
+    std::optional<Stats> previous_stats) const {
+  StringBuilder ss;
   ss << "VideoReceiveStreamInterface stats: " << time_ms << ", {ssrc: " << ssrc
      << ", ";
   ss << "total_bps: " << total_bitrate_bps << ", ";
@@ -62,8 +73,8 @@ std::string VideoReceiveStreamInterface::Stats::ToString(
   ss << "frameHeight: " << height << ", ";
   // TODO(crbug.com/webrtc/15166): `key` and `delta` will not
   // perfectly match the other frame counters.
-  ss << "key: " << frame_counts.key_frames << ", ";
-  ss << "delta: " << frame_counts.delta_frames << ", ";
+  ss << "key: " << received_frame_counts.key_frames << ", ";
+  ss << "delta: " << received_frame_counts.delta_frames << ", ";
   ss << "framesAssembledFromMultiplePackets: "
      << frames_assembled_from_multiple_packets << ", ";
   ss << "framesDecoded: " << frames_decoded << ", ";
@@ -94,40 +105,52 @@ std::string VideoReceiveStreamInterface::Stats::ToString(
   ss << "nackCount: " << rtcp_packet_type_counts.nack_packets << ", ";
   ss << "firCount: " << rtcp_packet_type_counts.fir_packets << ", ";
   ss << "pliCount: " << rtcp_packet_type_counts.pli_packets;
-  ss << '}';
-  return ss.str();
+  if (previous_stats.has_value() &&
+      previous_stats->corruption_score_sum.has_value() &&
+      corruption_score_sum.has_value() &&
+      previous_stats->corruption_score_count < corruption_score_count) {
+    ss << "averageCorruptionProbability: "
+       << 100.0 *
+              (*previous_stats->corruption_score_sum - *corruption_score_sum) /
+              static_cast<double>(previous_stats->corruption_score_count -
+                                  corruption_score_count)
+       << "%";
+  }
+  ss << "}";
+  return ss.Release();
 }
 
-VideoReceiveStreamInterface::Config::Config(const Config&) = default;
 VideoReceiveStreamInterface::Config::Config(Config&&) = default;
 VideoReceiveStreamInterface::Config::Config(
     Transport* rtcp_send_transport,
-    VideoDecoderFactory* decoder_factory)
+    VideoDecoderFactory* decoder_factory,
+    absl::AnyInvocable<void(const RtpPacketInfos&, Timestamp) const>
+        on_frame_delivered_callback)
     : decoder_factory(decoder_factory),
-      rtcp_send_transport(rtcp_send_transport) {}
+      rtcp_send_transport(rtcp_send_transport),
+      on_frame_delivered_callback(std::move(on_frame_delivered_callback)) {}
 
 VideoReceiveStreamInterface::Config&
 VideoReceiveStreamInterface::Config::operator=(Config&&) = default;
 VideoReceiveStreamInterface::Config::Config::~Config() = default;
 
 std::string VideoReceiveStreamInterface::Config::ToString() const {
-  char buf[4 * 1024];
-  rtc::SimpleStringBuilder ss(buf);
+  StringBuilder ss;
   ss << "{decoders: [";
   for (size_t i = 0; i < decoders.size(); ++i) {
     ss << decoders[i].ToString();
     if (i != decoders.size() - 1)
       ss << ", ";
   }
-  ss << ']';
+  ss << "]";
   ss << ", rtp: " << rtp.ToString();
   ss << ", renderer: " << (renderer ? "(renderer)" : "nullptr");
   ss << ", render_delay_ms: " << render_delay_ms;
   if (!sync_group.empty())
     ss << ", sync_group: " << sync_group;
-  ss << '}';
+  ss << "}";
 
-  return ss.str();
+  return ss.Release();
 }
 
 VideoReceiveStreamInterface::Config::Rtp::Rtp() = default;
@@ -135,19 +158,16 @@ VideoReceiveStreamInterface::Config::Rtp::Rtp(const Rtp&) = default;
 VideoReceiveStreamInterface::Config::Rtp::~Rtp() = default;
 
 std::string VideoReceiveStreamInterface::Config::Rtp::ToString() const {
-  char buf[2 * 1024];
-  rtc::SimpleStringBuilder ss(buf);
+  StringBuilder ss;
   ss << "{remote_ssrc: " << remote_ssrc;
-  ss << ", local_ssrc: " << local_ssrc;
   ss << ", rtcp_mode: "
      << (rtcp_mode == RtcpMode::kCompound ? "RtcpMode::kCompound"
                                           : "RtcpMode::kReducedSize");
   ss << ", rtcp_xr: ";
   ss << "{receiver_reference_time_report: "
      << (rtcp_xr.receiver_reference_time_report ? "on" : "off");
-  ss << '}';
-  ss << ", lntf: {enabled: " << (lntf.enabled ? "true" : "false") << '}';
-  ss << ", nack: {rtp_history_ms: " << nack.rtp_history_ms << '}';
+  ss << "}";
+  ss << ", nack: {rtp_history_ms: " << nack.rtp_history_ms << "}";
   ss << ", ulpfec_payload_type: " << ulpfec_payload_type;
   ss << ", red_type: " << red_payload_type;
   ss << ", rtx_ssrc: " << rtx_ssrc;
@@ -155,14 +175,32 @@ std::string VideoReceiveStreamInterface::Config::Rtp::ToString() const {
   for (auto& kv : rtx_associated_payload_types) {
     ss << kv.first << " (pt) -> " << kv.second << " (apt), ";
   }
-  ss << '}';
+  ss << "}";
   ss << ", raw_payload_types: {";
   for (const auto& pt : raw_payload_types) {
     ss << pt << ", ";
   }
-  ss << '}';
-  ss << '}';
-  return ss.str();
+  ss << "}";
+  ss << "}";
+  return ss.Release();
+}
+
+VideoReceiveStreamInterface::Config VideoReceiveStreamInterface::Config::Copy()
+    const {
+  VideoReceiveStreamInterface::Config config_copy(rtcp_send_transport,
+                                                  decoder_factory);
+  config_copy.decoders = decoders;
+  config_copy.rtp = rtp;
+  config_copy.renderer = renderer;
+  config_copy.render_delay_ms = render_delay_ms;
+  config_copy.enable_prerenderer_smoothing = enable_prerenderer_smoothing;
+  config_copy.sync_group = sync_group;
+  config_copy.frame_decryptor = frame_decryptor;
+  config_copy.crypto_options = crypto_options;
+  config_copy.frame_transformer = frame_transformer;
+  // Note: `on_first_packet` is a one-shot move-only callback.
+  // It is moved out during construction and should not be copied.
+  return config_copy;
 }
 
 }  // namespace webrtc

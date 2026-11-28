@@ -10,6 +10,11 @@
 
 #include "rtc_base/units/unit_base.h"
 
+#include <cmath>
+#include <cstdint>
+#include <limits>
+
+#include "rtc_base/checks.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -54,10 +59,18 @@ TEST(UnitBaseTest, ConstExpr) {
   constexpr TestUnit kTestUnitZero = TestUnit::Zero();
   constexpr TestUnit kTestUnitPlusInf = TestUnit::PlusInfinity();
   constexpr TestUnit kTestUnitMinusInf = TestUnit::MinusInfinity();
+
   static_assert(kTestUnitZero.IsZero(), "");
   static_assert(kTestUnitPlusInf.IsPlusInfinity(), "");
   static_assert(kTestUnitMinusInf.IsMinusInfinity(), "");
   static_assert(kTestUnitPlusInf.ToKiloOr(-1) == -1, "");
+
+  // Check FromValue is constexpr for floats.
+  static_assert(TestUnit::FromValue(0.0).IsZero());
+  static_assert(TestUnit::FromValue(INFINITY).IsPlusInfinity());
+  static_assert(TestUnit::FromValue(-INFINITY).IsMinusInfinity());
+  static_assert(TestUnit::FromValue(250.0) == TestUnit::FromValue(250));
+  static_assert(TestUnit::FromValue(-250.0) == TestUnit::FromValue(-250));
 
   static_assert(kTestUnitPlusInf > kTestUnitZero, "");
 
@@ -69,6 +82,7 @@ TEST(UnitBaseTest, ConstExpr) {
   static_assert(TestUnitAddKilo(kTestUnitValue, 2).ToValue() == kValue + 2000,
                 "");
   static_assert(TestUnit::FromValue(500) / 2 == TestUnit::FromValue(250));
+  static_assert(TestUnit::FromValue(500.0) / 2 == TestUnit::FromValue(250.0));
 }
 
 TEST(UnitBaseTest, GetBackSameValues) {
@@ -133,27 +147,6 @@ TEST(UnitBaseTest, ComparisonOperators) {
 
   EXPECT_GT(TestUnit::PlusInfinity(), large);
   EXPECT_LT(TestUnit::MinusInfinity(), TestUnit::Zero());
-}
-
-TEST(UnitBaseTest, Clamping) {
-  const TestUnit upper = TestUnit::FromKilo(800);
-  const TestUnit lower = TestUnit::FromKilo(100);
-  const TestUnit under = TestUnit::FromKilo(100);
-  const TestUnit inside = TestUnit::FromKilo(500);
-  const TestUnit over = TestUnit::FromKilo(1000);
-  EXPECT_EQ(under.Clamped(lower, upper), lower);
-  EXPECT_EQ(inside.Clamped(lower, upper), inside);
-  EXPECT_EQ(over.Clamped(lower, upper), upper);
-
-  TestUnit mutable_delta = lower;
-  mutable_delta.Clamp(lower, upper);
-  EXPECT_EQ(mutable_delta, lower);
-  mutable_delta = inside;
-  mutable_delta.Clamp(lower, upper);
-  EXPECT_EQ(mutable_delta, inside);
-  mutable_delta = over;
-  mutable_delta.Clamp(lower, upper);
-  EXPECT_EQ(mutable_delta, upper);
 }
 
 TEST(UnitBaseTest, CanBeInititializedFromLargeInt) {
@@ -222,6 +215,14 @@ TEST(UnitBaseTest, MathOperations) {
   EXPECT_EQ(TestUnit::FromValue(789) / 10, TestUnit::FromValue(78));
   EXPECT_EQ(TestUnit::FromValue(-789) / 10, TestUnit::FromValue(-78));
 }
+
+#if GTEST_HAS_DEATH_TEST && RTC_DCHECK_IS_ON && !defined(WEBRTC_ANDROID)
+TEST(UnitBaseTest, CrashesWhenCreatedFromNan) {
+  EXPECT_DEATH(TestUnit::FromValue(NAN), "");
+  EXPECT_DEATH(TestUnit::FromValue(0.0 / 0.0), "");
+  EXPECT_DEATH(TestUnit::FromValue(INFINITY - INFINITY), "");
+}
+#endif
 
 TEST(UnitBaseTest, InfinityOperations) {
   const int64_t kValue = 267;

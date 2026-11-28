@@ -40,7 +40,7 @@ class Normal {
         decoder_database_(decoder_database),
         background_noise_(background_noise),
         expand_(expand),
-        samples_per_ms_(rtc::CheckedDivExact(fs_hz_, 1000)),
+        samples_per_ms_(CheckedDivExact(fs_hz_, 1000)),
         statistics_(statistics) {}
 
   virtual ~Normal() {}

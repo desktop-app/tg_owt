@@ -10,27 +10,36 @@
 
 #include "modules/audio_coding/neteq/tools/neteq_test_factory.h"
 
-#include <errno.h>
-#include <limits.h>  // For ULONG_MAX returned by strtoul.
-#include <stdio.h>
-#include <stdlib.h>  // For strtoul.
-
+#include <cstdint>
+#include <cstdlib>  // For strtoul.
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
 
 #include "absl/strings/string_view.h"
+#include "api/audio_codecs/audio_codec_pair_id.h"
+#include "api/audio_codecs/audio_decoder.h"
+#include "api/audio_codecs/audio_decoder_factory.h"
+#include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/environment/environment.h"
+#include "api/field_trials.h"
+#include "api/make_ref_counted.h"
 #include "api/neteq/neteq.h"
+#include "api/neteq/neteq_factory.h"
+#include "api/scoped_refptr.h"
+#include "logging/rtc_event_log/rtc_event_log_parser.h"
 #include "modules/audio_coding/neteq/tools/audio_sink.h"
 #include "modules/audio_coding/neteq/tools/fake_decode_from_file.h"
 #include "modules/audio_coding/neteq/tools/initial_packet_inserter_neteq_input.h"
 #include "modules/audio_coding/neteq/tools/input_audio_file.h"
-#include "modules/audio_coding/neteq/tools/neteq_delay_analyzer.h"
 #include "modules/audio_coding/neteq/tools/neteq_event_log_input.h"
+#include "modules/audio_coding/neteq/tools/neteq_input.h"
 #include "modules/audio_coding/neteq/tools/neteq_replacement_input.h"
 #include "modules/audio_coding/neteq/tools/neteq_rtp_dump_input.h"
 #include "modules/audio_coding/neteq/tools/neteq_stats_getter.h"
@@ -39,20 +48,19 @@
 #include "modules/audio_coding/neteq/tools/output_audio_file.h"
 #include "modules/audio_coding/neteq/tools/output_wav_file.h"
 #include "modules/audio_coding/neteq/tools/rtp_file_source.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "rtc_base/checks.h"
 #include "test/function_audio_decoder_factory.h"
-#include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 namespace test {
 namespace {
 
-absl::optional<int> CodecSampleRate(
-    uint8_t payload_type,
-    webrtc::test::NetEqTestFactory::Config config) {
+std::optional<int> CodecSampleRate(uint8_t payload_type,
+                                   test::NetEqTestFactory::Config config) {
   if (payload_type == config.pcmu || payload_type == config.pcma ||
-      payload_type == config.ilbc || payload_type == config.pcm16b ||
-      payload_type == config.cn_nb || payload_type == config.avt)
+      payload_type == config.pcm16b || payload_type == config.cn_nb ||
+      payload_type == config.avt)
     return 8000;
   if (payload_type == config.isac || payload_type == config.pcm16b_wb ||
       payload_type == config.g722 || payload_type == config.cn_wb ||
@@ -62,11 +70,12 @@ absl::optional<int> CodecSampleRate(
       payload_type == config.cn_swb32 || payload_type == config.avt_32)
     return 32000;
   if (payload_type == config.opus || payload_type == config.pcm16b_swb48 ||
-      payload_type == config.cn_swb48 || payload_type == config.avt_48)
+      payload_type == config.cn_swb48 || payload_type == config.avt_48 ||
+      payload_type == config.opus_red)
     return 48000;
   if (payload_type == config.red)
     return 0;
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 }  // namespace
@@ -81,16 +90,15 @@ class SsrcSwitchDetector : public NetEqPostInsertPacket {
   explicit SsrcSwitchDetector(NetEqPostInsertPacket* other_callback)
       : other_callback_(other_callback) {}
 
-  void AfterInsertPacket(const NetEqInput::PacketData& packet,
+  void AfterInsertPacket(const RtpPacketReceived& packet,
                          NetEq* neteq) override {
-    if (last_ssrc_ && packet.header.ssrc != *last_ssrc_) {
+    if (last_ssrc_ && packet.Ssrc() != *last_ssrc_) {
       std::cout << "Changing streams from 0x" << std::hex << *last_ssrc_
-                << " to 0x" << std::hex << packet.header.ssrc << std::dec
-                << " (payload type "
-                << static_cast<int>(packet.header.payloadType) << ")"
+                << " to 0x" << std::hex << packet.Ssrc() << std::dec
+                << " (payload type " << int{packet.PayloadType()} << ")"
                 << std::endl;
     }
-    last_ssrc_ = packet.header.ssrc;
+    last_ssrc_ = packet.Ssrc();
     if (other_callback_) {
       other_callback_->AfterInsertPacket(packet, neteq);
     }
@@ -98,7 +106,7 @@ class SsrcSwitchDetector : public NetEqPostInsertPacket {
 
  private:
   NetEqPostInsertPacket* other_callback_;
-  absl::optional<uint32_t> last_ssrc_;
+  std::optional<uint32_t> last_ssrc_;
 };
 
 NetEqTestFactory::NetEqTestFactory() = default;
@@ -172,11 +180,6 @@ std::unique_ptr<NetEqTest> NetEqTestFactory::InitializeTest(
     return nullptr;
   }
 
-  if (!config.field_trial_string.empty()) {
-    field_trials_ =
-        std::make_unique<ScopedFieldTrials>(config.field_trial_string);
-  }
-
   // Skip some initial events/packets if requested.
   if (config.skip_get_audio_events > 0) {
     std::cout << "Skipping " << config.skip_get_audio_events
@@ -202,16 +205,16 @@ std::unique_ptr<NetEqTest> NetEqTestFactory::InitializeTest(
   }
 
   // Check the sample rate.
-  absl::optional<int> sample_rate_hz;
+  std::optional<int> sample_rate_hz;
   std::set<std::pair<int, uint32_t>> discarded_pt_and_ssrc;
-  while (absl::optional<RTPHeader> first_rtp_header = input->NextHeader()) {
-    RTC_DCHECK(first_rtp_header);
-    sample_rate_hz = CodecSampleRate(first_rtp_header->payloadType, config);
+  while (const RtpPacketReceived* first_rtp_packet = input->NextPacket()) {
+    RTC_DCHECK(first_rtp_packet);
+    sample_rate_hz = CodecSampleRate(first_rtp_packet->PayloadType(), config);
     if (sample_rate_hz) {
       std::cout << "Found valid packet with payload type "
-                << static_cast<int>(first_rtp_header->payloadType)
-                << " and SSRC 0x" << std::hex << first_rtp_header->ssrc
-                << std::dec << std::endl;
+                << int{first_rtp_packet->PayloadType()} << " and SSRC 0x"
+                << std::hex << first_rtp_packet->Ssrc() << std::dec
+                << std::endl;
       if (config.initial_dummy_packets > 0) {
         std::cout << "Nr of initial dummy packets: "
                   << config.initial_dummy_packets << std::endl;
@@ -222,8 +225,8 @@ std::unique_ptr<NetEqTest> NetEqTestFactory::InitializeTest(
     }
     // Discard this packet and move to the next. Keep track of discarded payload
     // types and SSRCs.
-    discarded_pt_and_ssrc.emplace(first_rtp_header->payloadType,
-                                  first_rtp_header->ssrc);
+    discarded_pt_and_ssrc.emplace(first_rtp_packet->PayloadType(),
+                                  first_rtp_packet->Ssrc());
     input->PopPacket();
   }
   if (!discarded_pt_and_ssrc.empty()) {
@@ -263,11 +266,11 @@ std::unique_ptr<NetEqTest> NetEqTestFactory::InitializeTest(
 
   NetEqTest::DecoderMap codecs = NetEqTest::StandardDecoderMap();
 
-  rtc::scoped_refptr<AudioDecoderFactory> decoder_factory =
+  scoped_refptr<AudioDecoderFactory> decoder_factory =
       CreateBuiltinAudioDecoderFactory();
 
   // Check if a replacement audio file was provided.
-  if (config.replacement_audio_file.size() > 0) {
+  if (!config.replacement_audio_file.empty()) {
     // Find largest unused payload type.
     int replacement_pt = 127;
     while (codecs.find(replacement_pt) != codecs.end()) {
@@ -297,12 +300,12 @@ std::unique_ptr<NetEqTest> NetEqTestFactory::InitializeTest(
 
     // Note that capture-by-copy implies that the lambda captures the value of
     // decoder_factory before it's reassigned on the left-hand side.
-    decoder_factory = rtc::make_ref_counted<FunctionAudioDecoderFactory>(
+    decoder_factory = make_ref_counted<FunctionAudioDecoderFactory>(
         [decoder_factory, config](
-            const SdpAudioFormat& format,
-            absl::optional<AudioCodecPairId> codec_pair_id) {
+            const Environment& env, const SdpAudioFormat& format,
+            std::optional<AudioCodecPairId> codec_pair_id) {
           std::unique_ptr<AudioDecoder> decoder =
-              decoder_factory->MakeAudioDecoder(format, codec_pair_id);
+              decoder_factory->Create(env, format, codec_pair_id);
           if (!decoder && format.name == "replacement") {
             decoder = std::make_unique<FakeDecodeFromFile>(
                 std::make_unique<InputAudioFile>(config.replacement_audio_file),
@@ -345,9 +348,10 @@ std::unique_ptr<NetEqTest> NetEqTestFactory::InitializeTest(
   neteq_config.sample_rate_hz = *sample_rate_hz;
   neteq_config.max_packets_in_buffer = config.max_nr_packets_in_buffer;
   neteq_config.enable_fast_accelerate = config.enable_fast_accelerate;
+  FieldTrials field_trials_view(config.field_trial_string);
   return std::make_unique<NetEqTest>(
       neteq_config, decoder_factory, codecs, std::move(text_log), factory,
-      std::move(input), std::move(output), callbacks);
+      std::move(input), std::move(output), callbacks, &field_trials_view);
 }
 
 }  // namespace test

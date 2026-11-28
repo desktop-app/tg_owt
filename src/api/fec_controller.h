@@ -11,6 +11,8 @@
 #ifndef API_FEC_CONTROLLER_H_
 #define API_FEC_CONTROLLER_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -32,9 +34,6 @@ class VCMProtectionCallback {
                                 uint32_t* sent_nack_rate_bps,
                                 uint32_t* sent_fec_rate_bps) = 0;
 
-  // 'retransmission_mode' is either a value of enum RetransmissionMode, or
-  // computed with bitwise operators on values of enum RetransmissionMode.
-  virtual void SetRetransmissionMode(int retransmission_mode) = 0;
  protected:
   virtual ~VCMProtectionCallback() {}
 };

@@ -8,20 +8,30 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stddef.h>  // size_t
+#include <stdio.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/audio/echo_canceller3_factory.h"
+#include "api/audio/audio_processing.h"
+#include "api/audio/builtin_audio_processing_builder.h"
+#include "api/scoped_refptr.h"
+#include "common_audio/channel_buffer.h"
+#include "common_audio/include/audio_util.h"
 #include "modules/audio_coding/neteq/tools/resample_input_audio_file.h"
 #include "modules/audio_processing/aec_dump/aec_dump_factory.h"
-#include "modules/audio_processing/test/audio_processing_builder_for_testing.h"
 #include "modules/audio_processing/test/debug_dump_replayer.h"
-#include "modules/audio_processing/test/test_utils.h"
+#include "modules/audio_processing/test/protobuf_utils.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/task_queue_for_test.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
@@ -33,7 +43,7 @@ namespace {
 void MaybeResetBuffer(std::unique_ptr<ChannelBuffer<float>>* buffer,
                       const StreamConfig& config) {
   auto& buffer_ref = *buffer;
-  if (!buffer_ref.get() || buffer_ref->num_frames() != config.num_frames() ||
+  if (!buffer_ref || buffer_ref->num_frames() != config.num_frames() ||
       buffer_ref->num_channels() != config.num_channels()) {
     buffer_ref.reset(
         new ChannelBuffer<float>(config.num_frames(), config.num_channels()));
@@ -111,7 +121,7 @@ class DebugDumpGenerator {
   bool enable_pre_amplifier_;
 
   TaskQueueForTest worker_queue_;
-  rtc::scoped_refptr<AudioProcessing> apm_;
+  scoped_refptr<AudioProcessing> apm_;
 
   const std::string dump_file_name_;
 };
@@ -140,8 +150,7 @@ DebugDumpGenerator::DebugDumpGenerator(absl::string_view input_file_name,
       enable_pre_amplifier_(enable_pre_amplifier),
       worker_queue_("debug_dump_generator_worker_queue"),
       dump_file_name_(dump_file_name) {
-  AudioProcessingBuilderForTesting apm_builder;
-  apm_ = apm_builder.Create();
+  apm_ = BuiltinAudioProcessingBuilder().Build(CreateTestEnvironment());
 }
 
 DebugDumpGenerator::DebugDumpGenerator(
@@ -264,7 +273,7 @@ class DebugDumpTest : public ::testing::Test {
 void DebugDumpTest::VerifyDebugDump(absl::string_view in_filename) {
   ASSERT_TRUE(debug_dump_replayer_.SetDumpFile(in_filename));
 
-  while (const absl::optional<audioproc::Event> event =
+  while (const std::optional<audioproc::Event> event =
              debug_dump_replayer_.GetNextEvent()) {
     debug_dump_replayer_.RunNextEvent();
     if (event->type() == audioproc::Event::STREAM) {
@@ -274,9 +283,9 @@ void DebugDumpTest::VerifyDebugDump(absl::string_view in_filename) {
       // Check that output of APM is bit-exact to the output in the dump.
       ASSERT_EQ(output_config.num_channels(),
                 static_cast<size_t>(msg->output_channel_size()));
-      ASSERT_EQ(output_config.num_frames() * sizeof(float),
-                msg->output_channel(0).size());
       for (int i = 0; i < msg->output_channel_size(); ++i) {
+        ASSERT_EQ(output_config.num_frames() * sizeof(float),
+                  msg->output_channel(i).size());
         ASSERT_EQ(0,
                   memcmp(output->channels()[i], msg->output_channel(i).data(),
                          msg->output_channel(i).size()));
@@ -293,7 +302,12 @@ TEST_F(DebugDumpTest, SimpleCase) {
   VerifyDebugDump(generator.dump_file_name());
 }
 
+// TODO(bugs.webrtc.org/345674542): Fix/enable.
+#if defined(__has_feature) && __has_feature(undefined_behavior_sanitizer)
+TEST_F(DebugDumpTest, DISABLED_ChangeInputFormat) {
+#else
 TEST_F(DebugDumpTest, ChangeInputFormat) {
+#endif
   DebugDumpGenerator generator(/*apm_config=*/{});
 
   generator.StartRecording();
@@ -310,7 +324,12 @@ TEST_F(DebugDumpTest, ChangeInputFormat) {
   VerifyDebugDump(generator.dump_file_name());
 }
 
+// TODO(bugs.webrtc.org/345674542): Fix/enable.
+#if defined(__has_feature) && __has_feature(undefined_behavior_sanitizer)
+TEST_F(DebugDumpTest, DISABLED_ChangeReverseFormat) {
+#else
 TEST_F(DebugDumpTest, ChangeReverseFormat) {
+#endif
   DebugDumpGenerator generator(/*apm_config=*/{});
   generator.StartRecording();
   generator.Process(100);
@@ -361,7 +380,7 @@ TEST_F(DebugDumpTest, VerifyCombinedExperimentalStringInclusive) {
 
   ASSERT_TRUE(debug_dump_replayer_.SetDumpFile(generator.dump_file_name()));
 
-  while (const absl::optional<audioproc::Event> event =
+  while (const std::optional<audioproc::Event> event =
              debug_dump_replayer_.GetNextEvent()) {
     debug_dump_replayer_.RunNextEvent();
     if (event->type() == audioproc::Event::CONFIG) {
@@ -385,7 +404,7 @@ TEST_F(DebugDumpTest, VerifyCombinedExperimentalStringExclusive) {
 
   ASSERT_TRUE(debug_dump_replayer_.SetDumpFile(generator.dump_file_name()));
 
-  while (const absl::optional<audioproc::Event> event =
+  while (const std::optional<audioproc::Event> event =
              debug_dump_replayer_.GetNextEvent()) {
     debug_dump_replayer_.RunNextEvent();
     if (event->type() == audioproc::Event::CONFIG) {
@@ -410,7 +429,7 @@ TEST_F(DebugDumpTest, VerifyAec3ExperimentalString) {
 
   ASSERT_TRUE(debug_dump_replayer_.SetDumpFile(generator.dump_file_name()));
 
-  while (const absl::optional<audioproc::Event> event =
+  while (const std::optional<audioproc::Event> event =
              debug_dump_replayer_.GetNextEvent()) {
     debug_dump_replayer_.RunNextEvent();
     if (event->type() == audioproc::Event::CONFIG) {
@@ -432,7 +451,7 @@ TEST_F(DebugDumpTest, VerifyEmptyExperimentalString) {
 
   ASSERT_TRUE(debug_dump_replayer_.SetDumpFile(generator.dump_file_name()));
 
-  while (const absl::optional<audioproc::Event> event =
+  while (const std::optional<audioproc::Event> event =
              debug_dump_replayer_.GetNextEvent()) {
     debug_dump_replayer_.RunNextEvent();
     if (event->type() == audioproc::Event::CONFIG) {

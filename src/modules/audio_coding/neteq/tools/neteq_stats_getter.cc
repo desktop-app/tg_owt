@@ -11,9 +11,15 @@
 #include "modules/audio_coding/neteq/tools/neteq_stats_getter.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <memory>
 #include <numeric>
+#include <string>
 #include <utility>
 
+#include "api/audio/audio_frame.h"
+#include "api/neteq/neteq.h"
+#include "modules/audio_coding/neteq/tools/neteq_delay_analyzer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/time_utils.h"
@@ -22,12 +28,11 @@ namespace webrtc {
 namespace test {
 
 std::string NetEqStatsGetter::ConcealmentEvent::ToString() const {
-  char ss_buf[256];
-  rtc::SimpleStringBuilder ss(ss_buf);
+  StringBuilder ss;
   ss << "ConcealmentEvent duration_ms:" << duration_ms
      << " event_number:" << concealment_event_number
      << " time_from_previous_event_end_ms:" << time_from_previous_event_end_ms;
-  return ss.str();
+  return ss.Release();
 }
 
 NetEqStatsGetter::NetEqStatsGetter(
@@ -48,7 +53,7 @@ void NetEqStatsGetter::AfterGetAudio(int64_t time_now_ms,
   // get audio. It is called independently from get audio in practice.
   const auto lifetime_stat = neteq->GetLifetimeStatistics();
   if (last_stats_query_time_ms_ == 0 ||
-      rtc::TimeDiff(time_now_ms, last_stats_query_time_ms_) >=
+      TimeDiff(time_now_ms, last_stats_query_time_ms_) >=
           stats_query_interval_ms_) {
     NetEqNetworkStatistics stats;
     RTC_CHECK_EQ(neteq->NetworkStatistics(&stats), 0);

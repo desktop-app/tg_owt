@@ -11,15 +11,32 @@
 #include "modules/video_coding/rtp_vp9_ref_finder.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <utility>
 
+#include "api/video/encoded_frame.h"
+#include "api/video/video_codec_constants.h"
+#include "modules/rtp_rtcp/source/frame_object.h"
+#include "modules/video_coding/codecs/interface/common_constants.h"
+#include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
+#include "modules/video_coding/rtp_frame_reference_finder.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/numerics/mod_ops.h"
+#include "rtc_base/numerics/sequence_number_util.h"
 
 namespace webrtc {
 RtpFrameReferenceFinder::ReturnVector RtpVp9RefFinder::ManageFrame(
     std::unique_ptr<RtpFrameObject> frame) {
-  const RTPVideoHeaderVP9& codec_header = absl::get<RTPVideoHeaderVP9>(
-      frame->GetRtpVideoHeader().video_type_header);
+  const RTPVideoHeaderVP9& codec_header =
+      std::get<RTPVideoHeaderVP9>(frame->GetRtpVideoHeader().video_type_header);
+
+  if (codec_header.temporal_idx >= kMaxTemporalStreams ||
+      codec_header.spatial_idx >= kMaxSpatialLayers) {
+    return {};
+  }
 
   if (codec_header.temporal_idx != kNoTemporalIdx)
     frame->SetTemporalIndex(codec_header.temporal_idx);
@@ -27,10 +44,7 @@ RtpFrameReferenceFinder::ReturnVector RtpVp9RefFinder::ManageFrame(
   frame->SetId(codec_header.picture_id & (kFrameIdLength - 1));
 
   FrameDecision decision;
-  if (codec_header.temporal_idx >= kMaxTemporalLayers ||
-      codec_header.spatial_idx >= kMaxSpatialLayers) {
-    decision = kDrop;
-  } else if (codec_header.flexible_mode) {
+  if (codec_header.flexible_mode) {
     decision = ManageFrameFlexible(frame.get(), codec_header);
   } else {
     if (codec_header.tl0_pic_idx == kNoTl0PicIdx) {
@@ -71,7 +85,7 @@ RtpFrameReferenceFinder::ReturnVector RtpVp9RefFinder::ManageFrame(
 RtpVp9RefFinder::FrameDecision RtpVp9RefFinder::ManageFrameFlexible(
     RtpFrameObject* frame,
     const RTPVideoHeaderVP9& codec_header) {
-  if (codec_header.num_ref_pics > EncodedFrame::kMaxFrameReferences) {
+  if (codec_header.num_ref_pics > kMaxVp9RefPics) {
     return kDrop;
   }
 
@@ -126,30 +140,26 @@ RtpVp9RefFinder::FrameDecision RtpVp9RefFinder::ManageFrameGof(
 
     info = &gof_info_it->second;
 
-    if (frame->frame_type() == VideoFrameType::kVideoFrameKey) {
+    if (frame->IsKey()) {
       frame->num_references = 0;
       FrameReceivedVp9(frame->Id(), info);
       FlattenFrameIdAndRefs(frame, codec_header.inter_layer_predicted);
       return kHandOff;
     }
-  } else if (frame->frame_type() == VideoFrameType::kVideoFrameKey) {
-    if (frame->SpatialIndex() == 0) {
+  } else {
+    if (frame->IsKey()) {
       RTC_LOG(LS_WARNING) << "Received keyframe without scalability structure";
       return kDrop;
     }
-    const auto gof_info_it = gof_info_.find(unwrapped_tl0);
-    if (gof_info_it == gof_info_.end())
-      return kStash;
 
-    info = &gof_info_it->second;
-
-    frame->num_references = 0;
-    FrameReceivedVp9(frame->Id(), info);
-    FlattenFrameIdAndRefs(frame, codec_header.inter_layer_predicted);
-    return kHandOff;
-  } else {
-    auto gof_info_it = gof_info_.find(
-        (codec_header.temporal_idx == 0) ? unwrapped_tl0 - 1 : unwrapped_tl0);
+    // tl0_idx is incremented on temporal_idx=0 frames of the lowest spatial
+    // layer (which spatial_idx is not necessarily zero). Upper spatial layer
+    // frames with inter-layer prediction use GOF info of their base spatial
+    // layer frames.
+    const bool use_prev_gof =
+        codec_header.temporal_idx == 0 && !codec_header.inter_layer_predicted;
+    auto gof_info_it =
+        gof_info_.find(use_prev_gof ? unwrapped_tl0 - 1 : unwrapped_tl0);
 
     // Gof info for this frame is not available yet, stash this frame.
     if (gof_info_it == gof_info_.end())
@@ -185,29 +195,31 @@ RtpVp9RefFinder::FrameDecision RtpVp9RefFinder::ManageFrameGof(
   auto up_switch_erase_to = up_switch_.lower_bound(old_picture_id);
   up_switch_.erase(up_switch_.begin(), up_switch_erase_to);
 
-  size_t diff =
-      ForwardDiff<uint16_t, kFrameIdLength>(info->gof->pid_start, frame->Id());
-  size_t gof_idx = diff % info->gof->num_frames_in_gof;
+  if (codec_header.inter_pic_predicted) {
+    size_t diff = ForwardDiff<uint16_t, kFrameIdLength>(info->gof->pid_start,
+                                                        frame->Id());
+    size_t gof_idx = diff % info->gof->num_frames_in_gof;
 
-  if (info->gof->num_ref_pics[gof_idx] > EncodedFrame::kMaxFrameReferences) {
-    return kDrop;
-  }
-  // Populate references according to the scalability structure.
-  frame->num_references = info->gof->num_ref_pics[gof_idx];
-  for (size_t i = 0; i < frame->num_references; ++i) {
-    frame->references[i] =
-        Subtract<kFrameIdLength>(frame->Id(), info->gof->pid_diff[gof_idx][i]);
-
-    // If this is a reference to a frame earlier than the last up switch point,
-    // then ignore this reference.
-    if (UpSwitchInIntervalVp9(frame->Id(), codec_header.temporal_idx,
-                              frame->references[i])) {
-      --frame->num_references;
+    if (info->gof->num_ref_pics[gof_idx] > kMaxVp9RefPics) {
+      return kDrop;
     }
-  }
 
-  // Override GOF references.
-  if (!codec_header.inter_pic_predicted) {
+    // Populate references according to the scalability structure.
+    size_t num_references = 0;
+    for (size_t i = 0; i < info->gof->num_ref_pics[gof_idx]; ++i) {
+      int64_t reference = Subtract<kFrameIdLength>(
+          frame->Id(), info->gof->pid_diff[gof_idx][i]);
+
+      // If this is a reference to a frame earlier than the last up switch
+      // point, then ignore this reference.
+      if (UpSwitchInIntervalVp9(frame->Id(), codec_header.temporal_idx,
+                                reference)) {
+        continue;
+      }
+      frame->references[num_references++] = reference;
+    }
+    frame->num_references = num_references;
+  } else {
     frame->num_references = 0;
   }
 
@@ -222,8 +234,8 @@ bool RtpVp9RefFinder::MissingRequiredFrameVp9(uint16_t picture_id,
   size_t gof_idx = diff % info.gof->num_frames_in_gof;
   size_t temporal_idx = info.gof->temporal_idx[gof_idx];
 
-  if (temporal_idx >= kMaxTemporalLayers) {
-    RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalLayers
+  if (temporal_idx >= kMaxTemporalStreams) {
+    RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalStreams
                         << " temporal "
                            "layers are supported.";
     return true;
@@ -265,8 +277,8 @@ void RtpVp9RefFinder::FrameReceivedVp9(uint16_t picture_id, GofInfo* info) {
       RTC_CHECK(gof_idx < kMaxVp9FramesInGof);
 
       size_t temporal_idx = info->gof->temporal_idx[gof_idx];
-      if (temporal_idx >= kMaxTemporalLayers) {
-        RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalLayers
+      if (temporal_idx >= kMaxTemporalStreams) {
+        RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalStreams
                             << " temporal "
                                "layers are supported.";
         return;
@@ -284,8 +296,8 @@ void RtpVp9RefFinder::FrameReceivedVp9(uint16_t picture_id, GofInfo* info) {
     RTC_CHECK(gof_idx < kMaxVp9FramesInGof);
 
     size_t temporal_idx = info->gof->temporal_idx[gof_idx];
-    if (temporal_idx >= kMaxTemporalLayers) {
-      RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalLayers
+    if (temporal_idx >= kMaxTemporalStreams) {
+      RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalStreams
                           << " temporal "
                              "layers are supported.";
       return;
@@ -315,7 +327,7 @@ void RtpVp9RefFinder::RetryStashedFrames(
   do {
     complete_frame = false;
     for (auto it = stashed_frames_.begin(); it != stashed_frames_.end();) {
-      const RTPVideoHeaderVP9& codec_header = absl::get<RTPVideoHeaderVP9>(
+      const RTPVideoHeaderVP9& codec_header = std::get<RTPVideoHeaderVP9>(
           it->frame->GetRtpVideoHeader().video_type_header);
       RTC_DCHECK(!codec_header.flexible_mode);
       FrameDecision decision =

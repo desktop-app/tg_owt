@@ -12,34 +12,16 @@ if (rtc_enable_protobuf) {
 }
 
 group("metrics") {
+  testonly = true
   deps = [
     ":global_metrics_logger_and_exporter",
     ":metric",
     ":metrics_accumulator",
     ":metrics_exporter",
     ":metrics_logger",
-    ":stdout_metrics_exporter",
   ]
-}
-
-if (rtc_include_tests) {
-  group("metrics_unittests") {
-    testonly = true
-
-    deps = [
-      ":global_metrics_logger_and_exporter_test",
-      ":metrics_accumulator_test",
-      ":metrics_logger_test",
-      ":print_result_proxy_metrics_exporter_test",
-      ":stdout_metrics_exporter_test",
-    ]
-
-    if (rtc_enable_protobuf) {
-      deps += [
-        ":chrome_perf_dashboard_metrics_exporter_test",
-        ":metrics_set_proto_file_exporter_test",
-      ]
-    }
+  if (!build_with_chromium) {
+    deps += [ ":stdout_metrics_exporter" ]
   }
 }
 
@@ -49,8 +31,10 @@ rtc_library("metric") {
     "metric.cc",
     "metric.h",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
-  deps = [ "../../../api/units:timestamp" ]
+  deps = [
+    "../../units:timestamp",
+    "//third_party/abseil-cpp/absl/strings:string_view",
+  ]
 }
 
 rtc_library("metrics_logger") {
@@ -62,12 +46,13 @@ rtc_library("metrics_logger") {
   deps = [
     ":metric",
     ":metrics_accumulator",
-    "../..:array_view",
+    "../../../rtc_base:macromagic",
     "../../../rtc_base/synchronization:mutex",
     "../../../system_wrappers",
     "../../numerics",
+    "../../units:timestamp",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 }
 
 rtc_library("metrics_accumulator") {
@@ -82,32 +67,36 @@ rtc_library("metrics_accumulator") {
     "../../../rtc_base/synchronization:mutex",
     "../../numerics",
     "../../units:timestamp",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 }
 
 rtc_library("metrics_exporter") {
   visibility = [ "*" ]
   sources = [ "metrics_exporter.h" ]
-  deps = [
-    ":metric",
-    "../..:array_view",
-  ]
+  deps = [ ":metric" ]
 }
 
-rtc_library("stdout_metrics_exporter") {
-  visibility = [ "*" ]
-  sources = [
-    "stdout_metrics_exporter.cc",
-    "stdout_metrics_exporter.h",
-  ]
-  deps = [
-    ":metric",
-    ":metrics_exporter",
-    "../..:array_view",
-    "../../../rtc_base:stringutils",
-  ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+if (!build_with_chromium) {
+  # Hidden from the Chromium build because it depends on absl flags which
+  # cannot be compiled in Chromium.
+  rtc_library("stdout_metrics_exporter") {
+    visibility = [ "*" ]
+    testonly = true
+    sources = [
+      "stdout_metrics_exporter.cc",
+      "stdout_metrics_exporter.h",
+    ]
+    deps = [
+      ":metric",
+      ":metrics_exporter",
+      "../../../rtc_base:safe_conversions",
+      "../../../rtc_base:stringutils",
+      "../../../test:test_flags",
+      "//third_party/abseil-cpp/absl/flags:flag",
+      "//third_party/abseil-cpp/absl/strings",
+    ]
+  }
 }
 
 rtc_library("chrome_perf_dashboard_metrics_exporter") {
@@ -120,13 +109,10 @@ rtc_library("chrome_perf_dashboard_metrics_exporter") {
   deps = [
     ":metric",
     ":metrics_exporter",
-    "../../../api:array_view",
     "../../../test:fileutils",
     "../../../test:perf_test",
-  ]
-  absl_deps = [
     "//third_party/abseil-cpp/absl/memory",
-    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
 }
 
@@ -149,9 +135,9 @@ rtc_library("metrics_set_proto_file_exporter") {
   deps = [
     ":metric",
     ":metrics_exporter",
-    "../..:array_view",
     "../../../rtc_base:logging",
     "../../../test:fileutils",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
 
   if (rtc_enable_protobuf) {
@@ -169,8 +155,8 @@ rtc_library("print_result_proxy_metrics_exporter") {
   deps = [
     ":metric",
     ":metrics_exporter",
-    "../..:array_view",
     "../../../test:perf_test",
+    "../../numerics",
   ]
 }
 
@@ -181,16 +167,15 @@ rtc_library("global_metrics_logger_and_exporter") {
     "global_metrics_logger_and_exporter.h",
   ]
   deps = [
+    ":metric",
     ":metrics_exporter",
     ":metrics_logger",
-    "../../../rtc_base:checks",
     "../../../system_wrappers",
   ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("metrics_logger_test") {
-    testonly = true
+  rtc_cc_test("metrics_logger_test") {
     sources = [ "metrics_logger_test.cc" ]
     deps = [
       ":metric",
@@ -198,12 +183,11 @@ if (rtc_include_tests) {
       "../../../system_wrappers",
       "../../../test:test_support",
       "../../numerics",
+      "../../units:timestamp",
     ]
-    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
   }
 
-  rtc_library("metrics_accumulator_test") {
-    testonly = true
+  rtc_cc_test("metrics_accumulator_test") {
     sources = [ "metrics_accumulator_test.cc" ]
     deps = [
       ":metric",
@@ -211,22 +195,22 @@ if (rtc_include_tests) {
       "../../../test:test_support",
       "../../units:timestamp",
     ]
-    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
   }
 
-  rtc_library("stdout_metrics_exporter_test") {
-    testonly = true
+  rtc_cc_test("stdout_metrics_exporter_test") {
     sources = [ "stdout_metrics_exporter_test.cc" ]
     deps = [
       ":metric",
       ":stdout_metrics_exporter",
+      "../../../test:fileutils",
+      "../../../test:test_flags",
       "../../../test:test_support",
       "../../units:timestamp",
+      "//third_party/abseil-cpp/absl/flags:flag",
     ]
   }
 
-  rtc_library("print_result_proxy_metrics_exporter_test") {
-    testonly = true
+  rtc_cc_test("print_result_proxy_metrics_exporter_test") {
     sources = [ "print_result_proxy_metrics_exporter_test.cc" ]
     deps = [
       ":metric",
@@ -236,8 +220,7 @@ if (rtc_include_tests) {
     ]
   }
 
-  rtc_library("global_metrics_logger_and_exporter_test") {
-    testonly = true
+  rtc_cc_test("global_metrics_logger_and_exporter_test") {
     sources = [ "global_metrics_logger_and_exporter_test.cc" ]
     deps = [
       ":global_metrics_logger_and_exporter",
@@ -247,12 +230,10 @@ if (rtc_include_tests) {
       "../../../system_wrappers",
       "../../../test:test_support",
     ]
-    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
   }
 
   if (rtc_enable_protobuf) {
-    rtc_library("metrics_set_proto_file_exporter_test") {
-      testonly = true
+    rtc_cc_test("metrics_set_proto_file_exporter_test") {
       sources = [ "metrics_set_proto_file_exporter_test.cc" ]
       deps = [
         ":metric",
@@ -265,15 +246,14 @@ if (rtc_include_tests) {
       ]
     }
 
-    rtc_library("chrome_perf_dashboard_metrics_exporter_test") {
-      testonly = true
+    rtc_cc_test("chrome_perf_dashboard_metrics_exporter_test") {
       sources = [ "chrome_perf_dashboard_metrics_exporter_test.cc" ]
       deps = [
         ":chrome_perf_dashboard_metrics_exporter",
         ":metric",
-        "../../../api/units:timestamp",
         "../../../test:fileutils",
         "../../../test:test_support",
+        "../../units:timestamp",
         "//third_party/catapult/tracing/tracing:histogram",
       ]
     }

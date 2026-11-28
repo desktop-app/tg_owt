@@ -36,8 +36,7 @@ class SampleStats<double> : public SamplesStatsCounter {
 template <>
 class SampleStats<TimeDelta> {
  public:
-  void AddSample(TimeDelta delta);
-  void AddSampleMs(double delta_ms);
+  void AddSample(TimeDelta delta, Timestamp time);
   void AddSamples(const SampleStats<TimeDelta>& other);
   bool IsEmpty();
   TimeDelta Max();
@@ -56,8 +55,7 @@ class SampleStats<TimeDelta> {
 template <>
 class SampleStats<DataRate> {
  public:
-  void AddSample(DataRate rate);
-  void AddSampleBps(double rate_bps);
+  void AddSample(DataRate rate, Timestamp time);
   void AddSamples(const SampleStats<DataRate>& other);
   bool IsEmpty();
   DataRate Max();

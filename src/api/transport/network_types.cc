@@ -11,6 +11,12 @@
 #include "api/transport/network_types.h"
 
 #include <algorithm>
+#include <vector>
+
+#include "api/transport/ecn_marking.h"
+#include "api/units/data_rate.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 
 namespace webrtc {
 StreamsConfig::StreamsConfig() = default;
@@ -101,6 +107,55 @@ bool PacedPacketInfo::operator==(const PacedPacketInfo& rhs) const {
          probe_cluster_id == rhs.probe_cluster_id &&
          probe_cluster_min_probes == rhs.probe_cluster_min_probes &&
          probe_cluster_min_bytes == rhs.probe_cluster_min_bytes;
+}
+
+PacerConfig PacerConfig::Create(Timestamp at_time,
+                                DataRate send_rate,
+                                DataRate pad_rate,
+                                TimeDelta time_window) {
+  PacerConfig pacer_config;
+  pacer_config.at_time = at_time;
+  pacer_config.time_window = time_window;
+  // Note that precision is lost here, since DataSize store number of bytes.
+  pacer_config.data_window = send_rate * pacer_config.rate_window();
+  pacer_config.pad_window = pad_rate * pacer_config.rate_window();
+  return pacer_config;
+}
+
+bool TransportPacketsFeedback::HasPacketWithEcnCe() const {
+  for (const PacketResult& fb : packet_feedbacks) {
+    if (fb.ecn == EcnMarking::kCe) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool TransportPacketsFeedback::HasPacketWithBleachedEct1() const {
+  for (const PacketResult& fb : packet_feedbacks) {
+    // Only received packets say anything about what the path did to the
+    // marking. Packets reported lost carry a defaulted Not-ECT marking and
+    // would otherwise be indistinguishable from bleached ones. ECT(0) counts
+    // as bleached since the path took the packet out of L4S.
+    if (fb.sent_with_ect1 && fb.IsReceived() && fb.ecn != EcnMarking::kEct1 &&
+        fb.ecn != EcnMarking::kCe) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool TransportPacketsFeedback::HasPacketWithEcn() const {
+  for (const PacketResult& fb : packet_feedbacks) {
+    // Only packets that were sent as ECT(1) say anything about what the path
+    // did to the marking. Some networks set the ECN bits on packets that were
+    // sent Not-ECT.
+    if (fb.sent_with_ect1 && fb.IsReceived() &&
+        (fb.ecn == EcnMarking::kEct1 || fb.ecn == EcnMarking::kCe)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace webrtc

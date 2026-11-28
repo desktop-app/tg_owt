@@ -11,7 +11,10 @@
 #ifndef MODULES_RTP_RTCP_SOURCE_ABSOLUTE_CAPTURE_TIME_SENDER_H_
 #define MODULES_RTP_RTCP_SOURCE_ABSOLUTE_CAPTURE_TIME_SENDER_H_
 
-#include "api/array_view.h"
+#include <cstdint>
+#include <optional>
+#include <span>
+
 #include "api/rtp_headers.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
@@ -45,11 +48,10 @@ class AbsoluteCaptureTimeSender {
   explicit AbsoluteCaptureTimeSender(Clock* clock);
 
   // Returns the source (i.e. SSRC or CSRC) of the capture system.
-  static uint32_t GetSource(uint32_t ssrc,
-                            rtc::ArrayView<const uint32_t> csrcs);
+  static uint32_t GetSource(uint32_t ssrc, std::span<const uint32_t> csrcs);
 
   // Returns value to write into AbsoluteCaptureTime RTP header extension to be
-  // sent, or `absl::nullopt` if the header extension shouldn't be attached to
+  // sent, or `std::nullopt` if the header extension shouldn't be attached to
   // the outgoing packet.
   //
   // - `source` - id of the capture system.
@@ -65,22 +67,14 @@ class AbsoluteCaptureTimeSender {
   // i.e. delta of 2^32 represents 1 second. See AbsoluteCaptureTime type
   // comments for more details.
   // - `force` - when set to true, OnSendPacket is forced to return non-nullopt.
-  absl::optional<AbsoluteCaptureTime> OnSendPacket(
+  std::optional<AbsoluteCaptureTime> OnSendPacket(
       uint32_t source,
       uint32_t rtp_timestamp,
       int rtp_clock_frequency_hz,
       NtpTime absolute_capture_time,
-      absl::optional<int64_t> estimated_capture_clock_offset,
+      std::optional<int64_t> estimated_capture_clock_offset,
       bool force = false);
 
-  // Returns a header extension to be sent, or `absl::nullopt` if the header
-  // extension shouldn't be sent.
-  [[deprecated]] absl::optional<AbsoluteCaptureTime> OnSendPacket(
-      uint32_t source,
-      uint32_t rtp_timestamp,
-      uint32_t rtp_clock_frequency,
-      uint64_t absolute_capture_timestamp,
-      absl::optional<int64_t> estimated_capture_clock_offset);
 
  private:
   bool ShouldSendExtension(
@@ -89,7 +83,7 @@ class AbsoluteCaptureTimeSender {
       uint32_t rtp_timestamp,
       int rtp_clock_frequency_hz,
       NtpTime absolute_capture_time,
-      absl::optional<int64_t> estimated_capture_clock_offset) const;
+      std::optional<int64_t> estimated_capture_clock_offset) const;
 
   Clock* const clock_;
 
@@ -99,7 +93,7 @@ class AbsoluteCaptureTimeSender {
   uint32_t last_rtp_timestamp_;
   int last_rtp_clock_frequency_hz_;
   NtpTime last_absolute_capture_time_;
-  absl::optional<int64_t> last_estimated_capture_clock_offset_;
+  std::optional<int64_t> last_estimated_capture_clock_offset_;
 };
 
 }  // namespace webrtc

@@ -9,10 +9,7 @@
 import("../../../webrtc.gni")
 
 rtc_source_set("internal_types") {
-  deps = [
-    "../../../rtc_base:strong_alias",
-    "../public:types",
-  ]
+  deps = [ "../../../rtc_base:strong_alias" ]
   sources = [ "internal_types.h" ]
 }
 
@@ -30,22 +27,21 @@ rtc_source_set("sequence_numbers") {
 }
 
 if (rtc_include_tests) {
-  rtc_library("dcsctp_common_unittests") {
-    testonly = true
-
-    defines = []
+  rtc_cc_test("math_test") {
     deps = [
       ":math",
-      ":sequence_numbers",
-      "../../../api:array_view",
-      "../../../rtc_base:checks",
-      "../../../rtc_base:gunit_helpers",
       "../../../test:test_support",
     ]
-    sources = [
-      "math_test.cc",
-      "sequence_numbers_test.cc",
+    sources = [ "math_test.cc" ]
+  }
+
+  rtc_cc_test("sequence_numbers_test") {
+    deps = [
+      ":sequence_numbers",
+      "../../../rtc_base:strong_alias",
+      "../../../test:test_support",
     ]
+    sources = [ "sequence_numbers_test.cc" ]
   }
 }
 

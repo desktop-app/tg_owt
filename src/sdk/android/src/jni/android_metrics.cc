@@ -8,13 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <jni.h>
+
 #include <map>
 #include <memory>
+#include <string>
 
 #include "rtc_base/string_utils.h"
 #include "sdk/android/generated_metrics_jni/Metrics_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "system_wrappers/include/metrics.h"
 
 // Enables collection of native histograms and creating them.
@@ -29,8 +32,7 @@ static void JNI_Metrics_Enable(JNIEnv* jni) {
 static ScopedJavaLocalRef<jobject> JNI_Metrics_GetAndReset(JNIEnv* jni) {
   ScopedJavaLocalRef<jobject> j_metrics = Java_Metrics_Constructor(jni);
 
-  std::map<std::string, std::unique_ptr<metrics::SampleInfo>,
-           rtc::AbslStringViewCmp>
+  std::map<std::string, std::unique_ptr<metrics::SampleInfo>, AbslStringViewCmp>
       histograms;
   metrics::GetAndReset(&histograms);
   for (const auto& kv : histograms) {
@@ -51,3 +53,5 @@ static ScopedJavaLocalRef<jobject> JNI_Metrics_GetAndReset(JNIEnv* jni) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(Metrics)

@@ -11,13 +11,17 @@
 #ifndef API_TEST_MOCK_AUDIO_SINK_H_
 #define API_TEST_MOCK_AUDIO_SINK_H_
 
-#include "absl/types/optional.h"
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+
 #include "api/media_stream_interface.h"
+#include "api/rtp_packet_infos.h"
 #include "test/gmock.h"
 
 namespace webrtc {
 
-class MockAudioSink : public webrtc::AudioTrackSinkInterface {
+class MockAudioSink : public AudioTrackSinkInterface {
  public:
   MOCK_METHOD(void,
               OnData,
@@ -35,7 +39,18 @@ class MockAudioSink : public webrtc::AudioTrackSinkInterface {
                int sample_rate,
                size_t number_of_channels,
                size_t number_of_frames,
-               absl::optional<int64_t> absolute_capture_timestamp_ms),
+               std::optional<int64_t> absolute_capture_timestamp_ms),
+              (override));
+
+  MOCK_METHOD(void,
+              OnData,
+              (const void* audio_data,
+               int bits_per_sample,
+               int sample_rate,
+               size_t number_of_channels,
+               size_t number_of_frames,
+               std::optional<int64_t> absolute_capture_timestamp_ms,
+               const RtpPacketInfos& packet_infos),
               (override));
 };
 

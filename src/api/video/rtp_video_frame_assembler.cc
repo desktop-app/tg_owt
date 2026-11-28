@@ -10,19 +10,28 @@
 
 #include "api/video/rtp_video_frame_assembler.h"
 
-#include <algorithm>
 #include <cstdint>
-#include <map>
 #include <memory>
+#include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/types/optional.h"
+#include "api/rtp_packet_infos.h"
+#include "api/scoped_refptr.h"
+#include "api/transport/rtp/dependency_descriptor.h"
+#include "api/units/timestamp.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_frame_type.h"
+#include "api/video/video_timing.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
 #include "modules/rtp_rtcp/source/rtp_dependency_descriptor_extension.h"
+#include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor.h"
 #include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor_extension.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
+#include "modules/rtp_rtcp/source/rtp_video_header.h"
+#include "modules/rtp_rtcp/source/video_rtp_depacketizer.h"
 #include "modules/rtp_rtcp/source/video_rtp_depacketizer_av1.h"
 #include "modules/rtp_rtcp/source/video_rtp_depacketizer_generic.h"
 #include "modules/rtp_rtcp/source/video_rtp_depacketizer_h264.h"
@@ -31,8 +40,13 @@
 #include "modules/rtp_rtcp/source/video_rtp_depacketizer_vp9.h"
 #include "modules/video_coding/packet_buffer.h"
 #include "modules/video_coding/rtp_frame_reference_finder.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/sequence_number_unwrapper.h"
+
+#ifdef RTC_ENABLE_H265
+#include "modules/rtp_rtcp/source/video_rtp_depacketizer_h265.h"
+#endif
 
 namespace webrtc {
 namespace {
@@ -52,9 +66,11 @@ std::unique_ptr<VideoRtpDepacketizer> CreateDepacketizer(
     case RtpVideoFrameAssembler::kGeneric:
       return std::make_unique<VideoRtpDepacketizerGeneric>();
     case RtpVideoFrameAssembler::kH265:
-      // TODO(bugs.webrtc.org/13485): Implement VideoRtpDepacketizerH265
-      RTC_DCHECK_NOTREACHED();
+#ifdef RTC_ENABLE_H265
+      return std::make_unique<VideoRtpDepacketizerH265>();
+#else
       return nullptr;
+#endif
   }
   RTC_DCHECK_NOTREACHED();
   return nullptr;
@@ -75,16 +91,17 @@ class RtpVideoFrameAssembler::Impl {
   RtpFrameVector AssembleFrames(
       video_coding::PacketBuffer::InsertResult insert_result);
   FrameVector FindReferences(RtpFrameVector frames);
-  FrameVector UpdateWithPadding(uint16_t seq_num);
+  FrameVector UpdateWithPadding(int64_t seq_num);
   bool ParseDependenciesDescriptorExtension(const RtpPacketReceived& rtp_packet,
                                             RTPVideoHeader& video_header);
   bool ParseGenericDescriptorExtension(const RtpPacketReceived& rtp_packet,
                                        RTPVideoHeader& video_header);
-  void ClearOldData(uint16_t incoming_seq_num);
+  void ClearOldData(int64_t incoming_seq_num);
 
   std::unique_ptr<FrameDependencyStructure> video_structure_;
+  SeqNumUnwrapper<uint16_t> rtp_sequence_number_unwrapper_;
   SeqNumUnwrapper<uint16_t> frame_id_unwrapper_;
-  absl::optional<int64_t> video_structure_frame_id_;
+  std::optional<int64_t> video_structure_frame_id_;
   std::unique_ptr<VideoRtpDepacketizer> depacketizer_;
   video_coding::PacketBuffer packet_buffer_;
   RtpFrameReferenceFinder reference_finder_;
@@ -97,15 +114,17 @@ RtpVideoFrameAssembler::Impl::Impl(
 
 RtpVideoFrameAssembler::FrameVector RtpVideoFrameAssembler::Impl::InsertPacket(
     const RtpPacketReceived& rtp_packet) {
+  int64_t unwrapped_sequence_number =
+      rtp_sequence_number_unwrapper_.Unwrap(rtp_packet.SequenceNumber());
   if (rtp_packet.payload_size() == 0) {
-    ClearOldData(rtp_packet.SequenceNumber());
-    return UpdateWithPadding(rtp_packet.SequenceNumber());
+    ClearOldData(unwrapped_sequence_number);
+    return UpdateWithPadding(unwrapped_sequence_number);
   }
 
-  absl::optional<VideoRtpDepacketizer::ParsedRtpPayload> parsed_payload =
+  std::optional<VideoRtpDepacketizer::ParsedRtpPayload> parsed_payload =
       depacketizer_->Parse(rtp_packet.PayloadBuffer());
 
-  if (parsed_payload == absl::nullopt) {
+  if (parsed_payload == std::nullopt) {
     return {};
   }
 
@@ -124,26 +143,28 @@ RtpVideoFrameAssembler::FrameVector RtpVideoFrameAssembler::Impl::InsertPacket(
   parsed_payload->video_header.is_last_packet_in_frame |= rtp_packet.Marker();
 
   auto packet = std::make_unique<video_coding::PacketBuffer::Packet>(
-      rtp_packet, parsed_payload->video_header);
+      rtp_packet,
+      rtp_sequence_number_unwrapper_.Unwrap(rtp_packet.SequenceNumber()),
+      parsed_payload->video_header);
   packet->video_payload = std::move(parsed_payload->video_payload);
 
-  ClearOldData(rtp_packet.SequenceNumber());
+  ClearOldData(unwrapped_sequence_number);
   return FindReferences(
       AssembleFrames(packet_buffer_.InsertPacket(std::move(packet))));
 }
 
-void RtpVideoFrameAssembler::Impl::ClearOldData(uint16_t incoming_seq_num) {
+void RtpVideoFrameAssembler::Impl::ClearOldData(int64_t incoming_seq_num) {
   constexpr uint16_t kOldSeqNumThreshold = 2000;
-  uint16_t old_seq_num = incoming_seq_num - kOldSeqNumThreshold;
+  int64_t old_seq_num = incoming_seq_num - kOldSeqNumThreshold;
   packet_buffer_.ClearTo(old_seq_num);
-  reference_finder_.ClearTo(old_seq_num);
+  reference_finder_.ClearTo(static_cast<uint16_t>(old_seq_num));
 }
 
 RtpVideoFrameAssembler::Impl::RtpFrameVector
 RtpVideoFrameAssembler::Impl::AssembleFrames(
     video_coding::PacketBuffer::InsertResult insert_result) {
   video_coding::PacketBuffer::Packet* first_packet = nullptr;
-  std::vector<rtc::ArrayView<const uint8_t>> payloads;
+  std::vector<std::span<const uint8_t>> payloads;
   RtpFrameVector result;
 
   for (auto& packet : insert_result.packets) {
@@ -154,31 +175,34 @@ RtpVideoFrameAssembler::Impl::AssembleFrames(
     payloads.emplace_back(packet->video_payload);
 
     if (packet->is_last_packet_in_frame()) {
-      rtc::scoped_refptr<EncodedImageBuffer> bitstream =
+      scoped_refptr<EncodedImageBuffer> bitstream =
           depacketizer_->AssembleFrame(payloads);
 
       if (!bitstream) {
         continue;
       }
 
+      // TODO: bugs.webrtc.org/42222730 - Propagate actual first/last packet
+      // received time from RtpPacketReceived::arrival_time.
       const video_coding::PacketBuffer::Packet& last_packet = *packet;
       result.push_back(std::make_unique<RtpFrameObject>(
-          first_packet->seq_num,                  //
-          last_packet.seq_num,                    //
-          last_packet.marker_bit,                 //
-          /*times_nacked=*/0,                     //
-          /*first_packet_received_time=*/0,       //
-          /*last_packet_received_time=*/0,        //
-          first_packet->timestamp,                //
-          /*ntp_time_ms=*/0,                      //
-          /*timing=*/VideoSendTiming(),           //
-          first_packet->payload_type,             //
-          first_packet->codec(),                  //
-          last_packet.video_header.rotation,      //
-          last_packet.video_header.content_type,  //
-          first_packet->video_header,             //
-          last_packet.video_header.color_space,   //
-          /*packet_infos=*/RtpPacketInfos(),      //
+          static_cast<uint16_t>(first_packet->seq_num()),       //
+          static_cast<uint16_t>(last_packet.seq_num()),         //
+          last_packet.marker_bit,                               //
+          /*times_nacked=*/0,                                   //
+          /*first_packet_received_time=*/Timestamp::Zero(),     //
+          /*last_packet_received_time=*/Timestamp::Zero(),      //
+          first_packet->timestamp,                              //
+          /*ntp_time_ms=*/0,                                    //
+          /*timing=*/VideoSendTiming(),                         //
+          first_packet->payload_type,                           //
+          first_packet->codec(),                                //
+          last_packet.video_header.rotation,                    //
+          last_packet.video_header.content_type,                //
+          first_packet->video_header,                           //
+          last_packet.video_header.color_space,                 //
+          last_packet.video_header.frame_instrumentation_data,  //
+          /*packet_infos=*/RtpPacketInfos(),                    //
           std::move(bitstream)));
     }
   }
@@ -202,10 +226,11 @@ RtpVideoFrameAssembler::Impl::FindReferences(RtpFrameVector frames) {
 }
 
 RtpVideoFrameAssembler::FrameVector
-RtpVideoFrameAssembler::Impl::UpdateWithPadding(uint16_t seq_num) {
+RtpVideoFrameAssembler::Impl::UpdateWithPadding(int64_t seq_num) {
   auto res =
       FindReferences(AssembleFrames(packet_buffer_.InsertPadding(seq_num)));
-  auto ref_finder_update = reference_finder_.PaddingReceived(seq_num);
+  auto ref_finder_update =
+      reference_finder_.PaddingReceived(static_cast<uint16_t>(seq_num));
 
   for (std::unique_ptr<RtpFrameObject>& complete_frame : ref_finder_update) {
     uint16_t rtp_seq_num_start = complete_frame->first_seq_num();
@@ -220,7 +245,7 @@ RtpVideoFrameAssembler::Impl::UpdateWithPadding(uint16_t seq_num) {
 bool RtpVideoFrameAssembler::Impl::ParseDependenciesDescriptorExtension(
     const RtpPacketReceived& rtp_packet,
     RTPVideoHeader& video_header) {
-  webrtc::DependencyDescriptor dependency_descriptor;
+  DependencyDescriptor dependency_descriptor;
 
   if (!rtp_packet.GetExtension<RtpDependencyDescriptorExtension>(
           video_structure_.get(), &dependency_descriptor)) {
@@ -276,7 +301,8 @@ bool RtpVideoFrameAssembler::Impl::ParseDependenciesDescriptorExtension(
   // the next key frame.
   if (dependency_descriptor.attached_structure) {
     RTC_DCHECK(dependency_descriptor.first_packet_in_frame);
-    if (video_structure_frame_id_ > frame_id) {
+    if (video_structure_frame_id_.has_value() &&
+        video_structure_frame_id_ > frame_id) {
       RTC_LOG(LS_WARNING)
           << "Arrived key frame with id " << frame_id << " and structure id "
           << dependency_descriptor.attached_structure->structure_id

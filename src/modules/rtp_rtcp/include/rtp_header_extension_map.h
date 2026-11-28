@@ -11,12 +11,11 @@
 #ifndef MODULES_RTP_RTCP_INCLUDE_RTP_HEADER_EXTENSION_MAP_H_
 #define MODULES_RTP_RTCP_INCLUDE_RTP_HEADER_EXTENSION_MAP_H_
 
-#include <stdint.h>
-
-#include <string>
+#include <array>
+#include <span>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "rtc_base/checks.h"
@@ -26,28 +25,30 @@ namespace webrtc {
 class RtpHeaderExtensionMap {
  public:
   static constexpr RTPExtensionType kInvalidType = kRtpExtensionNone;
-  static constexpr int kInvalidId = 0;
+  static constexpr RtpHeaderExtensionId kInvalidId =
+      RtpHeaderExtensionId::NotSet();
 
   RtpHeaderExtensionMap();
   explicit RtpHeaderExtensionMap(bool extmap_allow_mixed);
-  explicit RtpHeaderExtensionMap(rtc::ArrayView<const RtpExtension> extensions);
+  explicit RtpHeaderExtensionMap(std::span<const RtpExtension> extensions);
 
-  void Reset(rtc::ArrayView<const RtpExtension> extensions);
+  void Reset(std::span<const RtpExtension> extensions);
 
   template <typename Extension>
-  bool Register(int id) {
+  bool Register(RtpHeaderExtensionId id) {
     return Register(id, Extension::kId, Extension::Uri());
   }
-  bool RegisterByType(int id, RTPExtensionType type);
-  bool RegisterByUri(int id, absl::string_view uri);
+  bool RegisterByType(RtpHeaderExtensionId id, RTPExtensionType type);
+  bool RegisterByUri(RtpHeaderExtensionId id, absl::string_view uri);
 
   bool IsRegistered(RTPExtensionType type) const {
     return GetId(type) != kInvalidId;
   }
   // Return kInvalidType if not found.
-  RTPExtensionType GetType(int id) const;
+  RTPExtensionType GetType(RtpHeaderExtensionId id) const;
+
   // Return kInvalidId if not found.
-  uint8_t GetId(RTPExtensionType type) const {
+  RtpHeaderExtensionId GetId(RTPExtensionType type) const {
     RTC_DCHECK_GT(type, kRtpExtensionNone);
     RTC_DCHECK_LT(type, kRtpExtensionNumberOfExtensions);
     return ids_[type];
@@ -64,9 +65,11 @@ class RtpHeaderExtensionMap {
   }
 
  private:
-  bool Register(int id, RTPExtensionType type, absl::string_view uri);
+  bool Register(RtpHeaderExtensionId id,
+                RTPExtensionType type,
+                absl::string_view uri);
 
-  uint8_t ids_[kRtpExtensionNumberOfExtensions];
+  std::array<RtpHeaderExtensionId, kRtpExtensionNumberOfExtensions> ids_;
   bool extmap_allow_mixed_;
 };
 

@@ -13,11 +13,19 @@
 
 #include "modules/video_coding/codecs/vp9/vp9_frame_buffer_pool.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+#include "absl/algorithm/container.h"
+#include "api/scoped_refptr.h"
+#include "api/video/video_codec_constants.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "vpx/vpx_codec.h"
-#include "vpx/vpx_decoder.h"
-#include "vpx/vpx_frame_buffer.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_codec.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_frame_buffer.h"
 
 namespace webrtc {
 
@@ -30,7 +38,12 @@ size_t Vp9FrameBufferPool::Vp9FrameBuffer::GetDataSize() const {
 }
 
 void Vp9FrameBufferPool::Vp9FrameBuffer::SetSize(size_t size) {
+  const size_t old_size = data_.size();
   data_.SetSize(size);
+  // libvpx requires the frame buffer callback to zero the memory it hands out.
+  if (size > old_size) {
+    absl::c_fill(std::span(data_).subspan(old_size), 0);
+  }
 }
 
 bool Vp9FrameBufferPool::InitializeVpxUsePool(
@@ -52,10 +65,10 @@ bool Vp9FrameBufferPool::InitializeVpxUsePool(
   return true;
 }
 
-rtc::scoped_refptr<Vp9FrameBufferPool::Vp9FrameBuffer>
+scoped_refptr<Vp9FrameBufferPool::Vp9FrameBuffer>
 Vp9FrameBufferPool::GetFrameBuffer(size_t min_size) {
   RTC_DCHECK_GT(min_size, 0);
-  rtc::scoped_refptr<Vp9FrameBuffer> available_buffer = nullptr;
+  scoped_refptr<Vp9FrameBuffer> available_buffer = nullptr;
   {
     MutexLock lock(&buffers_lock_);
     // Do we have a buffer we can recycle?
@@ -140,16 +153,15 @@ int32_t Vp9FrameBufferPool::VpxGetFrameBuffer(void* user_priv,
   RTC_DCHECK(user_priv);
   RTC_DCHECK(fb);
 
-#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
-  // Limit size of 8k YUV highdef frame
-  size_t size_limit = 7680 * 4320 * 3 / 2 * 2;
+  // Limit size to the maximum supported YUV 4:4:4 12-bit frame buffer, which
+  // requires 2 bytes per sample.
+  size_t size_limit = static_cast<size_t>(kMaxFrameSizePixels) * 3 * 2;
   if (min_size > size_limit)
     return -1;
-#endif
 
   Vp9FrameBufferPool* pool = static_cast<Vp9FrameBufferPool*>(user_priv);
 
-  rtc::scoped_refptr<Vp9FrameBuffer> buffer = pool->GetFrameBuffer(min_size);
+  scoped_refptr<Vp9FrameBuffer> buffer = pool->GetFrameBuffer(min_size);
   fb->data = buffer->GetData();
   fb->size = buffer->GetDataSize();
   // Store Vp9FrameBuffer* in `priv` for use in VpxReleaseFrameBuffer.

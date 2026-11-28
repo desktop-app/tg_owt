@@ -11,6 +11,10 @@
 #include "modules/audio_processing/aec3/multi_channel_content_detector.h"
 
 #include <cmath>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <vector>
 
 #include "rtc_base/checks.h"
 #include "system_wrappers/include/metrics.h"
@@ -94,9 +98,9 @@ MultiChannelContentDetector::MultiChannelContentDetector(
       detection_threshold_(detection_threshold),
       detection_timeout_threshold_frames_(
           stereo_detection_timeout_threshold_seconds > 0
-              ? absl::make_optional(stereo_detection_timeout_threshold_seconds *
-                                    kNumFramesPerSecond)
-              : absl::nullopt),
+              ? std::make_optional(stereo_detection_timeout_threshold_seconds *
+                                   kNumFramesPerSecond)
+              : std::nullopt),
       stereo_detection_hysteresis_frames_(static_cast<int>(
           stereo_detection_hysteresis_seconds * kNumFramesPerSecond)),
       metrics_logger_((detect_stereo_content && num_render_input_channels > 1)

@@ -10,6 +10,11 @@
 
 #include "modules/audio_mixer/audio_frame_manipulator.h"
 
+#include <cstddef>
+#include <cstdint>
+
+#include "api/audio/audio_frame.h"
+#include "api/audio/channel_layout.h"
 #include "audio/utility/audio_frame_operations.h"
 #include "audio/utility/channel_mixer.h"
 #include "rtc_base/checks.h"
@@ -79,8 +84,9 @@ void RemixFrame(size_t target_number_of_channels, AudioFrame* frame) {
     // instead of guessing based on number of channels.
     const ChannelLayout output_layout(
         GuessChannelLayout(target_number_of_channels));
-    ChannelMixer mixer(GuessChannelLayout(frame->num_channels()),
-                       output_layout);
+    const ChannelLayout input_layout(GuessChannelLayout(frame->num_channels()));
+    ChannelMixer mixer(input_layout, frame->num_channels(), output_layout,
+                       target_number_of_channels);
     mixer.Transform(frame);
     RTC_DCHECK_EQ(frame->channel_layout(), output_layout);
   }

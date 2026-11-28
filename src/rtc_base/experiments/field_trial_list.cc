@@ -9,7 +9,13 @@
  */
 #include "rtc_base/experiments/field_trial_list.h"
 
+#include <memory>
+#include <optional>
+#include <string>
+
 #include "absl/strings/string_view.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/experiments/field_trial_parser.h"
 
 namespace webrtc {
 
@@ -35,7 +41,7 @@ bool FieldTrialListWrapper::Used() {
   return GetList()->Used();
 }
 
-bool FieldTrialStructListBase::Parse(absl::optional<std::string> str_value) {
+bool FieldTrialStructListBase::Parse(std::optional<std::string> str_value) {
   RTC_DCHECK_NOTREACHED();
   return true;
 }

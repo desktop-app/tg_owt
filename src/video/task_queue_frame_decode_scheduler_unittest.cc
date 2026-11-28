@@ -10,17 +10,16 @@
 
 #include "video/task_queue_frame_decode_scheduler.h"
 
-#include <stddef.h>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 
-#include <memory>
-#include <utility>
-
-#include "absl/types/optional.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/time_controller/simulated_time_controller.h"
+#include "video/frame_decode_timing.h"
 
 namespace webrtc {
 
@@ -93,7 +92,7 @@ TEST(TaskQueueFrameDecodeSchedulerTest, CancelOutstanding) {
   time_controller_.AdvanceTime(decode_delay / 2);
   EXPECT_THAT(scheduler.ScheduledRtpTimestamp(), Optional(rtp));
   scheduler.CancelOutstanding();
-  EXPECT_THAT(scheduler.ScheduledRtpTimestamp(), Eq(absl::nullopt));
+  EXPECT_THAT(scheduler.ScheduledRtpTimestamp(), Eq(std::nullopt));
   time_controller_.AdvanceTime(decode_delay / 2);
 
   scheduler.Stop();

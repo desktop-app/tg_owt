@@ -9,7 +9,11 @@
  */
 #include "rtc_base/experiments/struct_parameters_parser.h"
 
-#include "rtc_base/gunit.h"
+#include <memory>
+#include <optional>
+
+#include "api/units/time_delta.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 namespace {
@@ -19,8 +23,8 @@ struct DummyConfig {
   int retries = 5;
   unsigned size = 3;
   bool ping = 0;
-  absl::optional<TimeDelta> duration;
-  absl::optional<TimeDelta> latency = TimeDelta::Millis(100);
+  std::optional<TimeDelta> duration;
+  std::optional<TimeDelta> latency = TimeDelta::Millis(100);
   std::unique_ptr<StructParametersParser> Parser();
 };
 

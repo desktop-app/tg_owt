@@ -10,20 +10,32 @@
 
 #include "p2p/base/port_allocator.h"
 
+#include <cstdint>
 #include <iterator>
+#include <memory>
 #include <optional>
-#include <set>
 #include <utility>
+#include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
+#include "api/candidate.h"
+#include "api/transport/enums.h"
+#include "api/units/time_delta.h"
 #include "p2p/base/ice_credentials_iterator.h"
+#include "p2p/base/port.h"
+#include "p2p/base/port_interface.h"
+#include "p2p/base/transport_description.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/crypto_random.h"
+#include "rtc_base/net_helper.h"
+#include "rtc_base/socket_address.h"
 
-namespace cricket {
+namespace webrtc {
 
 RelayServerConfig::RelayServerConfig() {}
 
-RelayServerConfig::RelayServerConfig(const rtc::SocketAddress& address,
+RelayServerConfig::RelayServerConfig(const SocketAddress& address,
                                      absl::string_view username,
                                      absl::string_view password,
                                      ProtocolType proto)
@@ -36,7 +48,7 @@ RelayServerConfig::RelayServerConfig(absl::string_view address,
                                      absl::string_view username,
                                      absl::string_view password,
                                      ProtocolType proto)
-    : RelayServerConfig(rtc::SocketAddress(address, port),
+    : RelayServerConfig(SocketAddress(address, port),
                         username,
                         password,
                         proto) {}
@@ -100,7 +112,7 @@ PortAllocator::PortAllocator()
       step_delay_(kDefaultStepDelay),
       allow_tcp_listen_(true),
       candidate_filter_(CF_ALL),
-      tiebreaker_(rtc::CreateRandomId64()) {
+      tiebreaker_(CreateRandomId64()) {
   // The allocator will be attached to a thread in Initialize.
   thread_checker_.Detach();
 }
@@ -124,10 +136,10 @@ bool PortAllocator::SetConfiguration(
     const std::vector<RelayServerConfig>& turn_servers,
     int candidate_pool_size,
     bool prune_turn_ports,
-    webrtc::TurnCustomizer* turn_customizer,
-    const absl::optional<int>& stun_candidate_keepalive_interval) {
-  webrtc::PortPrunePolicy turn_port_prune_policy =
-      prune_turn_ports ? webrtc::PRUNE_BASED_ON_PRIORITY : webrtc::NO_PRUNE;
+    TurnCustomizer* turn_customizer,
+    const std::optional<int>& stun_candidate_keepalive_interval) {
+  PortPrunePolicy turn_port_prune_policy =
+      prune_turn_ports ? PRUNE_BASED_ON_PRIORITY : NO_PRUNE;
   return SetConfiguration(stun_servers, turn_servers, candidate_pool_size,
                           turn_port_prune_policy, turn_customizer,
                           stun_candidate_keepalive_interval);
@@ -137,9 +149,9 @@ bool PortAllocator::SetConfiguration(
     const ServerAddresses& stun_servers,
     const std::vector<RelayServerConfig>& turn_servers,
     int candidate_pool_size,
-    webrtc::PortPrunePolicy turn_port_prune_policy,
-    webrtc::TurnCustomizer* turn_customizer,
-    const absl::optional<int>& stun_candidate_keepalive_interval) {
+    PortPrunePolicy turn_port_prune_policy,
+    TurnCustomizer* turn_customizer,
+    const std::optional<int>& stun_candidate_keepalive_interval) {
   RTC_DCHECK_GE(candidate_pool_size, 0);
   RTC_DCHECK_LE(candidate_pool_size, static_cast<int>(UINT16_MAX));
   CheckRunOnValidThreadIfInitialized();
@@ -174,7 +186,10 @@ bool PortAllocator::SetConfiguration(
   // in future sessions. We also update the ready ports in the pooled sessions.
   // Ports in sessions that are taken and owned by P2PTransportChannel will be
   // updated there via IceConfig.
-  stun_candidate_keepalive_interval_ = stun_candidate_keepalive_interval;
+  stun_candidate_keepalive_interval_ =
+      stun_candidate_keepalive_interval.has_value()
+          ? std::optional(TimeDelta::Millis(*stun_candidate_keepalive_interval))
+          : std::nullopt;
   for (const auto& session : pooled_sessions_) {
     session->SetStunKeepaliveIntervalForReadyPorts(
         stun_candidate_keepalive_interval_);
@@ -232,6 +247,7 @@ std::unique_ptr<PortAllocatorSession> PortAllocator::TakePooledSession(
   auto it =
       pooled_sessions_.begin() + std::distance(pooled_sessions_.cbegin(), cit);
   std::unique_ptr<PortAllocatorSession> ret = std::move(*it);
+  RTC_DCHECK(ret->pooled());
   ret->SetIceParameters(content_name, component, ice_ufrag, ice_pwd);
   ret->set_pooled(false);
   // According to JSEP, a pooled session should filter candidates only
@@ -247,9 +263,8 @@ const PortAllocatorSession* PortAllocator::GetPooledSession(
   auto it = FindPooledSession(ice_credentials);
   if (it == pooled_sessions_.end()) {
     return nullptr;
-  } else {
-    return it->get();
   }
+  return it->get();
 }
 
 std::vector<std::unique_ptr<PortAllocatorSession>>::const_iterator
@@ -276,7 +291,7 @@ void PortAllocator::SetCandidateFilter(uint32_t filter) {
   }
   uint32_t prev_filter = candidate_filter_;
   candidate_filter_ = filter;
-  SignalCandidateFilterChanged(prev_filter, filter);
+  NotifyCandidateFilterChanged(prev_filter, filter);
 }
 
 void PortAllocator::GetCandidateStatsFromPooledSessions(
@@ -318,7 +333,14 @@ Candidate PortAllocator::SanitizeCandidate(const Candidate& c) const {
       ((c.is_stun() && filter_stun_related_address) ||
        (c.is_relay() && filter_turn_related_address) ||
        (c.is_prflx() && filter_prflx_related_address));
-  return c.ToSanitizedCopy(use_hostname_address, filter_related_address);
+  return c.ToSanitizedCopy(use_hostname_address, filter_related_address,
+                           /*filter_ufrag=*/false);
 }
 
-}  // namespace cricket
+void PortAllocatorSession::SubscribePortReady(
+    void* tag,
+    absl::AnyInvocable<void(PortAllocatorSession*, PortInterface*)> callback) {
+  port_ready_callbacks_.AddReceiver(tag, std::move(callback));
+}
+
+}  // namespace webrtc

@@ -12,17 +12,19 @@
 
 #include <algorithm>
 
+#include "api/field_trials.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_rate.h"
+#include "api/units/data_size.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
-#include "test/explicit_key_value_config.h"
+#include "test/create_test_field_trials.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 
 TEST(BitrateProberTest, VerifyStatesAndTimeBetweenProbes) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
   EXPECT_FALSE(prober.is_probing());
 
@@ -39,11 +41,13 @@ TEST(BitrateProberTest, VerifyStatesAndTimeBetweenProbes) {
   prober.CreateProbeCluster({.at_time = now,
                              .target_data_rate = kTestBitrate1,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   prober.CreateProbeCluster({.at_time = now,
                              .target_data_rate = kTestBitrate2,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 1});
   EXPECT_FALSE(prober.is_probing());
@@ -90,7 +94,7 @@ TEST(BitrateProberTest, VerifyStatesAndTimeBetweenProbes) {
 }
 
 TEST(BitrateProberTest, DoesntProbeWithoutRecentPackets) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
   const DataSize kProbeSize = DataSize::Bytes(1000);
 
@@ -100,6 +104,7 @@ TEST(BitrateProberTest, DoesntProbeWithoutRecentPackets) {
   prober.CreateProbeCluster({.at_time = now,
                              .target_data_rate = DataRate::KilobitsPerSec(900),
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   EXPECT_FALSE(prober.is_probing());
@@ -112,7 +117,7 @@ TEST(BitrateProberTest, DoesntProbeWithoutRecentPackets) {
 
 TEST(BitrateProberTest, DiscardsDelayedProbes) {
   const TimeDelta kMaxProbeDelay = TimeDelta::Millis(3);
-  const test::ExplicitKeyValueConfig trials(
+  const FieldTrials trials = CreateTestFieldTrials(
       "WebRTC-Bwe-ProbingBehavior/"
       "abort_delayed_probes:1,"
       "max_probe_delay:3ms/");
@@ -125,6 +130,7 @@ TEST(BitrateProberTest, DiscardsDelayedProbes) {
   prober.CreateProbeCluster({.at_time = now,
                              .target_data_rate = DataRate::KilobitsPerSec(900),
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
 
@@ -147,13 +153,14 @@ TEST(BitrateProberTest, DiscardsDelayedProbes) {
 }
 
 TEST(BitrateProberTest, LimitsNumberOfPendingProbeClusters) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
   const DataSize kProbeSize = DataSize::Bytes(1000);
   Timestamp now = Timestamp::Zero();
   prober.CreateProbeCluster({.at_time = now,
                              .target_data_rate = DataRate::KilobitsPerSec(900),
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   prober.OnIncomingPacket(kProbeSize);
@@ -165,6 +172,7 @@ TEST(BitrateProberTest, LimitsNumberOfPendingProbeClusters) {
         {.at_time = now,
          .target_data_rate = DataRate::KilobitsPerSec(900),
          .target_duration = TimeDelta::Millis(15),
+         .min_probe_delta = TimeDelta::Millis(2),
          .target_probe_count = 5,
          .id = i});
     prober.OnIncomingPacket(kProbeSize);
@@ -182,7 +190,7 @@ TEST(BitrateProberTest, LimitsNumberOfPendingProbeClusters) {
 }
 
 TEST(BitrateProberTest, DoesntInitializeProbingForSmallPackets) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
   prober.SetEnabled(true);
   ASSERT_FALSE(prober.is_probing());
@@ -190,6 +198,7 @@ TEST(BitrateProberTest, DoesntInitializeProbingForSmallPackets) {
   prober.CreateProbeCluster({.at_time = Timestamp::Zero(),
                              .target_data_rate = DataRate::KilobitsPerSec(1000),
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   prober.OnIncomingPacket(DataSize::Bytes(100));
@@ -198,7 +207,7 @@ TEST(BitrateProberTest, DoesntInitializeProbingForSmallPackets) {
 }
 
 TEST(BitrateProberTest, DoesInitializeProbingForSmallPacketsIfConfigured) {
-  const test::ExplicitKeyValueConfig config(
+  const FieldTrials config = CreateTestFieldTrials(
       "WebRTC-Bwe-ProbingBehavior/"
       "min_packet_size:0bytes/");
   BitrateProber prober(config);
@@ -208,6 +217,7 @@ TEST(BitrateProberTest, DoesInitializeProbingForSmallPacketsIfConfigured) {
   prober.CreateProbeCluster({.at_time = Timestamp::Zero(),
                              .target_data_rate = DataRate::KilobitsPerSec(1000),
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   prober.OnIncomingPacket(DataSize::Bytes(10));
@@ -216,7 +226,7 @@ TEST(BitrateProberTest, DoesInitializeProbingForSmallPacketsIfConfigured) {
 }
 
 TEST(BitrateProberTest, VerifyProbeSizeOnHighBitrate) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
 
   const DataRate kHighBitrate = DataRate::KilobitsPerSec(10000);  // 10 Mbps
@@ -224,6 +234,7 @@ TEST(BitrateProberTest, VerifyProbeSizeOnHighBitrate) {
   prober.CreateProbeCluster({.at_time = Timestamp::Zero(),
                              .target_data_rate = kHighBitrate,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   // Probe size should ensure a minimum of 1 ms interval.
@@ -231,10 +242,9 @@ TEST(BitrateProberTest, VerifyProbeSizeOnHighBitrate) {
             kHighBitrate * TimeDelta::Millis(1));
 }
 
-TEST(BitrateProberTest, ProbeSizeCanBeSetWithFieldTrial) {
-  const test::ExplicitKeyValueConfig trials(
-      "WebRTC-Bwe-ProbingBehavior/min_probe_delta:20ms/");
-  BitrateProber prober(trials);
+TEST(BitrateProberTest, ProbeSizeCanBeSetInProbeClusterConfig) {
+  const FieldTrials config = CreateTestFieldTrials();
+  BitrateProber prober(config);
   prober.SetEnabled(true);
 
   const DataRate kHighBitrate = DataRate::KilobitsPerSec(10000);  // 10 Mbps
@@ -242,6 +252,7 @@ TEST(BitrateProberTest, ProbeSizeCanBeSetWithFieldTrial) {
   prober.CreateProbeCluster({.at_time = Timestamp::Zero(),
                              .target_data_rate = kHighBitrate,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(20),
                              .target_probe_count = 5,
                              .id = 0});
   EXPECT_EQ(prober.RecommendedMinProbeSize(),
@@ -256,7 +267,7 @@ TEST(BitrateProberTest, ProbeSizeCanBeSetWithFieldTrial) {
 }
 
 TEST(BitrateProberTest, MinumumNumberOfProbingPackets) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
   // Even when probing at a low bitrate we expect a minimum number
   // of packets to be sent.
@@ -267,6 +278,7 @@ TEST(BitrateProberTest, MinumumNumberOfProbingPackets) {
   prober.CreateProbeCluster({.at_time = Timestamp::Zero(),
                              .target_data_rate = kBitrate,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
 
@@ -280,7 +292,7 @@ TEST(BitrateProberTest, MinumumNumberOfProbingPackets) {
 }
 
 TEST(BitrateProberTest, ScaleBytesUsedForProbing) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
   const DataRate kBitrate = DataRate::KilobitsPerSec(10000);  // 10 Mbps.
   const DataSize kPacketSize = DataSize::Bytes(1000);
@@ -290,6 +302,7 @@ TEST(BitrateProberTest, ScaleBytesUsedForProbing) {
   prober.CreateProbeCluster({.at_time = Timestamp::Zero(),
                              .target_data_rate = kBitrate,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   prober.OnIncomingPacket(kPacketSize);
@@ -304,7 +317,7 @@ TEST(BitrateProberTest, ScaleBytesUsedForProbing) {
 }
 
 TEST(BitrateProberTest, HighBitrateProbing) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
   const DataRate kBitrate = DataRate::KilobitsPerSec(1000000);  // 1 Gbps.
   const DataSize kPacketSize = DataSize::Bytes(1000);
@@ -314,6 +327,7 @@ TEST(BitrateProberTest, HighBitrateProbing) {
   prober.CreateProbeCluster({.at_time = Timestamp::Zero(),
                              .target_data_rate = kBitrate,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   prober.OnIncomingPacket(kPacketSize);
@@ -328,7 +342,7 @@ TEST(BitrateProberTest, HighBitrateProbing) {
 }
 
 TEST(BitrateProberTest, ProbeClusterTimeout) {
-  const FieldTrialBasedConfig config;
+  const FieldTrials config = CreateTestFieldTrials();
   BitrateProber prober(config);
   const DataRate kBitrate = DataRate::KilobitsPerSec(300);
   const DataSize kSmallPacketSize = DataSize::Bytes(20);
@@ -340,6 +354,7 @@ TEST(BitrateProberTest, ProbeClusterTimeout) {
   prober.CreateProbeCluster({.at_time = now,
                              .target_data_rate = kBitrate,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   prober.OnIncomingPacket(kSmallPacketSize);
@@ -348,6 +363,7 @@ TEST(BitrateProberTest, ProbeClusterTimeout) {
   prober.CreateProbeCluster({.at_time = now,
                              .target_data_rate = kBitrate / 10,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 1});
   prober.OnIncomingPacket(kSmallPacketSize);
@@ -356,6 +372,7 @@ TEST(BitrateProberTest, ProbeClusterTimeout) {
   prober.CreateProbeCluster({.at_time = now,
                              .target_data_rate = kBitrate / 10,
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 2});
   prober.OnIncomingPacket(kSmallPacketSize);
@@ -371,27 +388,29 @@ TEST(BitrateProberTest, ProbeClusterTimeout) {
 }
 
 TEST(BitrateProberTest, CanProbeImmediatelyIfConfigured) {
-  const test::ExplicitKeyValueConfig trials(
-      "WebRTC-Bwe-ProbingBehavior/min_packet_size:0/");
+  const FieldTrials trials =
+      CreateTestFieldTrials("WebRTC-Bwe-ProbingBehavior/min_packet_size:0/");
 
   BitrateProber prober(trials);
   prober.CreateProbeCluster({.at_time = Timestamp::Zero(),
                              .target_data_rate = DataRate::KilobitsPerSec(300),
                              .target_duration = TimeDelta::Millis(15),
+                             .min_probe_delta = TimeDelta::Millis(2),
                              .target_probe_count = 5,
                              .id = 0});
   EXPECT_TRUE(prober.is_probing());
 }
 
 TEST(BitrateProberTest, CanProbeImmediatelyAgainAfterProbeIfConfigured) {
-  const test::ExplicitKeyValueConfig trials(
-      "WebRTC-Bwe-ProbingBehavior/min_packet_size:0/");
+  const FieldTrials trials =
+      CreateTestFieldTrials("WebRTC-Bwe-ProbingBehavior/min_packet_size:0/");
 
   BitrateProber prober(trials);
   ProbeClusterConfig cluster_config = {
       .at_time = Timestamp::Zero(),
       .target_data_rate = DataRate::KilobitsPerSec(300),
       .target_duration = TimeDelta::Millis(15),
+      .min_probe_delta = TimeDelta::Millis(2),
       .target_probe_count = 1,
       .id = 0};
   prober.CreateProbeCluster(cluster_config);

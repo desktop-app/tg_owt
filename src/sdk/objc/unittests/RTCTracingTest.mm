@@ -11,9 +11,9 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
-#include <vector>
+#include "test/gtest.h"
 
-#include "rtc_base/gunit.h"
+#include <vector>
 
 #import "api/peerconnection/RTCTracing.h"
 #import "helpers/NSString+StdString.h"
@@ -25,10 +25,11 @@
 
 - (NSString *)documentsFilePathForFileName:(NSString *)fileName {
   NSParameterAssert(fileName.length);
-  NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+  NSArray *paths = NSSearchPathForDirectoriesInDomains(
+      NSDocumentDirectory, NSUserDomainMask, YES);
   NSString *documentsDirPath = paths.firstObject;
   NSString *filePath =
-  [documentsDirPath stringByAppendingPathComponent:fileName];
+      [documentsDirPath stringByAppendingPathComponent:fileName];
   return filePath;
 }
 

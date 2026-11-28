@@ -10,22 +10,23 @@
 
 #include "modules/remote_bitrate_estimator/aimd_rate_control.h"
 
-#include <inttypes.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
 
-#include "absl/strings/match.h"
+#include "api/field_trials_view.h"
+#include "api/transport/bandwidth_usage.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_rate.h"
+#include "api/units/data_size.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "modules/remote_bitrate_estimator/include/bwe_defines.h"
-#include "modules/remote_bitrate_estimator/overuse_detector.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/numerics/safe_minmax.h"
 
 namespace webrtc {
 namespace {
@@ -79,9 +80,7 @@ AimdRateControl::AimdRateControl(const FieldTrialsView& key_value_config,
       rtt_(kDefaultRtt),
       send_side_(send_side),
       no_bitrate_increase_in_alr_(
-          key_value_config.IsEnabled("WebRTC-DontIncreaseDelayBasedBweInAlr")),
-      subtract_additional_backoff_term_(!key_value_config.IsDisabled(
-          "WebRTC-Bwe-SubtractAdditionalBackoffTerm")) {
+          key_value_config.IsEnabled("WebRTC-DontIncreaseDelayBasedBweInAlr")) {
   ParseFieldTrial(
       {&disable_estimate_bounded_increase_,
        &use_current_estimate_as_min_upper_bound_},
@@ -114,13 +113,13 @@ TimeDelta AimdRateControl::GetFeedbackInterval() const {
   const TimeDelta interval = kRtcpSize / rtcp_bitrate;
   const TimeDelta kMinFeedbackInterval = TimeDelta::Millis(200);
   const TimeDelta kMaxFeedbackInterval = TimeDelta::Millis(1000);
-  return interval.Clamped(kMinFeedbackInterval, kMaxFeedbackInterval);
+  return std::clamp(interval, kMinFeedbackInterval, kMaxFeedbackInterval);
 }
 
 bool AimdRateControl::TimeToReduceFurther(Timestamp at_time,
                                           DataRate estimated_throughput) const {
   const TimeDelta bitrate_reduction_interval =
-      rtt_.Clamped(TimeDelta::Millis(10), TimeDelta::Millis(200));
+      std::clamp(rtt_, TimeDelta::Millis(10), TimeDelta::Millis(200));
   if (at_time - time_last_bitrate_change_ >= bitrate_reduction_interval) {
     return true;
   }
@@ -185,7 +184,7 @@ void AimdRateControl::SetEstimate(DataRate bitrate, Timestamp at_time) {
 }
 
 void AimdRateControl::SetNetworkStateEstimate(
-    const absl::optional<NetworkStateEstimate>& estimate) {
+    const std::optional<NetworkStateEstimate>& estimate) {
   network_estimate_ = estimate;
 }
 
@@ -207,23 +206,10 @@ double AimdRateControl::GetNearMaxIncreaseRateBpsPerSecond() const {
   return std::max(kMinIncreaseRateBpsPerSecond, increase_rate_bps_per_second);
 }
 
-TimeDelta AimdRateControl::GetExpectedBandwidthPeriod() const {
-  const TimeDelta kMinPeriod = TimeDelta::Seconds(2);
-  const TimeDelta kDefaultPeriod = TimeDelta::Seconds(3);
-  const TimeDelta kMaxPeriod = TimeDelta::Seconds(50);
-
-  double increase_rate_bps_per_second = GetNearMaxIncreaseRateBpsPerSecond();
-  if (!last_decrease_)
-    return kDefaultPeriod;
-  double time_to_recover_decrease_seconds =
-      last_decrease_->bps() / increase_rate_bps_per_second;
-  TimeDelta period = TimeDelta::Seconds(time_to_recover_decrease_seconds);
-  return period.Clamped(kMinPeriod, kMaxPeriod);
-}
 
 void AimdRateControl::ChangeBitrate(const RateControlInput& input,
                                     Timestamp at_time) {
-  absl::optional<DataRate> new_bitrate;
+  std::optional<DataRate> new_bitrate;
   DataRate estimated_throughput =
       input.estimated_throughput.value_or(latest_estimated_throughput_);
   if (input.estimated_throughput)
@@ -289,8 +275,7 @@ void AimdRateControl::ChangeBitrate(const RateControlInput& input,
       // Set bit rate to something slightly lower than the measured throughput
       // to get rid of any self-induced delay.
       decreased_bitrate = estimated_throughput * beta_;
-      if (decreased_bitrate > DataRate::KilobitsPerSec(5) &&
-          subtract_additional_backoff_term_) {
+      if (decreased_bitrate > DataRate::KilobitsPerSec(5)) {
         decreased_bitrate -= DataRate::KilobitsPerSec(5);
       }
 

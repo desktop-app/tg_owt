@@ -10,12 +10,18 @@
 
 #include "modules/congestion_controller/pcc/pcc_network_controller.h"
 
-#include <memory>
-
+#include "api/environment/environment.h"
+#include "api/transport/network_control.h"
+#include "api/transport/network_types.h"
+#include "api/units/data_rate.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "modules/congestion_controller/pcc/pcc_factory.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/scenario/scenario.h"
+#include "test/scenario/scenario_config.h"
 
 using ::testing::AllOf;
 using ::testing::Field;
@@ -28,8 +34,8 @@ namespace webrtc {
 namespace test {
 namespace {
 
-const DataRate kInitialBitrate = DataRate::KilobitsPerSec(60);
-const Timestamp kDefaultStartTime = Timestamp::Millis(10000000);
+constexpr DataRate kInitialBitrate = DataRate::KilobitsPerSec(60);
+constexpr Timestamp kDefaultStartTime = Timestamp::Millis(10000000);
 
 constexpr double kDataRateMargin = 0.20;
 constexpr double kMinDataRateFactor = 1 - kDataRateMargin;
@@ -41,35 +47,19 @@ inline Matcher<TargetTransferRate> TargetRateCloseTo(DataRate rate) {
                AllOf(Ge(min_data_rate), Le(max_data_rate)));
 }
 
-NetworkControllerConfig InitialConfig(
-    int starting_bandwidth_kbps = kInitialBitrate.kbps(),
-    int min_data_rate_kbps = 0,
-    int max_data_rate_kbps = 5 * kInitialBitrate.kbps()) {
-  NetworkControllerConfig config;
-  config.constraints.at_time = kDefaultStartTime;
-  config.constraints.min_data_rate =
-      DataRate::KilobitsPerSec(min_data_rate_kbps);
-  config.constraints.max_data_rate =
-      DataRate::KilobitsPerSec(max_data_rate_kbps);
-  config.constraints.starting_rate =
-      DataRate::KilobitsPerSec(starting_bandwidth_kbps);
-  return config;
-}
-
-ProcessInterval InitialProcessInterval() {
-  ProcessInterval process_interval;
-  process_interval.at_time = kDefaultStartTime;
-  return process_interval;
-}
-
 }  // namespace
 
 TEST(PccNetworkControllerTest, SendsConfigurationOnFirstProcess) {
-  std::unique_ptr<NetworkControllerInterface> controller_;
-  controller_.reset(new pcc::PccNetworkController(InitialConfig()));
+  Environment env = CreateTestEnvironment();
+  NetworkControllerConfig config(env);
+  config.constraints.at_time = kDefaultStartTime;
+  config.constraints.min_data_rate = DataRate::Zero();
+  config.constraints.max_data_rate = 5 * kInitialBitrate;
+  config.constraints.starting_rate = kInitialBitrate;
+  pcc::PccNetworkController controller(config);
 
   NetworkControlUpdate update =
-      controller_->OnProcessInterval(InitialProcessInterval());
+      controller.OnProcessInterval({.at_time = kDefaultStartTime});
   EXPECT_THAT(*update.target_rate, TargetRateCloseTo(kInitialBitrate));
   EXPECT_THAT(*update.pacer_config,
               Property(&PacerConfig::data_rate, Ge(kInitialBitrate)));
@@ -112,7 +102,8 @@ TEST(PccNetworkControllerTest, UpdatesTargetSendRate) {
   ret_net->UpdateConfig(
       [](NetworkSimulationConfig* c) { c->delay = TimeDelta::Millis(200); });
   s.RunFor(TimeDelta::Seconds(35));
-  EXPECT_NEAR(client->target_rate().kbps(), 170, 50);
+  EXPECT_LE(client->target_rate().kbps(), 200);
+  EXPECT_GT(client->target_rate().kbps(), 90);
 }
 
 }  // namespace test

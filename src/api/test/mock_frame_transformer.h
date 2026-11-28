@@ -11,10 +11,11 @@
 #ifndef API_TEST_MOCK_FRAME_TRANSFORMER_H_
 #define API_TEST_MOCK_FRAME_TRANSFORMER_H_
 
+#include <cstdint>
 #include <memory>
-#include <vector>
 
 #include "api/frame_transformer_interface.h"
+#include "api/scoped_refptr.h"
 #include "test/gmock.h"
 
 namespace webrtc {
@@ -27,11 +28,11 @@ class MockFrameTransformer : public FrameTransformerInterface {
               (override));
   MOCK_METHOD(void,
               RegisterTransformedFrameCallback,
-              (rtc::scoped_refptr<TransformedFrameCallback>),
+              (scoped_refptr<TransformedFrameCallback>),
               (override));
   MOCK_METHOD(void,
               RegisterTransformedFrameSinkCallback,
-              (rtc::scoped_refptr<TransformedFrameCallback>, uint32_t),
+              (scoped_refptr<TransformedFrameCallback>, uint32_t),
               (override));
   MOCK_METHOD(void, UnregisterTransformedFrameCallback, (), (override));
   MOCK_METHOD(void,

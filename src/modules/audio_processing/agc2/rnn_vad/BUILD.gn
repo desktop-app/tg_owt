@@ -32,10 +32,7 @@ rtc_library("rnn_vad") {
     ":rnn_vad_spectral_features",
     "..:biquad_filter",
     "..:cpu_features",
-    "../../../../api:array_view",
     "../../../../rtc_base:checks",
-    "../../../../rtc_base:safe_compare",
-    "../../../../rtc_base:safe_conversions",
     "//third_party/rnnoise:rnn_vad",
   ]
 }
@@ -47,14 +44,12 @@ rtc_library("rnn_vad_auto_correlation") {
   ]
   deps = [
     ":rnn_vad_common",
-    "../../../../api:array_view",
     "../../../../rtc_base:checks",
     "../../utility:pffft_wrapper",
   ]
 }
 
 rtc_source_set("rnn_vad_common") {
-  # TODO(alessiob): Make this target visibility private.
   visibility = [
     ":*",
     "..:vad_wrapper",
@@ -72,13 +67,12 @@ rtc_library("rnn_vad_lp_residual") {
     "lp_residual.h",
   ]
   deps = [
-    "../../../../api:array_view",
     "../../../../rtc_base:checks",
     "../../../../rtc_base:safe_compare",
   ]
 }
 
-rtc_source_set("rnn_vad_layers") {
+rtc_library("rnn_vad_layers") {
   sources = [
     "rnn_fc.cc",
     "rnn_fc.h",
@@ -96,23 +90,21 @@ rtc_source_set("rnn_vad_layers") {
     ":rnn_vad_common",
     ":vector_math",
     "..:cpu_features",
-    "../../../../api:array_view",
     "../../../../api:function_view",
     "../../../../rtc_base:checks",
     "../../../../rtc_base:safe_conversions",
+    "//third_party/abseil-cpp/absl/strings:string_view",
     "//third_party/rnnoise:rnn_vad",
   ]
   if (current_cpu == "x86" || current_cpu == "x64") {
     deps += [ ":vector_math_avx2" ]
   }
-  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 }
 
 rtc_source_set("vector_math") {
   sources = [ "vector_math.h" ]
   deps = [
     "..:cpu_features",
-    "../../../../api:array_view",
     "../../../../rtc_base:checks",
     "../../../../rtc_base:safe_conversions",
     "../../../../rtc_base/system:arch",
@@ -132,7 +124,6 @@ if (current_cpu == "x86" || current_cpu == "x64") {
     }
     deps = [
       ":vector_math",
-      "../../../../api:array_view",
       "../../../../rtc_base:checks",
       "../../../../rtc_base:safe_conversions",
     ]
@@ -158,7 +149,6 @@ rtc_library("rnn_vad_pitch") {
     ":rnn_vad_common",
     ":vector_math",
     "..:cpu_features",
-    "../../../../api:array_view",
     "../../../../rtc_base:checks",
     "../../../../rtc_base:gtest_prod",
     "../../../../rtc_base:safe_compare",
@@ -172,18 +162,12 @@ rtc_library("rnn_vad_pitch") {
 
 rtc_source_set("rnn_vad_ring_buffer") {
   sources = [ "ring_buffer.h" ]
-  deps = [
-    "../../../../api:array_view",
-    "../../../../rtc_base:checks",
-  ]
+  deps = [ "../../../../rtc_base:checks" ]
 }
 
 rtc_source_set("rnn_vad_sequence_buffer") {
   sources = [ "sequence_buffer.h" ]
-  deps = [
-    "../../../../api:array_view",
-    "../../../../rtc_base:checks",
-  ]
+  deps = [ "../../../../rtc_base:checks" ]
 }
 
 rtc_library("rnn_vad_spectral_features") {
@@ -197,7 +181,6 @@ rtc_library("rnn_vad_spectral_features") {
     ":rnn_vad_common",
     ":rnn_vad_ring_buffer",
     ":rnn_vad_symmetric_matrix_buffer",
-    "../../../../api:array_view",
     "../../../../rtc_base:checks",
     "../../../../rtc_base:safe_compare",
     "../../utility:pffft_wrapper",
@@ -207,32 +190,12 @@ rtc_library("rnn_vad_spectral_features") {
 rtc_source_set("rnn_vad_symmetric_matrix_buffer") {
   sources = [ "symmetric_matrix_buffer.h" ]
   deps = [
-    "../../../../api:array_view",
     "../../../../rtc_base:checks",
     "../../../../rtc_base:safe_compare",
   ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("test_utils") {
-    testonly = true
-    sources = [
-      "test_utils.cc",
-      "test_utils.h",
-    ]
-    deps = [
-      ":rnn_vad",
-      ":rnn_vad_common",
-      "../../../../api:array_view",
-      "../../../../api:scoped_refptr",
-      "../../../../rtc_base:checks",
-      "../../../../rtc_base:safe_compare",
-      "../../../../test:fileutils",
-      "../../../../test:test_support",
-    ]
-    absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
-  }
-
   unittest_resources = [
     "../../../../resources/audio_processing/agc2/rnn_vad/band_energies.dat",
     "../../../../resources/audio_processing/agc2/rnn_vad/pitch_buf_24k.dat",
@@ -250,67 +213,209 @@ if (rtc_include_tests) {
     }
   }
 
-  rtc_library("unittests") {
+  rtc_library("test_utils") {
     testonly = true
     sources = [
-      "auto_correlation_unittest.cc",
-      "features_extraction_unittest.cc",
-      "lp_residual_unittest.cc",
-      "pitch_search_internal_unittest.cc",
-      "pitch_search_unittest.cc",
-      "ring_buffer_unittest.cc",
-      "rnn_fc_unittest.cc",
-      "rnn_gru_unittest.cc",
-      "rnn_unittest.cc",
-      "rnn_vad_unittest.cc",
-      "sequence_buffer_unittest.cc",
-      "spectral_features_internal_unittest.cc",
-      "spectral_features_unittest.cc",
-      "symmetric_matrix_buffer_unittest.cc",
-      "vector_math_unittest.cc",
+      "test_utils.cc",
+      "test_utils.h",
     ]
-
-    defines = []
-    if (rtc_build_with_neon && current_cpu != "arm64") {
-      suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
-      cflags = [ "-mfpu=neon" ]
-    }
-
     deps = [
       ":rnn_vad",
-      ":rnn_vad_auto_correlation",
       ":rnn_vad_common",
-      ":rnn_vad_layers",
-      ":rnn_vad_lp_residual",
-      ":rnn_vad_pitch",
-      ":rnn_vad_ring_buffer",
-      ":rnn_vad_sequence_buffer",
-      ":rnn_vad_spectral_features",
-      ":rnn_vad_symmetric_matrix_buffer",
-      ":test_utils",
-      ":vector_math",
-      "..:cpu_features",
-      "../..:audioproc_test_utils",
-      "../../../../api:array_view",
-      "../../../../common_audio/",
+      "../../../../api:scoped_refptr",
       "../../../../rtc_base:checks",
-      "../../../../rtc_base:logging",
       "../../../../rtc_base:safe_compare",
-      "../../../../rtc_base:safe_conversions",
-      "../../../../rtc_base:stringutils",
-      "../../../../rtc_base/system:arch",
+      "../../../../test:fileutils",
       "../../../../test:test_support",
-      "../../utility:pffft_wrapper",
-      "//third_party/rnnoise:rnn_vad",
+      "//third_party/abseil-cpp/absl/strings:string_view",
     ]
-    if (current_cpu == "x86" || current_cpu == "x64") {
-      deps += [ ":vector_math_avx2" ]
-    }
-    absl_deps = [ "//third_party/abseil-cpp/absl/memory" ]
     data = unittest_resources
     if (is_ios) {
       deps += [ ":unittests_bundle_data" ]
     }
+  }
+
+  rtc_cc_test("auto_correlation_unittest") {
+    sources = [ "auto_correlation_unittest.cc" ]
+    deps = [
+      ":rnn_vad_auto_correlation",
+      ":rnn_vad_common",
+      ":rnn_vad_pitch",
+      ":test_utils",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("features_extraction_unittest") {
+    sources = [ "features_extraction_unittest.cc" ]
+    deps = [
+      ":rnn_vad",
+      ":rnn_vad_common",
+      "..:cpu_features",
+      "../../../../rtc_base:safe_compare",
+      "../../../../rtc_base:safe_conversions",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("lp_residual_unittest") {
+    sources = [ "lp_residual_unittest.cc" ]
+    deps = [
+      ":rnn_vad_common",
+      ":rnn_vad_lp_residual",
+      ":test_utils",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("pitch_search_internal_unittest") {
+    sources = [ "pitch_search_internal_unittest.cc" ]
+    deps = [
+      ":rnn_vad_common",
+      ":rnn_vad_pitch",
+      ":test_utils",
+      "..:cpu_features",
+      "../../../../rtc_base:stringutils",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("pitch_search_unittest") {
+    sources = [ "pitch_search_unittest.cc" ]
+    deps = [
+      ":rnn_vad_common",
+      ":rnn_vad_pitch",
+      ":test_utils",
+      "..:cpu_features",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("ring_buffer_unittest") {
+    sources = [ "ring_buffer_unittest.cc" ]
+    deps = [
+      ":rnn_vad_ring_buffer",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("rnn_fc_unittest") {
+    sources = [ "rnn_fc_unittest.cc" ]
+    deps = [
+      ":rnn_vad_layers",
+      ":test_utils",
+      "..:cpu_features",
+      "../..:audioproc_test_utils",
+      "../../../../rtc_base:logging",
+      "../../../../test:test_support",
+      "//third_party/rnnoise:rnn_vad",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("rnn_gru_unittest") {
+    sources = [ "rnn_gru_unittest.cc" ]
+    deps = [
+      ":rnn_vad_layers",
+      ":test_utils",
+      "..:cpu_features",
+      "../..:audioproc_test_utils",
+      "../../../../rtc_base:checks",
+      "../../../../rtc_base:logging",
+      "../../../../rtc_base:safe_conversions",
+      "../../../../test:test_support",
+      "//third_party/rnnoise:rnn_vad",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("rnn_unittest") {
+    sources = [ "rnn_unittest.cc" ]
+    deps = [
+      ":rnn_vad",
+      ":rnn_vad_common",
+      "..:cpu_features",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("rnn_vad_unittest") {
+    sources = [ "rnn_vad_unittest.cc" ]
+    deps = [
+      ":rnn_vad",
+      ":rnn_vad_common",
+      ":test_utils",
+      "..:cpu_features",
+      "../..:audioproc_test_utils",
+      "../../../../common_audio",
+      "../../../../rtc_base:logging",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("sequence_buffer_unittest") {
+    sources = [ "sequence_buffer_unittest.cc" ]
+    deps = [
+      ":rnn_vad_sequence_buffer",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("spectral_features_internal_unittest") {
+    sources = [ "spectral_features_internal_unittest.cc" ]
+    deps = [
+      ":rnn_vad_common",
+      ":rnn_vad_spectral_features",
+      ":test_utils",
+      "../../../../rtc_base:safe_compare",
+      "../../../../test:test_support",
+      "../../utility:pffft_wrapper",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("spectral_features_unittest") {
+    sources = [ "spectral_features_unittest.cc" ]
+    deps = [
+      ":rnn_vad_common",
+      ":rnn_vad_spectral_features",
+      ":test_utils",
+      "../../../../rtc_base:safe_compare",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("symmetric_matrix_buffer_unittest") {
+    sources = [ "symmetric_matrix_buffer_unittest.cc" ]
+    deps = [
+      ":rnn_vad_ring_buffer",
+      ":rnn_vad_symmetric_matrix_buffer",
+      "../../../../test:test_support",
+    ]
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
+  }
+
+  rtc_cc_test("rnn_vector_math_unittest") {
+    sources = [ "rnn_vector_math_unittest.cc" ]
+    deps = [
+      ":vector_math",
+      "..:cpu_features",
+      "../../../../test:test_support",
+    ]
+    if (current_cpu == "x86" || current_cpu == "x64") {
+      deps += [ ":vector_math_avx2" ]
+    }
+    suppressed_configs += [ "//build/config/compiler:compiler_arm_fpu" ]
   }
 
   if (!build_with_chromium) {
@@ -321,11 +426,10 @@ if (rtc_include_tests) {
         ":rnn_vad",
         ":rnn_vad_common",
         "..:cpu_features",
-        "../../../../api:array_view",
         "../../../../common_audio",
+        "../../../../rtc_base:checks",
         "../../../../rtc_base:logging",
         "../../../../rtc_base:safe_compare",
-        "../../../../test:test_support",
         "//third_party/abseil-cpp/absl/flags:flag",
         "//third_party/abseil-cpp/absl/flags:parse",
       ]

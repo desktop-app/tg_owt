@@ -10,12 +10,14 @@
 #ifndef NET_DCSCTP_TX_MOCK_SEND_QUEUE_H_
 #define NET_DCSCTP_TX_MOCK_SEND_QUEUE_H_
 
-#include <cstdint>
+#include <cstddef>
+#include <optional>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "api/units/timestamp.h"
+#include "net/dcsctp/common/internal_types.h"
+#include "net/dcsctp/public/dcsctp_handover_state.h"
+#include "net/dcsctp/public/types.h"
 #include "net/dcsctp/tx/send_queue.h"
 #include "test/gmock.h"
 
@@ -23,14 +25,7 @@ namespace dcsctp {
 
 class MockSendQueue : public SendQueue {
  public:
-  MockSendQueue() {
-    ON_CALL(*this, Produce)
-        .WillByDefault([](webrtc::Timestamp now, size_t max_size) {
-          return absl::nullopt;
-        });
-  }
-
-  MOCK_METHOD(absl::optional<SendQueue::DataToSend>,
+  MOCK_METHOD(std::optional<SendQueue::DataToSend>,
               Produce,
               (webrtc::Timestamp now, size_t max_size),
               (override));
@@ -55,6 +50,14 @@ class MockSendQueue : public SendQueue {
               (StreamID stream_id, size_t bytes),
               (override));
   MOCK_METHOD(void, EnableMessageInterleaving, (bool enabled), (override));
+  MOCK_METHOD(void,
+              AddHandoverState,
+              (webrtc::Timestamp now, DcSctpSocketHandoverState& state),
+              (const, override));
+  MOCK_METHOD(void,
+              RestoreFromState,
+              (webrtc::Timestamp now, const DcSctpSocketHandoverState& state),
+              (override));
 };
 
 }  // namespace dcsctp

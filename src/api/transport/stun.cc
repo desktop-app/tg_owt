@@ -10,26 +10,35 @@
 
 #include "api/transport/stun.h"
 
-#include <string.h>
-
-#include <algorithm>
+#include <algorithm>  // IWYU pragma: keep
+#include <array>
 #include <cstdint>
+#include <cstring>
+#include <functional>
 #include <iterator>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
 #include <utility>
+#include <vector>
 
+#include "absl/strings/string_view.h"
+#include "rtc_base/byte_buffer.h"
 #include "rtc_base/byte_order.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/crc32.h"
-#include "rtc_base/helpers.h"
+#include "rtc_base/crypto_random.h"
+#include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/message_digest.h"
+#include "rtc_base/net_helpers.h"
+#include "rtc_base/socket_address.h"
+#include "rtc_base/span_helpers.h"
+#include "rtc_base/string_utils.h"
 #include "system_wrappers/include/metrics.h"
 
-using rtc::ByteBufferReader;
-using rtc::ByteBufferWriter;
-
-namespace cricket {
+namespace webrtc {
 
 namespace {
 
@@ -38,12 +47,12 @@ const int kMessageIntegrityAttributeLength = 20;
 const int kTheoreticalMaximumAttributeLength = 65535;
 
 uint32_t ReduceTransactionId(absl::string_view transaction_id) {
-  RTC_DCHECK(transaction_id.length() == cricket::kStunTransactionIdLength ||
-             transaction_id.length() == cricket::kStunLegacyTransactionIdLength)
+  RTC_DCHECK(transaction_id.length() == kStunTransactionIdLength ||
+             transaction_id.length() == kStunLegacyTransactionIdLength)
       << transaction_id.length();
-  ByteBufferReader reader(rtc::MakeArrayView(
-      reinterpret_cast<const uint8_t*>(transaction_id.data()),
-      transaction_id.size()));
+  ByteBufferReader reader(
+      std::span(reinterpret_cast<const uint8_t*>(transaction_id.data()),
+                transaction_id.size()));
   uint32_t result = 0;
   uint32_t next;
   while (reader.ReadUInt32(&next)) {
@@ -85,6 +94,11 @@ bool LengthValid(int type, int length) {
   return true;
 }
 
+bool IsGoogPingMethod(uint16_t type) {
+  return type == GOOG_PING_REQUEST || type == GOOG_PING_RESPONSE ||
+         type == GOOG_PING_ERROR_RESPONSE;
+}
+
 }  // namespace
 
 const char STUN_ERROR_REASON_TRY_ALTERNATE_SERVER[] = "Try Alternate Server";
@@ -99,10 +113,8 @@ const char STUN_ERROR_REASON_UNSUPPORTED_PROTOCOL[] = "Unsupported Protocol";
 const char STUN_ERROR_REASON_ROLE_CONFLICT[] = "Role Conflict";
 const char STUN_ERROR_REASON_SERVER_ERROR[] = "Server Error";
 
-const char TURN_MAGIC_COOKIE_VALUE[] = {'\x72', '\xC6', '\x4B', '\xC6'};
 const char EMPTY_TRANSACTION_ID[] = "0000000000000000";
 const uint32_t STUN_FINGERPRINT_XOR_VALUE = 0x5354554E;
-const int SERVER_NOT_REACHABLE_ERROR = 701;
 
 // StunMessage
 
@@ -134,6 +146,15 @@ static bool DesignatedExpertRange(int attr_type) {
 }
 
 void StunMessage::AddAttribute(std::unique_ptr<StunAttribute> attr) {
+  // Once a message is signed, adding attributes is a programming error.
+  // Exceptions are the Integrity attributes and Fingerprint.
+  if (attr->type() != STUN_ATTR_MESSAGE_INTEGRITY &&
+      attr->type() != STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32 &&
+      attr->type() != STUN_ATTR_FINGERPRINT) {
+    RTC_CHECK(integrity_ != IntegrityStatus::kIntegrityOk)
+        << "You cannot add attributes to a signed STUN message."
+        << " Message type was 0x" << ToHex(attr->type());
+  }
   // Fail any attributes that aren't valid for this type of message,
   // but allow any type for the range that in the RFC is reserved for
   // the "designated experts".
@@ -152,6 +173,12 @@ void StunMessage::AddAttribute(std::unique_ptr<StunAttribute> attr) {
 }
 
 std::unique_ptr<StunAttribute> StunMessage::RemoveAttribute(int type) {
+  if (type != STUN_ATTR_MESSAGE_INTEGRITY &&
+      type != STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32) {
+    // Removing attributes will break integrity, so don't allow
+    // removing attributes from a signed message.
+    RTC_CHECK(integrity_ != IntegrityStatus::kIntegrityOk);
+  }
   std::unique_ptr<StunAttribute> attribute;
   for (auto it = attrs_.rbegin(); it != attrs_.rend(); ++it) {
     if ((*it)->type() == type) {
@@ -167,6 +194,12 @@ std::unique_ptr<StunAttribute> StunMessage::RemoveAttribute(int type) {
       attr_length += (4 - (attr_length % 4));
     }
     length_ -= static_cast<uint16_t>(attr_length + 4);
+    if (type == STUN_ATTR_MESSAGE_INTEGRITY ||
+        type == STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32) {
+      // If the message was signed, it is now unsigned, and adding more
+      // attributes is possible.
+      integrity_ = IntegrityStatus::kNotSet;
+    }
   }
   return attribute;
 }
@@ -177,6 +210,7 @@ void StunMessage::ClearAttributes() {
   }
   attrs_.clear();
   length_ = 0;
+  integrity_ = IntegrityStatus::kNotSet;
 }
 
 std::vector<uint16_t> StunMessage::GetNonComprehendedAttributes() const {
@@ -245,17 +279,18 @@ StunMessage::IntegrityStatus StunMessage::ValidateMessageIntegrity(
       << "Usage error: Verification should only be done once";
   password_ = password;
   if (GetByteString(STUN_ATTR_MESSAGE_INTEGRITY)) {
-    if (ValidateMessageIntegrityOfType(
-            STUN_ATTR_MESSAGE_INTEGRITY, kStunMessageIntegritySize,
-            buffer_.c_str(), buffer_.size(), password)) {
+    if (ValidateMessageIntegrityOfType(STUN_ATTR_MESSAGE_INTEGRITY,
+                                       kStunMessageIntegritySize, buffer_,
+                                       password)) {
       integrity_ = IntegrityStatus::kIntegrityOk;
     } else {
       integrity_ = IntegrityStatus::kIntegrityBad;
     }
-  } else if (GetByteString(STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32)) {
-    if (ValidateMessageIntegrityOfType(
-            STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32, kStunMessageIntegrity32Size,
-            buffer_.c_str(), buffer_.size(), password)) {
+  } else if (IsGoogPingMethod(type_) &&
+             GetByteString(STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32)) {
+    if (ValidateMessageIntegrityOfType(STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32,
+                                       kStunMessageIntegrity32Size, buffer_,
+                                       password)) {
       integrity_ = IntegrityStatus::kIntegrityOk;
     } else {
       integrity_ = IntegrityStatus::kIntegrityBad;
@@ -340,38 +375,17 @@ StunMessage::IntegrityStatus StunMessage::RevalidateMessageIntegrity(
 }
 
 bool StunMessage::ValidateMessageIntegrityForTesting(
-    const char* data,
-    size_t size,
-    const std::string& password) {
-  return ValidateMessageIntegrityOfType(STUN_ATTR_MESSAGE_INTEGRITY,
-                                        kStunMessageIntegritySize, data, size,
-                                        password);
+    const std::string& password,
+    std::span<const uint8_t> data) {
+  return ValidateMessageIntegrityOfType(
+      STUN_ATTR_MESSAGE_INTEGRITY, kStunMessageIntegritySize, data, password);
 }
 
 bool StunMessage::ValidateMessageIntegrity32ForTesting(
-    const char* data,
-    size_t size,
-    const std::string& password) {
+    const std::string& password,
+    std::span<const uint8_t> data) {
   return ValidateMessageIntegrityOfType(STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32,
-                                        kStunMessageIntegrity32Size, data, size,
-                                        password);
-}
-
-// Deprecated
-bool StunMessage::ValidateMessageIntegrity(const char* data,
-                                           size_t size,
-                                           const std::string& password) {
-  return ValidateMessageIntegrityOfType(STUN_ATTR_MESSAGE_INTEGRITY,
-                                        kStunMessageIntegritySize, data, size,
-                                        password);
-}
-
-// Deprecated
-bool StunMessage::ValidateMessageIntegrity32(const char* data,
-                                             size_t size,
-                                             const std::string& password) {
-  return ValidateMessageIntegrityOfType(STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32,
-                                        kStunMessageIntegrity32Size, data, size,
+                                        kStunMessageIntegrity32Size, data,
                                         password);
 }
 
@@ -379,36 +393,35 @@ bool StunMessage::ValidateMessageIntegrity32(const char* data,
 // procedure outlined in RFC 5389, section 15.4.
 bool StunMessage::ValidateMessageIntegrityOfType(int mi_attr_type,
                                                  size_t mi_attr_size,
-                                                 const char* data,
-                                                 size_t size,
+                                                 std::span<const uint8_t> data,
                                                  const std::string& password) {
   RTC_DCHECK(mi_attr_size <= kStunMessageIntegritySize);
 
   // Verifying the size of the message.
-  if ((size % 4) != 0 || size < kStunHeaderSize) {
+  if ((data.size() % 4) != 0 || data.size() < kStunHeaderSize) {
     return false;
   }
 
   // Getting the message length from the STUN header.
-  uint16_t msg_length = rtc::GetBE16(&data[2]);
-  if (size != (msg_length + kStunHeaderSize)) {
+  uint16_t msg_length = GetBE16(data.subspan(2, 2));
+  if (data.size() != (msg_length + kStunHeaderSize)) {
     return false;
   }
 
   // Finding Message Integrity attribute in stun message.
   size_t current_pos = kStunHeaderSize;
   bool has_message_integrity_attr = false;
-  while (current_pos + 4 <= size) {
+  while (current_pos + 4 <= data.size()) {
     uint16_t attr_type, attr_length;
     // Getting attribute type and length.
-    attr_type = rtc::GetBE16(&data[current_pos]);
-    attr_length = rtc::GetBE16(&data[current_pos + sizeof(attr_type)]);
+    attr_type = GetBE16(data.subspan(current_pos, 2));
+    attr_length = GetBE16(data.subspan(current_pos + sizeof(attr_type), 2));
 
     // If M-I, sanity check it, and break out.
     if (attr_type == mi_attr_type) {
       if (attr_length != mi_attr_size ||
           current_pos + sizeof(attr_type) + sizeof(attr_length) + attr_length >
-              size) {
+              data.size()) {
         return false;
       }
       has_message_integrity_attr = true;
@@ -428,14 +441,14 @@ bool StunMessage::ValidateMessageIntegrityOfType(int mi_attr_type,
 
   // Getting length of the message to calculate Message Integrity.
   size_t mi_pos = current_pos;
-  std::unique_ptr<char[]> temp_data(new char[current_pos]);
-  memcpy(temp_data.get(), data, current_pos);
-  if (size > mi_pos + kStunAttributeHeaderSize + mi_attr_size) {
+  std::unique_ptr<uint8_t[]> temp_data(new uint8_t[current_pos]);
+  memcpy(temp_data.get(), data.data(), current_pos);
+  if (data.size() > mi_pos + kStunAttributeHeaderSize + mi_attr_size) {
     // Stun message has other attributes after message integrity.
     // Adjust the length parameter in stun message to calculate HMAC.
     size_t extra_offset =
-        size - (mi_pos + kStunAttributeHeaderSize + mi_attr_size);
-    size_t new_adjusted_len = size - extra_offset - kStunHeaderSize;
+        data.size() - (mi_pos + kStunAttributeHeaderSize + mi_attr_size);
+    size_t new_adjusted_len = data.size() - extra_offset - kStunHeaderSize;
 
     // Writing new length of the STUN message @ Message Length in temp buffer.
     //      0                   1                   2                   3
@@ -443,21 +456,22 @@ bool StunMessage::ValidateMessageIntegrityOfType(int mi_attr_type,
     //     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     //     |0 0|     STUN Message Type     |         Message Length        |
     //     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    rtc::SetBE16(temp_data.get() + 2, static_cast<uint16_t>(new_adjusted_len));
+    SetBE16(std::span<uint8_t>(temp_data.get() + 2, 2),
+            static_cast<uint16_t>(new_adjusted_len));
   }
 
-  char hmac[kStunMessageIntegritySize];
-  size_t ret =
-      rtc::ComputeHmac(rtc::DIGEST_SHA_1, password.c_str(), password.size(),
-                       temp_data.get(), mi_pos, hmac, sizeof(hmac));
-  RTC_DCHECK(ret == sizeof(hmac));
-  if (ret != sizeof(hmac)) {
+  std::array<uint8_t, kStunMessageIntegritySize> hmac;
+  size_t ret = ComputeHmac(DIGEST_SHA_1, AsUint8Span(password),
+                           std::span(temp_data.get(), mi_pos), hmac);
+  if (ret != hmac.size()) {
+    RTC_DCHECK_NOTREACHED() << "hmac return != hmac.size()";
     return false;
   }
 
   // Comparing the calculated HMAC with the one present in the message.
-  return memcmp(data + current_pos + kStunAttributeHeaderSize, hmac,
-                mi_attr_size) == 0;
+  return std::ranges::equal(
+      data.subspan(current_pos + kStunAttributeHeaderSize, mi_attr_size),
+      std::span(hmac).first(mi_attr_size));
 }
 
 bool StunMessage::AddMessageIntegrity(absl::string_view password) {
@@ -488,19 +502,18 @@ bool StunMessage::AddMessageIntegrityOfType(int attr_type,
 
   int msg_len_for_hmac = static_cast<int>(
       buf.Length() - kStunAttributeHeaderSize - msg_integrity_attr->length());
-  char hmac[kStunMessageIntegritySize];
-  size_t ret =
-      rtc::ComputeHmac(rtc::DIGEST_SHA_1, key.data(), key.size(), buf.Data(),
-                       msg_len_for_hmac, hmac, sizeof(hmac));
-  RTC_DCHECK(ret == sizeof(hmac));
-  if (ret != sizeof(hmac)) {
+  std::array<uint8_t, kStunMessageIntegritySize> hmac;
+  size_t ret = ComputeHmac(DIGEST_SHA_1, AsUint8Span(key),
+                           std::span(buf.Data(), msg_len_for_hmac), hmac);
+  if (ret != hmac.size()) {
+    RTC_DCHECK_NOTREACHED();
     RTC_LOG(LS_ERROR) << "HMAC computation failed. Message-Integrity "
                          "has dummy value.";
     return false;
   }
 
   // Insert correct HMAC into the attribute.
-  msg_integrity_attr->CopyBytes(hmac, attr_size);
+  msg_integrity_attr->CopyBytes(std::span(hmac).first(attr_size));
   password_ = std::string(key);
   integrity_ = IntegrityStatus::kIntegrityOk;
   return true;
@@ -509,52 +522,53 @@ bool StunMessage::AddMessageIntegrityOfType(int attr_type,
 // Verifies a message is in fact a STUN message, by performing the checks
 // outlined in RFC 5389, section 7.3, including the FINGERPRINT check detailed
 // in section 15.5.
-bool StunMessage::ValidateFingerprint(const char* data, size_t size) {
+bool StunMessage::ValidateFingerprint(std::span<const uint8_t> data) {
   // Check the message length.
   size_t fingerprint_attr_size =
       kStunAttributeHeaderSize + StunUInt32Attribute::SIZE;
-  if (size % 4 != 0 || size < kStunHeaderSize + fingerprint_attr_size)
+  if (data.size() % 4 != 0 ||
+      data.size() < kStunHeaderSize + fingerprint_attr_size)
     return false;
 
   // Skip the rest if the magic cookie isn't present.
-  const char* magic_cookie =
-      data + kStunTransactionIdOffset - kStunMagicCookieLength;
-  if (rtc::GetBE32(magic_cookie) != kStunMagicCookie)
+  size_t magic_cookie_offset =
+      kStunTransactionIdOffset - kStunMagicCookieLength;
+  if (GetBE32(data.subspan(magic_cookie_offset, 4)) != kStunMagicCookie)
     return false;
 
   // Check the fingerprint type and length.
-  const char* fingerprint_attr_data = data + size - fingerprint_attr_size;
-  if (rtc::GetBE16(fingerprint_attr_data) != STUN_ATTR_FINGERPRINT ||
-      rtc::GetBE16(fingerprint_attr_data + sizeof(uint16_t)) !=
+  size_t fingerprint_attr_offset = data.size() - fingerprint_attr_size;
+  if (GetBE16(data.subspan(fingerprint_attr_offset, 2)) !=
+          STUN_ATTR_FINGERPRINT ||
+      GetBE16(data.subspan(fingerprint_attr_offset + sizeof(uint16_t), 2)) !=
           StunUInt32Attribute::SIZE)
     return false;
 
   // Check the fingerprint value.
-  uint32_t fingerprint =
-      rtc::GetBE32(fingerprint_attr_data + kStunAttributeHeaderSize);
+  uint32_t fingerprint = GetBE32(
+      data.subspan(fingerprint_attr_offset + kStunAttributeHeaderSize, 4));
   return ((fingerprint ^ STUN_FINGERPRINT_XOR_VALUE) ==
-          rtc::ComputeCrc32(data, size - fingerprint_attr_size));
+          ComputeCrc32(data.first(data.size() - fingerprint_attr_size)));
 }
 
 // static
 std::string StunMessage::GenerateTransactionId() {
-  return rtc::CreateRandomString(kStunTransactionIdLength);
+  return CreateRandomString(kStunTransactionIdLength);
 }
 
-bool StunMessage::IsStunMethod(rtc::ArrayView<int> methods,
-                               const char* data,
-                               size_t size) {
+bool StunMessage::IsStunMethod(std::span<int> methods,
+                               std::span<const uint8_t> data) {
   // Check the message length.
-  if (size % 4 != 0 || size < kStunHeaderSize)
+  if (data.size() % 4 != 0 || data.size() < kStunHeaderSize)
     return false;
 
   // Skip the rest if the magic cookie isn't present.
-  const char* magic_cookie =
-      data + kStunTransactionIdOffset - kStunMagicCookieLength;
-  if (rtc::GetBE32(magic_cookie) != kStunMagicCookie)
+  size_t magic_cookie_offset =
+      kStunTransactionIdOffset - kStunMagicCookieLength;
+  if (GetBE32(data.subspan(magic_cookie_offset, 4)) != kStunMagicCookie)
     return false;
 
-  int method = rtc::GetBE16(data);
+  int method = GetBE16(data);
   for (int m : methods) {
     if (m == method) {
       return true;
@@ -578,7 +592,7 @@ bool StunMessage::AddFingerprint() {
 
   int msg_len_for_crc32 = static_cast<int>(
       buf.Length() - kStunAttributeHeaderSize - fingerprint_attr->length());
-  uint32_t c = rtc::ComputeCrc32(buf.Data(), msg_len_for_crc32);
+  uint32_t c = ComputeCrc32(buf.Data(), msg_len_for_crc32);
 
   // Insert the correct CRC-32, XORed with a constant, into the attribute.
   fingerprint_attr->SetValue(c ^ STUN_FINGERPRINT_XOR_VALUE);
@@ -587,7 +601,7 @@ bool StunMessage::AddFingerprint() {
 
 bool StunMessage::Read(ByteBufferReader* buf) {
   // Keep a copy of the buffer data around for later verification.
-  buffer_.assign(reinterpret_cast<const char*>(buf->Data()), buf->Length());
+  buffer_.assign(buf->DataView().begin(), buf->DataView().end());
 
   if (!buf->ReadUInt16(&type_)) {
     return false;
@@ -617,7 +631,7 @@ bool StunMessage::Read(ByteBufferReader* buf) {
   static_assert(sizeof(magic_cookie_int) == kStunMagicCookieLength,
                 "Integer size mismatch: magic_cookie_int and kStunMagicCookie");
   std::memcpy(&magic_cookie_int, magic_cookie.data(), sizeof(magic_cookie_int));
-  if (rtc::NetworkToHost32(magic_cookie_int) != kStunMagicCookie) {
+  if (NetworkToHost32(magic_cookie_int) != kStunMagicCookie) {
     // If magic cookie is invalid it means that the peer implements
     // RFC3489 instead of RFC5389.
     transaction_id.insert(0, magic_cookie);
@@ -633,6 +647,7 @@ bool StunMessage::Read(ByteBufferReader* buf) {
   attrs_.resize(0);
 
   size_t rest = buf->Length() - length_;
+  bool seen_message_integrity = false;
   while (buf->Length() > rest) {
     uint16_t attr_type, attr_length;
     if (!buf->ReadUInt16(&attr_type))
@@ -640,10 +655,15 @@ bool StunMessage::Read(ByteBufferReader* buf) {
     if (!buf->ReadUInt16(&attr_length))
       return false;
 
-    std::unique_ptr<StunAttribute> attr(
-        CreateAttribute(attr_type, attr_length));
+    // Per RFC 5389 Section 15.4, with the exception of the FINGERPRINT
+    // attribute, which appears after MESSAGE-INTEGRITY, agents MUST ignore
+    // all other attributes that follow MESSAGE-INTEGRITY.
+    std::unique_ptr<StunAttribute> attr;
+    if (!seen_message_integrity || attr_type == STUN_ATTR_FINGERPRINT) {
+      attr.reset(CreateAttribute(attr_type, attr_length));
+    }
     if (!attr) {
-      // Skip any unknown or malformed attributes.
+      // Skip any unknown, malformed, or post-MESSAGE-INTEGRITY attributes.
       if ((attr_length % 4) != 0) {
         attr_length += (4 - (attr_length % 4));
       }
@@ -653,6 +673,10 @@ bool StunMessage::Read(ByteBufferReader* buf) {
     } else {
       if (!attr->Read(buf)) {
         return false;
+      }
+      if (attr_type == STUN_ATTR_MESSAGE_INTEGRITY ||
+          attr_type == STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32) {
+        seen_message_integrity = true;
       }
       attrs_.push_back(std::move(attr));
     }
@@ -743,7 +767,7 @@ StunAttribute* StunMessage::CreateAttribute(int type, size_t length) /*const*/ {
     return StunAttribute::Create(STUN_VALUE_BYTE_STRING, type,
                                  static_cast<uint16_t>(length), this);
   } else {
-    return NULL;
+    return nullptr;
   }
 }
 
@@ -753,7 +777,7 @@ const StunAttribute* StunMessage::GetAttribute(int type) const {
       return attr.get();
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 bool StunMessage::IsValidTransactionId(absl::string_view transaction_id) {
@@ -765,8 +789,8 @@ bool StunMessage::EqualAttributes(
     const StunMessage* other,
     std::function<bool(int type)> attribute_type_mask) const {
   RTC_DCHECK(other != nullptr);
-  rtc::ByteBufferWriter tmp_buffer_ptr1;
-  rtc::ByteBufferWriter tmp_buffer_ptr2;
+  ByteBufferWriter tmp_buffer_ptr1;
+  ByteBufferWriter tmp_buffer_ptr2;
   for (const auto& attr : attrs_) {
     if (attribute_type_mask(attr->type())) {
       const StunAttribute* other_attr = other->GetAttribute(attr->type());
@@ -815,7 +839,7 @@ void StunAttribute::WritePadding(ByteBufferWriter* buf) const {
   int remainder = length_ % 4;
   if (remainder > 0) {
     uint8_t zeroes[4] = {0};
-    buf->WriteBytes(zeroes, 4 - remainder);
+    buf->Write(std::span<const uint8_t>(zeroes, 4 - remainder));
   }
 }
 
@@ -839,7 +863,7 @@ StunAttribute* StunAttribute::Create(StunAttributeValueType value_type,
     case STUN_VALUE_UINT16_LIST:
       return new StunUInt16ListAttribute(type, length);
     default:
-      return NULL;
+      return nullptr;
   }
 }
 
@@ -885,7 +909,7 @@ StunAttribute::CreateUnknownAttributes() {
 }
 
 StunAddressAttribute::StunAddressAttribute(uint16_t type,
-                                           const rtc::SocketAddress& addr)
+                                           const SocketAddress& addr)
     : StunAttribute(type, 0) {
   SetAddress(addr);
 }
@@ -914,23 +938,23 @@ bool StunAddressAttribute::Read(ByteBufferReader* buf) {
     if (length() != SIZE_IP4) {
       return false;
     }
-    if (!buf->ReadBytes(rtc::MakeArrayView(reinterpret_cast<uint8_t*>(&v4addr),
-                                           sizeof(v4addr)))) {
+    if (!buf->ReadBytes(
+            std::span(reinterpret_cast<uint8_t*>(&v4addr), sizeof(v4addr)))) {
       return false;
     }
-    rtc::IPAddress ipaddr(v4addr);
-    SetAddress(rtc::SocketAddress(ipaddr, port));
+    IPAddress ipaddr(v4addr);
+    SetAddress(SocketAddress(ipaddr, port));
   } else if (stun_family == STUN_ADDRESS_IPV6) {
     in6_addr v6addr;
     if (length() != SIZE_IP6) {
       return false;
     }
-    if (!buf->ReadBytes(rtc::MakeArrayView(reinterpret_cast<uint8_t*>(&v6addr),
-                                           sizeof(v6addr)))) {
+    if (!buf->ReadBytes(
+            std::span(reinterpret_cast<uint8_t*>(&v6addr), sizeof(v6addr)))) {
       return false;
     }
-    rtc::IPAddress ipaddr(v6addr);
-    SetAddress(rtc::SocketAddress(ipaddr, port));
+    IPAddress ipaddr(v6addr);
+    SetAddress(SocketAddress(ipaddr, port));
   } else {
     return false;
   }
@@ -949,12 +973,14 @@ bool StunAddressAttribute::Write(ByteBufferWriter* buf) const {
   switch (address_.family()) {
     case AF_INET: {
       in_addr v4addr = address_.ipaddr().ipv4_address();
-      buf->WriteBytes(reinterpret_cast<uint8_t*>(&v4addr), sizeof(v4addr));
+      buf->Write(std::span<const uint8_t>(reinterpret_cast<uint8_t*>(&v4addr),
+                                          sizeof(v4addr)));
       break;
     }
     case AF_INET6: {
       in6_addr v6addr = address_.ipaddr().ipv6_address();
-      buf->WriteBytes(reinterpret_cast<uint8_t*>(&v6addr), sizeof(v6addr));
+      buf->Write(std::span<const uint8_t>(reinterpret_cast<uint8_t*>(&v6addr),
+                                          sizeof(v6addr)));
       break;
     }
   }
@@ -962,8 +988,8 @@ bool StunAddressAttribute::Write(ByteBufferWriter* buf) const {
 }
 
 StunXorAddressAttribute::StunXorAddressAttribute(uint16_t type,
-                                                 const rtc::SocketAddress& addr)
-    : StunAddressAttribute(type, addr), owner_(NULL) {}
+                                                 const SocketAddress& addr)
+    : StunAddressAttribute(type, addr), owner_(nullptr) {}
 
 StunXorAddressAttribute::StunXorAddressAttribute(uint16_t type,
                                                  uint16_t length,
@@ -978,15 +1004,14 @@ void StunXorAddressAttribute::SetOwner(StunMessage* owner) {
   owner_ = owner;
 }
 
-rtc::IPAddress StunXorAddressAttribute::GetXoredIP() const {
+IPAddress StunXorAddressAttribute::GetXoredIP() const {
   if (owner_) {
-    rtc::IPAddress ip = ipaddr();
+    IPAddress ip = ipaddr();
     switch (ip.family()) {
       case AF_INET: {
         in_addr v4addr = ip.ipv4_address();
-        v4addr.s_addr =
-            (v4addr.s_addr ^ rtc::HostToNetwork32(kStunMagicCookie));
-        return rtc::IPAddress(v4addr);
+        v4addr.s_addr = (v4addr.s_addr ^ HostToNetwork32(kStunMagicCookie));
+        return IPAddress(v4addr);
       }
       case AF_INET6: {
         in6_addr v6addr = ip.ipv6_address();
@@ -998,12 +1023,11 @@ rtc::IPAddress StunXorAddressAttribute::GetXoredIP() const {
           uint32_t* ip_as_ints = reinterpret_cast<uint32_t*>(&v6addr.s6_addr);
           // Transaction ID is in network byte order, but magic cookie
           // is stored in host byte order.
-          ip_as_ints[0] =
-              (ip_as_ints[0] ^ rtc::HostToNetwork32(kStunMagicCookie));
+          ip_as_ints[0] = (ip_as_ints[0] ^ HostToNetwork32(kStunMagicCookie));
           ip_as_ints[1] = (ip_as_ints[1] ^ transactionid_as_ints[0]);
           ip_as_ints[2] = (ip_as_ints[2] ^ transactionid_as_ints[1]);
           ip_as_ints[3] = (ip_as_ints[3] ^ transactionid_as_ints[2]);
-          return rtc::IPAddress(v6addr);
+          return IPAddress(v6addr);
         }
         break;
       }
@@ -1011,15 +1035,15 @@ rtc::IPAddress StunXorAddressAttribute::GetXoredIP() const {
   }
   // Invalid ip family or transaction ID, or missing owner.
   // Return an AF_UNSPEC address.
-  return rtc::IPAddress();
+  return IPAddress();
 }
 
 bool StunXorAddressAttribute::Read(ByteBufferReader* buf) {
   if (!StunAddressAttribute::Read(buf))
     return false;
   uint16_t xoredport = port() ^ (kStunMagicCookie >> 16);
-  rtc::IPAddress xored_ip = GetXoredIP();
-  SetAddress(rtc::SocketAddress(xored_ip, xoredport));
+  IPAddress xored_ip = GetXoredIP();
+  SetAddress(SocketAddress(xored_ip, xoredport));
   return true;
 }
 
@@ -1029,7 +1053,7 @@ bool StunXorAddressAttribute::Write(ByteBufferWriter* buf) const {
     RTC_LOG(LS_ERROR) << "Error writing xor-address attribute: unknown family.";
     return false;
   }
-  rtc::IPAddress xored_ip = GetXoredIP();
+  IPAddress xored_ip = GetXoredIP();
   if (xored_ip.family() == AF_UNSPEC) {
     return false;
   }
@@ -1039,14 +1063,14 @@ bool StunXorAddressAttribute::Write(ByteBufferWriter* buf) const {
   switch (xored_ip.family()) {
     case AF_INET: {
       in_addr v4addr = xored_ip.ipv4_address();
-      buf->WriteBytes(reinterpret_cast<const uint8_t*>(&v4addr),
-                      sizeof(v4addr));
+      buf->Write(std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(&v4addr), sizeof(v4addr)));
       break;
     }
     case AF_INET6: {
       in6_addr v6addr = xored_ip.ipv6_address();
-      buf->WriteBytes(reinterpret_cast<const uint8_t*>(&v6addr),
-                      sizeof(v6addr));
+      buf->Write(std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(&v6addr), sizeof(v6addr)));
       break;
     }
   }
@@ -1107,23 +1131,33 @@ bool StunUInt64Attribute::Write(ByteBufferWriter* buf) const {
 }
 
 StunByteStringAttribute::StunByteStringAttribute(uint16_t type)
-    : StunAttribute(type, 0), bytes_(NULL) {}
+    : StunAttribute(type, 0), bytes_(nullptr) {}
 
 StunByteStringAttribute::StunByteStringAttribute(uint16_t type,
                                                  absl::string_view str)
-    : StunAttribute(type, 0), bytes_(NULL) {
+    : StunAttribute(type, 0), bytes_(nullptr) {
   CopyBytes(str);
 }
 
 StunByteStringAttribute::StunByteStringAttribute(uint16_t type,
-                                                 const void* bytes,
-                                                 size_t length)
-    : StunAttribute(type, 0), bytes_(NULL) {
-  CopyBytes(bytes, length);
+                                                 std::span<const uint8_t> bytes)
+    : StunAttribute(type, 0), bytes_(nullptr) {
+  CopyBytes(bytes);
+}
+
+StunByteStringAttribute::StunByteStringAttribute(
+    uint16_t type,
+    std::span<const uint32_t> values)
+    : StunAttribute(type, 0), bytes_(nullptr) {
+  ByteBufferWriter writer;
+  for (uint32_t value : values) {
+    writer.WriteUInt32(value);
+  }
+  CopyBytes(writer.DataView());
 }
 
 StunByteStringAttribute::StunByteStringAttribute(uint16_t type, uint16_t length)
-    : StunAttribute(type, length), bytes_(NULL) {}
+    : StunAttribute(type, length), bytes_(nullptr) {}
 
 StunByteStringAttribute::~StunByteStringAttribute() {
   delete[] bytes_;
@@ -1133,33 +1167,45 @@ StunAttributeValueType StunByteStringAttribute::value_type() const {
   return STUN_VALUE_BYTE_STRING;
 }
 
+std::optional<std::vector<uint32_t>> StunByteStringAttribute::GetUInt32Vector()
+    const {
+  if (length() % 4 != 0) {
+    return std::nullopt;
+  }
+  std::vector<uint32_t> values;
+  ByteBufferReader reader(array_view());
+  uint32_t value;
+  while (reader.ReadUInt32(&value)) {
+    values.push_back(value);
+  }
+  return values;
+}
+
 void StunByteStringAttribute::CopyBytes(absl::string_view bytes) {
+  CopyBytes(AsUint8Span(bytes));
+}
+
+void StunByteStringAttribute::CopyBytes(std::span<const uint8_t> bytes) {
   uint8_t* new_bytes = new uint8_t[bytes.size()];
   memcpy(new_bytes, bytes.data(), bytes.size());
   SetBytes(new_bytes, bytes.size());
 }
 
-void StunByteStringAttribute::CopyBytes(const void* bytes, size_t length) {
-  uint8_t* new_bytes = new uint8_t[length];
-  memcpy(new_bytes, bytes, length);
-  SetBytes(new_bytes, length);
-}
-
 uint8_t StunByteStringAttribute::GetByte(size_t index) const {
-  RTC_DCHECK(bytes_ != NULL);
+  RTC_DCHECK(bytes_ != nullptr);
   RTC_DCHECK(index < length());
   return bytes_[index];
 }
 
 void StunByteStringAttribute::SetByte(size_t index, uint8_t value) {
-  RTC_DCHECK(bytes_ != NULL);
+  RTC_DCHECK(bytes_ != nullptr);
   RTC_DCHECK(index < length());
   bytes_[index] = value;
 }
 
 bool StunByteStringAttribute::Read(ByteBufferReader* buf) {
   bytes_ = new uint8_t[length()];
-  if (!buf->ReadBytes(rtc::ArrayView<uint8_t>(bytes_, length()))) {
+  if (!buf->ReadBytes(std::span<uint8_t>(bytes_, length()))) {
     return false;
   }
 
@@ -1172,7 +1218,7 @@ bool StunByteStringAttribute::Write(ByteBufferWriter* buf) const {
   if (!LengthValid(type(), length())) {
     return false;
   }
-  buf->WriteBytes(bytes_, length());
+  buf->Write(std::span<const uint8_t>(bytes_, length()));
   WritePadding(buf);
   return true;
 }
@@ -1393,20 +1439,20 @@ bool ComputeStunCredentialHash(const std::string& username,
   input += ':';
   input += password;
 
-  char digest[rtc::MessageDigest::kMaxSize];
-  size_t size = rtc::ComputeDigest(rtc::DIGEST_MD5, input.c_str(), input.size(),
-                                   digest, sizeof(digest));
+  std::array<uint8_t, MessageDigest::kMaxSize> digest;
+  size_t size = ComputeDigest(DIGEST_MD5, AsUint8Span(input), digest);
+
   if (size == 0) {
     return false;
   }
 
-  *hash = std::string(digest, size);
+  *hash = std::string(AsStringView(std::span(digest).first(size)));
   return true;
 }
 
 std::unique_ptr<StunAttribute> CopyStunAttribute(
     const StunAttribute& attribute,
-    rtc::ByteBufferWriter* tmp_buffer_ptr) {
+    ByteBufferWriter* tmp_buffer_ptr) {
   ByteBufferWriter tmpBuffer;
   if (tmp_buffer_ptr == nullptr) {
     tmp_buffer_ptr = &tmpBuffer;
@@ -1423,7 +1469,7 @@ std::unique_ptr<StunAttribute> CopyStunAttribute(
   if (!attribute.Write(tmp_buffer_ptr)) {
     return nullptr;
   }
-  rtc::ByteBufferReader reader(*tmp_buffer_ptr);
+  ByteBufferReader reader(*tmp_buffer_ptr);
   if (!copy->Read(&reader)) {
     return nullptr;
   }
@@ -1431,36 +1477,11 @@ std::unique_ptr<StunAttribute> CopyStunAttribute(
   return copy;
 }
 
-StunAttributeValueType RelayMessage::GetAttributeValueType(int type) const {
-  switch (type) {
-    case STUN_ATTR_LIFETIME:
-      return STUN_VALUE_UINT32;
-    case STUN_ATTR_MAGIC_COOKIE:
-      return STUN_VALUE_BYTE_STRING;
-    case STUN_ATTR_BANDWIDTH:
-      return STUN_VALUE_UINT32;
-    case STUN_ATTR_DESTINATION_ADDRESS:
-      return STUN_VALUE_ADDRESS;
-    case STUN_ATTR_SOURCE_ADDRESS2:
-      return STUN_VALUE_ADDRESS;
-    case STUN_ATTR_DATA:
-      return STUN_VALUE_BYTE_STRING;
-    case STUN_ATTR_OPTIONS:
-      return STUN_VALUE_UINT32;
-    default:
-      return StunMessage::GetAttributeValueType(type);
-  }
-}
-
-StunMessage* RelayMessage::CreateNew() const {
-  return new RelayMessage();
-}
-
 StunAttributeValueType TurnMessage::GetAttributeValueType(int type) const {
   switch (type) {
     case STUN_ATTR_CHANNEL_NUMBER:
       return STUN_VALUE_UINT32;
-    case STUN_ATTR_TURN_LIFETIME:
+    case STUN_ATTR_LIFETIME:
       return STUN_VALUE_UINT32;
     case STUN_ATTR_XOR_PEER_ADDRESS:
       return STUN_VALUE_XOR_ADDRESS;
@@ -1511,15 +1532,15 @@ std::unique_ptr<StunMessage> StunMessage::Clone() const {
   if (!copy) {
     return nullptr;
   }
-  rtc::ByteBufferWriter buf;
+  ByteBufferWriter buf;
   if (!Write(&buf)) {
     return nullptr;
   }
-  rtc::ByteBufferReader reader(buf);
+  ByteBufferReader reader(buf);
   if (!copy->Read(&reader)) {
     return nullptr;
   }
   return copy;
 }
 
-}  // namespace cricket
+}  // namespace webrtc

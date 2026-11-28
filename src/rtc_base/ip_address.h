@@ -11,29 +11,31 @@
 #ifndef RTC_BASE_IP_ADDRESS_H_
 #define RTC_BASE_IP_ADDRESS_H_
 
-#if defined(WEBRTC_POSIX)
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-
-#include "absl/strings/string_view.h"
-#endif
-#if defined(WEBRTC_WIN)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif
-#include <string.h>
-
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <string>
 
+#include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "rtc_base/byte_order.h"
+#include "rtc_base/net_helpers.h"
+#include "rtc_base/system/rtc_export.h"
+
+#if defined(WEBRTC_POSIX)
+#include <arpa/inet.h>  // IWYU pragma: keep
+#include <netdb.h>
+#include <netinet/in.h>  // IWYU pragma: export
+#endif
+
 #if defined(WEBRTC_WIN)
+#include <ws2tcpip.h>
+
 #include "rtc_base/win32.h"
 #endif
-#include "absl/strings/string_view.h"
-#include "rtc_base/system/rtc_export.h"
-namespace rtc {
+
+namespace webrtc {
 
 enum IPv6AddressFlag {
   IPV6_ADDRESS_FLAG_NONE = 0x00,
@@ -46,6 +48,23 @@ enum IPv6AddressFlag {
   // lifetime is reached. It is still valid but just shouldn't be used
   // to create new connection.
   IPV6_ADDRESS_FLAG_DEPRECATED = 1 << 1,
+};
+
+// Used for metrics; Entries should not be renumbered and numeric values should
+// never be reused.
+enum class IPAddressType {
+  // IP Address not yet resolved.
+  kUnknown = 0,
+  // Missing or any IP Address i.e. 0.0.0.0 or ::.
+  kAny = 1,
+  // 127.0.0.1 or ::1.
+  kLoopback = 2,
+  // For v4: 127.0.0.0/8 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12.
+  // For v6: FE80::/16 and ::1.
+  kPrivate = 3,
+  // Addresses not covered by the above.
+  kPublic = 4,
+  kMaxValue = kPublic,
 };
 
 // Version-agnostic IP address class, wraps a union of in_addr and in6_addr.
@@ -82,13 +101,6 @@ class RTC_EXPORT IPAddress {
   bool operator<(const IPAddress& other) const;
   bool operator>(const IPAddress& other) const;
 
-#ifdef WEBRTC_UNIT_TEST
-  inline std::ostream& operator<<(  // no-presubmit-check TODO(webrtc:8982)
-      std::ostream& os) {           // no-presubmit-check TODO(webrtc:8982)
-    return os << ToString();
-  }
-#endif  // WEBRTC_UNIT_TEST
-
   int family() const { return family_; }
   in_addr ipv4_address() const;
   in6_addr ipv6_address() const;
@@ -102,9 +114,32 @@ class RTC_EXPORT IPAddress {
   // Same as ToString but anonymizes it by hiding the last part.
   std::string ToSensitiveString() const;
 
+  // The same string as ToSensitiveString(), stored without heap allocations.
+  // Supports AbslStringify, so that it can be appended to e.g. a StringBuilder
+  // without creating a temporary string:
+  //   sb << IPAddress::Sensitive(ip);
+  class RTC_EXPORT Sensitive {
+   public:
+    explicit Sensitive(const IPAddress& ip);
+
+    absl::string_view view() const;
+
+    template <typename Sink>
+    friend void AbslStringify(Sink& sink, const Sensitive& sensitive) {
+      sink.Append(sensitive.view());
+    }
+
+   private:
+    std::array<char, INET6_ADDRSTRLEN> buffer_;
+    size_t length_ = 0;
+  };
+
   // Returns an unmapped address from a possibly-mapped address.
   // Returns the same address if this isn't a mapped address.
   IPAddress Normalized() const;
+
+  // Returns an unmapped address from multiple IPv4-embedding formats.
+  IPAddress NormalizeWithCheckForEmbeddedIPv4Address() const;
 
   // Returns this address as an IPv6 address.
   // Maps v4 addresses (as ::ffff:a.b.c.d), returns v6 addresses unchanged.
@@ -118,6 +153,29 @@ class RTC_EXPORT IPAddress {
 
   // Whether this is an unspecified IP address.
   bool IsNil() const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const IPAddress& ip) {
+    switch (ip.family_) {
+      case AF_INET:
+        sink.Append("ipv4:");
+        sink.Append(ip.ToString());
+        break;
+      case AF_INET6:
+        sink.Append("ipv6:");
+        sink.Append(ip.ToString());
+        break;
+      case AF_UNSPEC:
+        sink.Append("unspecified");
+        break;
+      default:
+        sink.Append("unknown:");
+        sink.Append(absl::StrCat(ip.family_));
+        sink.Append(":");
+        sink.Append(ip.ToString());
+        break;
+    }
+  }
 
  private:
   int family_;
@@ -180,7 +238,9 @@ size_t HashIP(const IPAddress& ip);
 // These are only really applicable for IPv6 addresses.
 bool IPIs6Bone(const IPAddress& ip);
 bool IPIs6To4(const IPAddress& ip);
+bool IPIsIsatap(const IPAddress& ip);
 RTC_EXPORT bool IPIsMacBased(const IPAddress& ip);
+bool IPIsNat64(const IPAddress& ip);
 bool IPIsSiteLocal(const IPAddress& ip);
 bool IPIsTeredo(const IPAddress& ip);
 bool IPIsULA(const IPAddress& ip);
@@ -193,7 +253,7 @@ int IPAddressPrecedence(const IPAddress& ip);
 // Returns 'ip' truncated to be 'length' bits long.
 RTC_EXPORT IPAddress TruncateIP(const IPAddress& ip, int length);
 
-IPAddress GetLoopbackIP(int family);
+RTC_EXPORT IPAddress GetLoopbackIP(int family);
 IPAddress GetAnyIP(int family);
 
 // Returns the number of contiguously set bits, counting from the MSB in network
@@ -201,6 +261,7 @@ IPAddress GetAnyIP(int family);
 // counted.
 int CountIPMaskBits(const IPAddress& mask);
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // RTC_BASE_IP_ADDRESS_H_

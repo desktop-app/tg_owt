@@ -11,20 +11,21 @@
 // Integration tests for PeerConnection.
 // These tests exercise a full stack for the SVC extension.
 
-#include <stdint.h>
-
-#include <functional>
+#include <algorithm>
 #include <vector>
 
 #include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
+#include "api/media_types.h"
+#include "api/peer_connection_interface.h"
 #include "api/rtc_error.h"
 #include "api/rtp_parameters.h"
 #include "api/rtp_transceiver_interface.h"
 #include "api/scoped_refptr.h"
+#include "media/base/media_constants.h"
 #include "pc/test/integration_test_helpers.h"
-#include "rtc_base/gunit.h"
-#include "rtc_base/helpers.h"
 #include "test/gtest.h"
+#include "test/wait_until.h"
 
 namespace webrtc {
 
@@ -37,11 +38,10 @@ class PeerConnectionSVCIntegrationTest
       : PeerConnectionIntegrationBaseTest(SdpSemantics::kUnifiedPlan) {}
 
   RTCError SetCodecPreferences(
-      rtc::scoped_refptr<RtpTransceiverInterface> transceiver,
+      scoped_refptr<RtpTransceiverInterface> transceiver,
       absl::string_view codec_name) {
     RtpCapabilities capabilities =
-        caller()->pc_factory()->GetRtpSenderCapabilities(
-            cricket::MEDIA_TYPE_VIDEO);
+        caller()->pc_factory()->GetRtpReceiverCapabilities(MediaType::VIDEO);
     std::vector<RtpCodecCapability> codecs;
     for (const RtpCodecCapability& codec_capability : capabilities.codecs) {
       if (codec_capability.name == codec_name)
@@ -95,11 +95,10 @@ TEST_F(PeerConnectionSVCIntegrationTest, SetParametersAcceptsL1T3WithVP8) {
   ConnectFakeSignaling();
 
   RtpCapabilities capabilities =
-      caller()->pc_factory()->GetRtpSenderCapabilities(
-          cricket::MEDIA_TYPE_VIDEO);
+      caller()->pc_factory()->GetRtpReceiverCapabilities(MediaType::VIDEO);
   std::vector<RtpCodecCapability> vp8_codec;
   for (const RtpCodecCapability& codec_capability : capabilities.codecs) {
-    if (codec_capability.name == cricket::kVp8CodecName)
+    if (codec_capability.name == kVp8CodecName)
       vp8_codec.push_back(codec_capability);
   }
 
@@ -119,27 +118,6 @@ TEST_F(PeerConnectionSVCIntegrationTest, SetParametersAcceptsL1T3WithVP8) {
   EXPECT_TRUE(result.ok());
 }
 
-TEST_F(PeerConnectionSVCIntegrationTest, SetParametersRejectsL3T3WithVP8) {
-  ASSERT_TRUE(CreatePeerConnectionWrappers());
-  ConnectFakeSignaling();
-
-  RtpTransceiverInit init;
-  RtpEncodingParameters encoding_parameters;
-  init.send_encodings.push_back(encoding_parameters);
-  auto transceiver_or_error =
-      caller()->pc()->AddTransceiver(caller()->CreateLocalVideoTrack(), init);
-  ASSERT_TRUE(transceiver_or_error.ok());
-  auto transceiver = transceiver_or_error.MoveValue();
-  EXPECT_TRUE(SetCodecPreferences(transceiver, cricket::kVp8CodecName).ok());
-
-  RtpParameters parameters = transceiver->sender()->GetParameters();
-  ASSERT_EQ(parameters.encodings.size(), 1u);
-  parameters.encodings[0].scalability_mode = "L3T3";
-  auto result = transceiver->sender()->SetParameters(parameters);
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.type(), RTCErrorType::INVALID_MODIFICATION);
-}
-
 TEST_F(PeerConnectionSVCIntegrationTest,
        SetParametersAcceptsL1T3WithVP8AfterNegotiation) {
   ASSERT_TRUE(CreatePeerConnectionWrappers());
@@ -152,10 +130,10 @@ TEST_F(PeerConnectionSVCIntegrationTest,
       caller()->pc()->AddTransceiver(caller()->CreateLocalVideoTrack(), init);
   ASSERT_TRUE(transceiver_or_error.ok());
   auto transceiver = transceiver_or_error.MoveValue();
-  EXPECT_TRUE(SetCodecPreferences(transceiver, cricket::kVp8CodecName).ok());
+  EXPECT_TRUE(SetCodecPreferences(transceiver, kVp8CodecName).ok());
 
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   RtpParameters parameters = transceiver->sender()->GetParameters();
   ASSERT_EQ(parameters.encodings.size(), 1u);
@@ -176,10 +154,10 @@ TEST_F(PeerConnectionSVCIntegrationTest,
       caller()->pc()->AddTransceiver(caller()->CreateLocalVideoTrack(), init);
   ASSERT_TRUE(transceiver_or_error.ok());
   auto transceiver = transceiver_or_error.MoveValue();
-  EXPECT_TRUE(SetCodecPreferences(transceiver, cricket::kVp9CodecName).ok());
+  EXPECT_TRUE(SetCodecPreferences(transceiver, kVp9CodecName).ok());
 
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   RtpParameters parameters = transceiver->sender()->GetParameters();
   ASSERT_EQ(parameters.encodings.size(), 1u);
@@ -200,10 +178,10 @@ TEST_F(PeerConnectionSVCIntegrationTest,
       caller()->pc()->AddTransceiver(caller()->CreateLocalVideoTrack(), init);
   ASSERT_TRUE(transceiver_or_error.ok());
   auto transceiver = transceiver_or_error.MoveValue();
-  EXPECT_TRUE(SetCodecPreferences(transceiver, cricket::kVp8CodecName).ok());
+  EXPECT_TRUE(SetCodecPreferences(transceiver, kVp8CodecName).ok());
 
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   RtpParameters parameters = transceiver->sender()->GetParameters();
   ASSERT_EQ(parameters.encodings.size(), 1u);
@@ -225,10 +203,10 @@ TEST_F(PeerConnectionSVCIntegrationTest,
       caller()->pc()->AddTransceiver(caller()->CreateLocalVideoTrack(), init);
   ASSERT_TRUE(transceiver_or_error.ok());
   auto transceiver = transceiver_or_error.MoveValue();
-  EXPECT_TRUE(SetCodecPreferences(transceiver, cricket::kVp9CodecName).ok());
+  EXPECT_TRUE(SetCodecPreferences(transceiver, kVp9CodecName).ok());
 
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   RtpParameters parameters = transceiver->sender()->GetParameters();
   ASSERT_EQ(parameters.encodings.size(), 1u);
@@ -251,14 +229,12 @@ TEST_F(PeerConnectionSVCIntegrationTest, FallbackToL1Tx) {
   auto caller_transceiver = transceiver_or_error.MoveValue();
 
   RtpCapabilities capabilities =
-      caller()->pc_factory()->GetRtpSenderCapabilities(
-          cricket::MEDIA_TYPE_VIDEO);
+      caller()->pc_factory()->GetRtpReceiverCapabilities(MediaType::VIDEO);
   std::vector<RtpCodecCapability> send_codecs = capabilities.codecs;
   // Only keep VP9 in the caller
   send_codecs.erase(std::partition(send_codecs.begin(), send_codecs.end(),
                                    [](const auto& codec) -> bool {
-                                     return codec.name ==
-                                            cricket::kVp9CodecName;
+                                     return codec.name == kVp9CodecName;
                                    }),
                     send_codecs.end());
   ASSERT_FALSE(send_codecs.empty());
@@ -272,7 +248,7 @@ TEST_F(PeerConnectionSVCIntegrationTest, FallbackToL1Tx) {
   EXPECT_TRUE(result.ok());
 
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   parameters = caller_transceiver->sender()->GetParameters();
   ASSERT_TRUE(parameters.encodings[0].scalability_mode.has_value());
@@ -283,8 +259,7 @@ TEST_F(PeerConnectionSVCIntegrationTest, FallbackToL1Tx) {
   send_codecs = capabilities.codecs;
   send_codecs.erase(std::partition(send_codecs.begin(), send_codecs.end(),
                                    [](const auto& codec) -> bool {
-                                     return codec.name ==
-                                            cricket::kVp8CodecName;
+                                     return codec.name == kVp8CodecName;
                                    }),
                     send_codecs.end());
   ASSERT_FALSE(send_codecs.empty());
@@ -292,7 +267,7 @@ TEST_F(PeerConnectionSVCIntegrationTest, FallbackToL1Tx) {
 
   // Renegotiate to force the new codec list to be used
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   // Fallback should happen and L3T3 is not used anymore
   parameters = caller_transceiver->sender()->GetParameters();

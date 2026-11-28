@@ -10,9 +10,12 @@
 
 #include "rtc_base/network_constants.h"
 
+#include <string>
+
+#include "absl/strings/string_view.h"
 #include "rtc_base/checks.h"
 
-namespace rtc {
+namespace webrtc {
 
 std::string AdapterTypeToString(AdapterType type) {
   switch (type) {
@@ -44,4 +47,13 @@ std::string AdapterTypeToString(AdapterType type) {
   }
 }
 
-}  // namespace rtc
+absl::string_view NetworkSliceToString(NetworkSlice network_slice) {
+  switch (network_slice) {
+    case NetworkSlice::NO_SLICE:
+      return "NO_SLICE";
+    case NetworkSlice::UNIFIED_COMMUNICATIONS:
+      return "UNIFIED_COMMUNICATIONS";
+  }
+}
+
+}  // namespace webrtc

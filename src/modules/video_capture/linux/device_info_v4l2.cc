@@ -10,25 +10,21 @@
 
 #include "modules/video_capture/linux/device_info_v4l2.h"
 
-#include <errno.h>
 #include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <linux/videodev2.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-// v4l includes
-#if defined(__OpenBSD__)
-#include <sys/videoio.h>
-#else
-#include <linux/videodev2.h>
-#endif
 
-#include <vector>
+#include <cerrno>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
-#include "modules/video_capture/video_capture.h"
+#include "common_video/libyuv/include/webrtc_libyuv.h"
+#include "modules/video_capture/device_info_impl.h"
 #include "modules/video_capture/video_capture_defines.h"
-#include "modules/video_capture/video_capture_impl.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 
 // These defines are here to support building on kernel 3.16 which some
@@ -132,6 +128,7 @@ int32_t DeviceInfoV4l2::GetDeviceName(uint32_t deviceNumber,
 
   char cameraName[64];
   memset(deviceNameUTF8, 0, deviceNameLength);
+  memset(deviceUniqueIdUTF8, 0, deviceUniqueIdUTF8Length);
   memcpy(cameraName, cap.card, sizeof(cap.card));
 
   if (deviceNameLength > strlen(cameraName)) {
@@ -145,7 +142,6 @@ int32_t DeviceInfoV4l2::GetDeviceName(uint32_t deviceNumber,
     // copy device id
     size_t len = strlen(reinterpret_cast<const char*>(cap.bus_info));
     if (deviceUniqueIdUTF8Length > len) {
-      memset(deviceUniqueIdUTF8, 0, deviceUniqueIdUTF8Length);
       memcpy(deviceUniqueIdUTF8, cap.bus_info, len);
     } else {
       RTC_LOG(LS_INFO) << "buffer passed is too small";

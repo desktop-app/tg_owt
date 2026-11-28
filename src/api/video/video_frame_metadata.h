@@ -12,12 +12,12 @@
 #define API_VIDEO_VIDEO_FRAME_METADATA_H_
 
 #include <cstdint>
+#include <optional>
+#include <span>
+#include <variant>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/types/optional.h"
-#include "absl/types/variant.h"
-#include "api/array_view.h"
 #include "api/transport/rtp/dependency_descriptor.h"
 #include "api/video/video_codec_type.h"
 #include "api/video/video_content_type.h"
@@ -30,10 +30,10 @@
 
 namespace webrtc {
 
-using RTPVideoHeaderCodecSpecifics = absl::variant<absl::monostate,
-                                                   RTPVideoHeaderVP8,
-                                                   RTPVideoHeaderVP9,
-                                                   RTPVideoHeaderH264>;
+using RTPVideoHeaderCodecSpecifics = std::variant<std::monostate,
+                                                  RTPVideoHeaderVP8,
+                                                  RTPVideoHeaderVP9,
+                                                  RTPVideoHeaderH264>;
 
 // A subset of metadata from the RTP video header, exposed in insertable streams
 // API.
@@ -58,8 +58,8 @@ class RTC_EXPORT VideoFrameMetadata {
   VideoContentType GetContentType() const;
   void SetContentType(VideoContentType content_type);
 
-  absl::optional<int64_t> GetFrameId() const;
-  void SetFrameId(absl::optional<int64_t> frame_id);
+  std::optional<int64_t> GetFrameId() const;
+  void SetFrameId(std::optional<int64_t> frame_id);
 
   int GetSpatialIndex() const;
   void SetSpatialIndex(int spatial_index);
@@ -67,13 +67,18 @@ class RTC_EXPORT VideoFrameMetadata {
   int GetTemporalIndex() const;
   void SetTemporalIndex(int temporal_index);
 
-  rtc::ArrayView<const int64_t> GetFrameDependencies() const;
-  void SetFrameDependencies(rtc::ArrayView<const int64_t> frame_dependencies);
+  // TODO: https://issues.webrtc.org/515776877 - Remove this method.
+  [[deprecated("Use GetDependencies instead")]]
+  std::span<const int64_t> GetFrameDependencies() const;
+  // TODO: https://issues.webrtc.org/515776877 - Remove this method.
+  [[deprecated("Use SetDependencies instead")]]
+  void SetFrameDependencies(std::span<const int64_t> frame_dependencies);
+  std::optional<std::span<const int64_t>> GetDependencies() const;
+  void SetDependencies(std::optional<std::span<const int64_t>> dependencies);
 
-  rtc::ArrayView<const DecodeTargetIndication> GetDecodeTargetIndications()
-      const;
+  std::span<const DecodeTargetIndication> GetDecodeTargetIndications() const;
   void SetDecodeTargetIndications(
-      rtc::ArrayView<const DecodeTargetIndication> decode_target_indications);
+      std::span<const DecodeTargetIndication> decode_target_indications);
 
   bool GetIsLastFrameInPicture() const;
   void SetIsLastFrameInPicture(bool is_last_frame_in_picture);
@@ -91,7 +96,7 @@ class RTC_EXPORT VideoFrameMetadata {
 
   uint32_t GetSsrc() const;
   void SetSsrc(uint32_t ssrc);
-  std::vector<uint32_t> GetCsrcs() const;
+  const std::vector<uint32_t>& GetCsrcs() const;
   void SetCsrcs(std::vector<uint32_t> csrcs);
 
   friend bool operator==(const VideoFrameMetadata& lhs,
@@ -107,10 +112,10 @@ class RTC_EXPORT VideoFrameMetadata {
   VideoContentType content_type_ = VideoContentType::UNSPECIFIED;
 
   // Corresponding to GenericDescriptorInfo.
-  absl::optional<int64_t> frame_id_;
+  std::optional<int64_t> frame_id_;
   int spatial_index_ = 0;
   int temporal_index_ = 0;
-  absl::InlinedVector<int64_t, 5> frame_dependencies_;
+  std::optional<absl::InlinedVector<int64_t, 5>> frame_dependencies_;
   absl::InlinedVector<DecodeTargetIndication, 10> decode_target_indications_;
 
   bool is_last_frame_in_picture_ = true;

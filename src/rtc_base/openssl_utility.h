@@ -12,14 +12,17 @@
 #define RTC_BASE_OPENSSL_UTILITY_H_
 
 #include <openssl/ossl_typ.h>
+#ifdef OPENSSL_IS_BORINGSSL
+#include <openssl/pool.h>
+#endif
+#include <openssl/x509.h>
 
 #include <cstdint>
 #include <span>
-#include <string>
 
 #include "absl/strings/string_view.h"
 
-namespace rtc {
+namespace webrtc {
 // The openssl namespace holds static helper methods. All methods related
 // to OpenSSL that are commonly used and don't require global state should be
 // placed here.
@@ -52,9 +55,20 @@ bool VerifyPeerCertMatchesHost(SSL* ssl, absl::string_view host);
 // SEQUENCE (not covered by the issuer's signature) this parser rejects.
 bool IsDistrustedCertificate(std::span<const uint8_t> cert_der);
 
+// Returns true if any certificate in `chain` is distrusted according to
+// IsDistrustedCertificate().
+#ifdef OPENSSL_IS_BORINGSSL
+bool ContainsDistrustedCertificate(const STACK_OF(CRYPTO_BUFFER) * chain);
+#endif
+bool ContainsDistrustedCertificate(const STACK_OF(X509) * chain);
+
 // Logs all the errors in the OpenSSL errror queue from the current thread. A
 // prefix can be provided for context.
 void LogSSLErrors(absl::string_view prefix);
+
+// Logs a human-readable description of the SSL connection's handshake state
+// and any alerts. Intended to be installed via SSL_CTX_set_info_callback().
+void SSLInfoCallback(const SSL* ssl, int where, int ret);
 
 #ifndef WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS
 // Attempt to add the certificates from the loader into the SSL_CTX. False is
@@ -68,6 +82,7 @@ CRYPTO_BUFFER_POOL* GetBufferPool();
 #endif
 
 }  // namespace openssl
-}  // namespace rtc
+}  // namespace webrtc
+
 
 #endif  // RTC_BASE_OPENSSL_UTILITY_H_

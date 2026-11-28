@@ -13,22 +13,21 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/transport/field_trial_based_config.h"
+#include "api/field_trials.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_rate.h"
 #include "api/units/data_size.h"
 #include "api/units/timestamp.h"
 #include "modules/congestion_controller/goog_cc/bitrate_estimator.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
-using ::testing::_;
 using ::testing::InSequence;
-using ::testing::NiceMock;
 using ::testing::Return;
 
 namespace webrtc {
@@ -47,12 +46,12 @@ class MockBitrateEstimator : public BitrateEstimator {
               Update,
               (Timestamp at_time, DataSize data_size, bool in_alr),
               (override));
-  MOCK_METHOD(absl::optional<DataRate>, bitrate, (), (const, override));
+  MOCK_METHOD(std::optional<DataRate>, bitrate, (), (const, override));
   MOCK_METHOD(void, ExpectFastRateChange, (), (override));
 };
 
 struct AcknowledgedBitrateEstimatorTestStates {
-  FieldTrialBasedConfig field_trial_config;
+  FieldTrials field_trial_config = CreateTestFieldTrials();
   std::unique_ptr<AcknowledgedBitrateEstimator> acknowledged_bitrate_estimator;
   MockBitrateEstimator* mock_bitrate_estimator;
 };
@@ -134,11 +133,11 @@ TEST(TestAcknowledgedBitrateEstimator, ExpectFastRateChangeWhenLeftAlr) {
 
 TEST(TestAcknowledgedBitrateEstimator, ReturnBitrate) {
   auto states = CreateTestStates();
-  absl::optional<DataRate> return_value = DataRate::KilobitsPerSec(42);
+  std::optional<DataRate> return_value = DataRate::KilobitsPerSec(42);
   EXPECT_CALL(*states.mock_bitrate_estimator, bitrate())
       .Times(1)
       .WillOnce(Return(return_value));
   EXPECT_EQ(return_value, states.acknowledged_bitrate_estimator->bitrate());
 }
 
-}  // namespace webrtc*/
+}  // namespace webrtc

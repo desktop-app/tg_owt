@@ -11,33 +11,29 @@
 #ifndef API_MEDIA_TYPES_H_
 #define API_MEDIA_TYPES_H_
 
-#include <string>
-
+#include "absl/strings/string_view.h"
 #include "rtc_base/system/rtc_export.h"
 
-// The cricket and webrtc have separate definitions for what a media type is.
-// They're not compatible. Watch out for this.
+namespace webrtc {
 
-namespace cricket {
-
-enum MediaType {
-  MEDIA_TYPE_AUDIO,
-  MEDIA_TYPE_VIDEO,
-  MEDIA_TYPE_DATA,
-  MEDIA_TYPE_UNSUPPORTED
+enum class MediaType {
+  AUDIO,
+  VIDEO,
+  DATA,
+  UNSUPPORTED,
+  ANY,
 };
+
+RTC_EXPORT absl::string_view MediaTypeToString(MediaType type);
+
+template <typename Sink>
+void AbslStringify(Sink& sink, MediaType type) {
+  sink.Append(MediaTypeToString(type));
+}
 
 extern const char kMediaTypeAudio[];
 extern const char kMediaTypeVideo[];
 extern const char kMediaTypeData[];
-
-RTC_EXPORT std::string MediaTypeToString(MediaType type);
-
-}  // namespace cricket
-
-namespace webrtc {
-
-enum class MediaType { ANY, AUDIO, VIDEO, DATA };
 
 }  // namespace webrtc
 

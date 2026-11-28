@@ -53,13 +53,19 @@ static RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *gWebRTCConfiguration = nil;
 @synthesize outputNumberOfChannels = _outputNumberOfChannels;
 
 - (instancetype)init {
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     // Use a category which supports simultaneous recording and playback.
     // By default, using this category implies that our app’s audio is
     // nonmixable, hence activating the session will interrupt any other
     // audio sessions which are also nonmixable.
     _category = AVAudioSessionCategoryPlayAndRecord;
+#if defined(__IPHONE_26_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_26_0
+    _categoryOptions = AVAudioSessionCategoryOptionAllowBluetoothHFP;
+#else
+    // Use the deprecated option on older SDKs.
     _categoryOptions = AVAudioSessionCategoryOptionAllowBluetooth;
+#endif
 
     // Specify mode for two-way voice communication (e.g. VoIP).
     _mode = AVAudioSessionModeVoiceChat;
@@ -84,7 +90,8 @@ static RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *gWebRTCConfiguration = nil;
 }
 
 + (instancetype)currentConfiguration {
-  RTC_OBJC_TYPE(RTCAudioSession) *session = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+  RTC_OBJC_TYPE(RTCAudioSession) *session =
+      [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
   RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *config =
       [[RTC_OBJC_TYPE(RTCAudioSessionConfiguration) alloc] init];
   config.category = session.category;
@@ -103,7 +110,8 @@ static RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *gWebRTCConfiguration = nil;
   }
 }
 
-+ (void)setWebRTCConfiguration:(RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *)configuration {
++ (void)setWebRTCConfiguration:
+    (RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *)configuration {
   @synchronized(self) {
     gWebRTCConfiguration = configuration;
   }

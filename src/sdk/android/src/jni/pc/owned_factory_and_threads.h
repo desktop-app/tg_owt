@@ -11,12 +11,13 @@
 #ifndef SDK_ANDROID_SRC_JNI_PC_OWNED_FACTORY_AND_THREADS_H_
 #define SDK_ANDROID_SRC_JNI_PC_OWNED_FACTORY_AND_THREADS_H_
 
-#include <jni.h>
-
 #include <memory>
-#include <utility>
+#include <optional>
 
+#include "api/environment/environment.h"
 #include "api/peer_connection_interface.h"
+#include "api/scoped_refptr.h"
+#include "rtc_base/socket_factory.h"
 #include "rtc_base/thread.h"
 
 namespace webrtc {
@@ -31,28 +32,52 @@ namespace jni {
 class OwnedFactoryAndThreads {
  public:
   OwnedFactoryAndThreads(
-      std::unique_ptr<rtc::SocketFactory> socket_factory,
-      std::unique_ptr<rtc::Thread> network_thread,
-      std::unique_ptr<rtc::Thread> worker_thread,
-      std::unique_ptr<rtc::Thread> signaling_thread,
-      const rtc::scoped_refptr<PeerConnectionFactoryInterface>& factory);
+      std::unique_ptr<SocketFactory> socket_factory,
+      std::unique_ptr<Thread> network_thread,
+      std::unique_ptr<Thread> worker_thread,
+      std::unique_ptr<Thread> signaling_thread,
+      const Environment& env,
+      const scoped_refptr<PeerConnectionFactoryInterface>& factory);
+
+  [[deprecated("Use webrtc::Environment constructor.")]]
+  OwnedFactoryAndThreads(
+      std::unique_ptr<SocketFactory> socket_factory,
+      std::unique_ptr<Thread> network_thread,
+      std::unique_ptr<Thread> worker_thread,
+      std::unique_ptr<Thread> signaling_thread,
+      const scoped_refptr<PeerConnectionFactoryInterface>& factory);
 
   ~OwnedFactoryAndThreads() = default;
 
   PeerConnectionFactoryInterface* factory() { return factory_.get(); }
-  rtc::SocketFactory* socket_factory() { return socket_factory_.get(); }
-  rtc::Thread* network_thread() { return network_thread_.get(); }
-  rtc::Thread* signaling_thread() { return signaling_thread_.get(); }
-  rtc::Thread* worker_thread() { return worker_thread_.get(); }
+  SocketFactory* socket_factory() { return socket_factory_.get(); }
+  Thread* network_thread() { return network_thread_.get(); }
+  Thread* signaling_thread() { return signaling_thread_.get(); }
+  // Callers may not supply a separate worker thread, in which case the network
+  // thread also acts as the worker thread. See
+  // https://groups.google.com/g/discuss-webrtc/c/Fs_Hd5XNJh0
+  Thread* worker_thread() {
+    return worker_thread_ != nullptr ? worker_thread_.get()
+                                     : network_thread_.get();
+  }
+  std::optional<Environment> env() const { return env_; }
 
  private:
-  // Usually implemented by the SocketServer associated with the network thread,
-  // so needs to outlive the network thread.
-  const std::unique_ptr<rtc::SocketFactory> socket_factory_;
-  const std::unique_ptr<rtc::Thread> network_thread_;
-  const std::unique_ptr<rtc::Thread> worker_thread_;
-  const std::unique_ptr<rtc::Thread> signaling_thread_;
-  const rtc::scoped_refptr<PeerConnectionFactoryInterface> factory_;
+  // The declaration order here determines the destruction order (reverse).
+  // 1. `factory_` is destroyed first.
+  // 2. `network_thread_` and `worker_thread_` are stopped/destroyed.
+  // 3. `signaling_thread_` is destroyed after them to ensure worker and network
+  //    threads can safely marshal tasks (e.g. proxy releases) to the signaling
+  //    thread during their destruction.
+  // 4. `socket_factory_` is destroyed.
+  // 5. `env_` is destroyed last to ensure core utilities (Clock, FieldTrials)
+  //    outlive all other objects.
+  const std::optional<Environment> env_;
+  const std::unique_ptr<SocketFactory> socket_factory_;
+  const std::unique_ptr<Thread> signaling_thread_;
+  const std::unique_ptr<Thread> worker_thread_;
+  const std::unique_ptr<Thread> network_thread_;
+  const scoped_refptr<PeerConnectionFactoryInterface> factory_;
 };
 
 }  // namespace jni

@@ -9,18 +9,18 @@
  */
 #include "net/dcsctp/packet/chunk/sack_chunk.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <set>
+#include <span>
 #include <string>
-#include <type_traits>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/packet/bounded_byte_reader.h"
 #include "net/dcsctp/packet/bounded_byte_writer.h"
-#include "net/dcsctp/packet/tlv_trait.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/strings/str_join.h"
 #include "rtc_base/strings/string_builder.h"
@@ -56,12 +56,11 @@ namespace dcsctp {
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //  |                       Duplicate TSN X                         |
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int SackChunk::kType;
 
-absl::optional<SackChunk> SackChunk::Parse(rtc::ArrayView<const uint8_t> data) {
-  absl::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
+std::optional<SackChunk> SackChunk::Parse(std::span<const uint8_t> data) {
+  std::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
   if (!reader.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   TSN tsn_ack(reader->Load32<4>());
@@ -72,7 +71,7 @@ absl::optional<SackChunk> SackChunk::Parse(rtc::ArrayView<const uint8_t> data) {
   if (reader->variable_data_size() != nbr_of_gap_blocks * kGapAckBlockSize +
                                           nbr_of_dup_tsns * kDupTsnBlockSize) {
     RTC_DLOG(LS_WARNING) << "Invalid number of gap blocks or duplicate TSNs";
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   std::vector<GapAckBlock> gap_ack_blocks;
@@ -135,7 +134,7 @@ void SackChunk::SerializeTo(std::vector<uint8_t>& out) const {
 }
 
 std::string SackChunk::ToString() const {
-  rtc::StringBuilder sb;
+  webrtc::StringBuilder sb;
   sb << "SACK, cum_ack_tsn=" << *cumulative_tsn_ack()
      << ", a_rwnd=" << a_rwnd();
   for (const GapAckBlock& gap : gap_ack_blocks_) {
@@ -145,8 +144,9 @@ std::string SackChunk::ToString() const {
   }
   if (!duplicate_tsns_.empty()) {
     sb << ", dup_tsns="
-       << StrJoin(duplicate_tsns(), ",",
-                  [](rtc::StringBuilder& sb, TSN tsn) { sb << *tsn; });
+       << webrtc::StrJoin(
+              duplicate_tsns(), ",",
+              [](webrtc::StringBuilder& sb, TSN tsn) { sb << *tsn; });
   }
 
   return sb.Release();

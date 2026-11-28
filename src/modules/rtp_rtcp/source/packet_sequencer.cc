@@ -10,8 +10,17 @@
 
 #include "modules/rtp_rtcp/source/packet_sequencer.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/random.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
@@ -24,7 +33,7 @@ constexpr uint32_t kTimestampTicksPerMs = 90;
 }  // namespace
 
 PacketSequencer::PacketSequencer(uint32_t media_ssrc,
-                                 absl::optional<uint32_t> rtx_ssrc,
+                                 std::optional<uint32_t> rtx_ssrc,
                                  bool require_marker_before_media_padding,
                                  Clock* clock)
     : media_ssrc_(media_ssrc),
@@ -38,9 +47,10 @@ PacketSequencer::PacketSequencer(uint32_t media_ssrc,
       last_packet_marker_bit_(false) {
   Random random(clock_->TimeInMicroseconds());
   // Random start, 16 bits. Upper half of range is avoided in order to prevent
-  // wraparound issues during startup. Sequence number 0 is avoided for
-  // historical reasons, presumably to avoid debugability or test usage
-  // conflicts.
+  // SRTP wraparound issues during startup. See this unit test for details:
+  // SrtpSessionTest.ProtectUnprotectWrapAroundRocMismatch
+  // Sequence number 0 is avoided for historical reasons, presumably to avoid
+  // debugability or test usage conflicts.
   constexpr uint16_t kMaxInitRtpSeqNumber = 0x7fff;  // 2^15 - 1.
   media_sequence_number_ = random.Rand(1, kMaxInitRtpSeqNumber);
   rtx_sequence_number_ = random.Rand(1, kMaxInitRtpSeqNumber);

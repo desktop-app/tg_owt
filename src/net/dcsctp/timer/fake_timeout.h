@@ -10,15 +10,14 @@
 #ifndef NET_DCSCTP_TIMER_FAKE_TIMEOUT_H_
 #define NET_DCSCTP_TIMER_FAKE_TIMEOUT_H_
 
-#include <cstdint>
 #include <functional>
-#include <limits>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/task_queue/task_queue_base.h"
+#include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "net/dcsctp/public/timeout.h"
 #include "net/dcsctp/public/types.h"
@@ -79,7 +78,7 @@ class FakeTimeoutManager {
     return timer;
   }
   std::unique_ptr<FakeTimeout> CreateTimeout(
-      webrtc::TaskQueueBase::DelayPrecision precision) {
+      webrtc::TaskQueueBase::DelayPrecision /* precision */) {
     // FakeTimeout does not support implement |precision|.
     return CreateTimeout();
   }
@@ -89,7 +88,7 @@ class FakeTimeoutManager {
   // still believes it's running, and it needs to be updated to set
   // Timer::is_running_ to false before you operate on the Timer or Timeout
   // again.
-  absl::optional<TimeoutID> GetNextExpiredTimeout() {
+  std::optional<TimeoutID> GetNextExpiredTimeout() {
     webrtc::Timestamp now = get_time_();
     std::vector<TimeoutID> expired_timers;
     for (auto& timer : timers_) {
@@ -97,7 +96,7 @@ class FakeTimeoutManager {
         return timer->timeout_id();
       }
     }
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   webrtc::TimeDelta GetTimeToNextTimeout() const {

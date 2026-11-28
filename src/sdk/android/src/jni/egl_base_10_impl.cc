@@ -9,6 +9,7 @@
  */
 
 #include <EGL/egl.h>
+#include <jni.h>
 
 #include "sdk/android/generated_video_egl_jni/EglBase10Impl_jni.h"
 
@@ -21,3 +22,5 @@ static jlong JNI_EglBase10Impl_GetCurrentNativeEGLContext(JNIEnv* jni) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(EglBase10Impl)

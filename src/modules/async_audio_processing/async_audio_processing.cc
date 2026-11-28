@@ -10,11 +10,12 @@
  */
 #include "modules/async_audio_processing/async_audio_processing.h"
 
+#include <memory>
 #include <utility>
 
 #include "api/audio/audio_frame.h"
+#include "api/audio/audio_frame_processor.h"
 #include "api/task_queue/task_queue_factory.h"
-#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -61,9 +62,9 @@ AsyncAudioProcessing::AsyncAudioProcessing(
       frame_processor_(frame_processor),
       task_queue_(task_queue_factory.CreateTaskQueue(
           "AsyncAudioProcessing",
-          TaskQueueFactory::Priority::NORMAL)) {
+          TaskQueueFactory::Priority::kNormal)) {
   frame_processor_.SetSink([this](std::unique_ptr<AudioFrame> frame) {
-    task_queue_.PostTask([this, frame = std::move(frame)]() mutable {
+    task_queue_->PostTask([this, frame = std::move(frame)]() mutable {
       on_frame_processed_callback_(std::move(frame));
     });
   });
@@ -78,9 +79,9 @@ AsyncAudioProcessing::AsyncAudioProcessing(
       owned_frame_processor_(std::move(frame_processor)),
       task_queue_(task_queue_factory.CreateTaskQueue(
           "AsyncAudioProcessing",
-          TaskQueueFactory::Priority::NORMAL)) {
+          TaskQueueFactory::Priority::kNormal)) {
   owned_frame_processor_->SetSink([this](std::unique_ptr<AudioFrame> frame) {
-    task_queue_.PostTask([this, frame = std::move(frame)]() mutable {
+    task_queue_->PostTask([this, frame = std::move(frame)]() mutable {
       on_frame_processed_callback_(std::move(frame));
     });
   });
@@ -88,11 +89,11 @@ AsyncAudioProcessing::AsyncAudioProcessing(
 
 void AsyncAudioProcessing::Process(std::unique_ptr<AudioFrame> frame) {
   if (owned_frame_processor_) {
-    task_queue_.PostTask([this, frame = std::move(frame)]() mutable {
+    task_queue_->PostTask([this, frame = std::move(frame)]() mutable {
       owned_frame_processor_->Process(std::move(frame));
     });
   } else {
-    task_queue_.PostTask([this, frame = std::move(frame)]() mutable {
+    task_queue_->PostTask([this, frame = std::move(frame)]() mutable {
       frame_processor_.Process(std::move(frame));
     });
   }

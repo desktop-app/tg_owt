@@ -123,7 +123,7 @@ class JNIEnvironment {
 //   JNIEnv* jni = ::base::android::AttachCurrentThread();
 //   JavaVM* jvm = NULL;
 //   jni->GetJavaVM(&jvm);
-//   webrtc::JVM::Initialize(jvm);
+//   JVM::Initialize(jvm);
 //
 //   // Header (.h) file of example class called User.
 //   std::unique_ptr<JNIEnvironment> env;
@@ -162,6 +162,8 @@ class JVM {
   // Gives access to the global Java VM interface pointer, which then can be
   // used to create a valid JNIEnvironment object or to get a JavaClass object.
   static JVM* GetInstance();
+  // Returns true if JVM has been initialized.
+  static bool IsInitialized();
 
   // Creates a JNIEnvironment object.
   // This method returns a NULL pointer if AttachCurrentThread() has not been

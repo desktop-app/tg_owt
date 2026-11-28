@@ -10,16 +10,25 @@
 
 #include "pc/test/fake_audio_capture_module.h"
 
-#include <string.h>
-
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <optional>
 
+#include "api/audio/audio_device_defines.h"
 #include "api/scoped_refptr.h"
-#include "rtc_base/gunit.h"
+#include "api/test/rtc_error_matchers.h"
+#include "api/units/time_delta.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
+#include "test/wait_until.h"
 
-class FakeAdmTest : public ::testing::Test, public webrtc::AudioTransport {
+namespace webrtc {
+namespace {
+
+class FakeAdmTest : public ::testing::Test, public AudioTransport {
  protected:
   static const int kMsInSecond = 1000;
 
@@ -30,22 +39,31 @@ class FakeAdmTest : public ::testing::Test, public webrtc::AudioTransport {
 
   void SetUp() override {
     fake_audio_capture_module_ = FakeAudioCaptureModule::Create();
-    EXPECT_TRUE(fake_audio_capture_module_.get() != NULL);
+    fake_audio_capture_module_->Init();
+    EXPECT_TRUE(fake_audio_capture_module_.get() != nullptr);
+    EXPECT_TRUE(fake_audio_capture_module_->Initialized());
   }
 
-  // Callbacks inherited from webrtc::AudioTransport.
+  void TearDown() override {
+    fake_audio_capture_module_->Terminate();
+    EXPECT_FALSE(fake_audio_capture_module_->Initialized());
+  }
+
+  // Callbacks inherited from AudioTransport.
   // ADM is pushing data.
-  int32_t RecordedDataIsAvailable(const void* audioSamples,
-                                  const size_t nSamples,
-                                  const size_t nBytesPerSample,
-                                  const size_t nChannels,
-                                  const uint32_t samplesPerSec,
-                                  const uint32_t totalDelayMS,
-                                  const int32_t clockDrift,
-                                  const uint32_t currentMicLevel,
-                                  const bool keyPressed,
-                                  uint32_t& newMicLevel) override {
-    webrtc::MutexLock lock(&mutex_);
+  int32_t RecordedDataIsAvailable(
+      const void* audioSamples,
+      const size_t nSamples,
+      const size_t nBytesPerSample,
+      const size_t nChannels,
+      const uint32_t samplesPerSec,
+      const uint32_t totalDelayMS,
+      const int32_t clockDrift,
+      const uint32_t currentMicLevel,
+      const bool keyPressed,
+      uint32_t& newMicLevel,
+      std::optional<int64_t> /* estimated_capture_time_ns */) override {
+    MutexLock lock(&mutex_);
     rec_buffer_bytes_ = nSamples * nBytesPerSample;
     if ((rec_buffer_bytes_ == 0) ||
         (rec_buffer_bytes_ >
@@ -77,7 +95,7 @@ class FakeAdmTest : public ::testing::Test, public webrtc::AudioTransport {
                            size_t& nSamplesOut,
                            int64_t* elapsed_time_ms,
                            int64_t* ntp_time_ms) override {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     ++pull_iterations_;
     const size_t audio_buffer_size = nSamples * nBytesPerSample;
     const size_t bytes_out =
@@ -91,15 +109,15 @@ class FakeAdmTest : public ::testing::Test, public webrtc::AudioTransport {
   }
 
   int push_iterations() const {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     return push_iterations_;
   }
   int pull_iterations() const {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     return pull_iterations_;
   }
 
-  rtc::scoped_refptr<FakeAudioCaptureModule> fake_audio_capture_module_;
+  scoped_refptr<FakeAudioCaptureModule> fake_audio_capture_module_;
 
  private:
   bool RecordedDataReceived() const { return rec_buffer_bytes_ != 0; }
@@ -115,9 +133,9 @@ class FakeAdmTest : public ::testing::Test, public webrtc::AudioTransport {
     return min_buffer_size;
   }
 
-  rtc::AutoThread main_thread_;
+  test::RunLoop main_thread_;
 
-  mutable webrtc::Mutex mutex_;
+  mutable Mutex mutex_;
 
   int push_iterations_;
   int pull_iterations_;
@@ -151,7 +169,9 @@ TEST_F(FakeAdmTest, PlayoutTest) {
   EXPECT_EQ(0, fake_audio_capture_module_->PlayoutDelay(&delay_ms));
   EXPECT_EQ(0, delay_ms);
 
-  EXPECT_TRUE_WAIT(pull_iterations() > 0, kMsInSecond);
+  EXPECT_THAT(WaitUntil([&] { return pull_iterations(); }, ::testing::Gt(0),
+                        {.timeout = TimeDelta::Millis(kMsInSecond)}),
+              IsRtcOk());
   EXPECT_GE(0, push_iterations());
 
   EXPECT_EQ(0, fake_audio_capture_module_->StopPlayout());
@@ -174,7 +194,9 @@ TEST_F(FakeAdmTest, RecordTest) {
   EXPECT_EQ(0, fake_audio_capture_module_->StartRecording());
   EXPECT_TRUE(fake_audio_capture_module_->Recording());
 
-  EXPECT_TRUE_WAIT(push_iterations() > 0, kMsInSecond);
+  EXPECT_THAT(WaitUntil([&] { return push_iterations(); }, ::testing::Gt(0),
+                        {.timeout = TimeDelta::Millis(kMsInSecond)}),
+              IsRtcOk());
   EXPECT_GE(0, pull_iterations());
 
   EXPECT_EQ(0, fake_audio_capture_module_->StopRecording());
@@ -190,9 +212,16 @@ TEST_F(FakeAdmTest, DuplexTest) {
   EXPECT_EQ(0, fake_audio_capture_module_->InitRecording());
   EXPECT_EQ(0, fake_audio_capture_module_->StartRecording());
 
-  EXPECT_TRUE_WAIT(push_iterations() > 0, kMsInSecond);
-  EXPECT_TRUE_WAIT(pull_iterations() > 0, kMsInSecond);
+  EXPECT_THAT(WaitUntil([&] { return push_iterations(); }, ::testing::Gt(0),
+                        {.timeout = TimeDelta::Millis(kMsInSecond)}),
+              IsRtcOk());
+  EXPECT_THAT(WaitUntil([&] { return pull_iterations(); }, ::testing::Gt(0),
+                        {.timeout = TimeDelta::Millis(kMsInSecond)}),
+              IsRtcOk());
 
   EXPECT_EQ(0, fake_audio_capture_module_->StopPlayout());
   EXPECT_EQ(0, fake_audio_capture_module_->StopRecording());
 }
+
+}  // namespace
+}  // namespace webrtc

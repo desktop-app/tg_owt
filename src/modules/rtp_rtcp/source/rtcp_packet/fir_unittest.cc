@@ -10,6 +10,10 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet/fir.h"
 
+#include <cstdint>
+#include <tuple>
+
+#include "rtc_base/buffer.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/rtcp_packet_parser.h"
@@ -19,7 +23,6 @@ using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Field;
-using ::testing::make_tuple;
 using webrtc::rtcp::Fir;
 
 namespace webrtc {
@@ -50,9 +53,9 @@ TEST(RtcpPacketFirTest, Create) {
   fir.SetSenderSsrc(kSenderSsrc);
   fir.AddRequestTo(kRemoteSsrc, kSeqNr);
 
-  rtc::Buffer packet = fir.Build();
+  Buffer packet = fir.Build();
 
-  EXPECT_THAT(make_tuple(packet.data(), packet.size()),
+  EXPECT_THAT(std::make_tuple(packet.data(), packet.size()),
               ElementsAreArray(kPacket));
 }
 
@@ -62,7 +65,7 @@ TEST(RtcpPacketFirTest, TwoFciEntries) {
   fir.AddRequestTo(kRemoteSsrc, kSeqNr);
   fir.AddRequestTo(kRemoteSsrc + 1, kSeqNr + 1);
 
-  rtc::Buffer packet = fir.Build();
+  Buffer packet = fir.Build();
   Fir parsed;
   EXPECT_TRUE(test::ParseSinglePacket(packet, &parsed));
 

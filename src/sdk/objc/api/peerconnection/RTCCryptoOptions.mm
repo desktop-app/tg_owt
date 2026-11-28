@@ -13,18 +13,33 @@
 @implementation RTC_OBJC_TYPE (RTCCryptoOptions)
 
 @synthesize srtpEnableGcmCryptoSuites = _srtpEnableGcmCryptoSuites;
-@synthesize srtpEnableAes128Sha1_32CryptoCipher = _srtpEnableAes128Sha1_32CryptoCipher;
-@synthesize srtpEnableEncryptedRtpHeaderExtensions = _srtpEnableEncryptedRtpHeaderExtensions;
+@synthesize srtpPreferGcmCryptoSuites = _srtpPreferGcmCryptoSuites;
+@synthesize srtpEnableAes128Sha1_32CryptoCipher =
+    _srtpEnableAes128Sha1_32CryptoCipher;
+@synthesize srtpEnableAes128Sha1_80CryptoCipher =
+    _srtpEnableAes128Sha1_80CryptoCipher;
+@synthesize srtpEnableEncryptedRtpHeaderExtensions =
+    _srtpEnableEncryptedRtpHeaderExtensions;
 @synthesize sframeRequireFrameEncryption = _sframeRequireFrameEncryption;
 
-- (instancetype)initWithSrtpEnableGcmCryptoSuites:(BOOL)srtpEnableGcmCryptoSuites
-              srtpEnableAes128Sha1_32CryptoCipher:(BOOL)srtpEnableAes128Sha1_32CryptoCipher
-           srtpEnableEncryptedRtpHeaderExtensions:(BOOL)srtpEnableEncryptedRtpHeaderExtensions
-                     sframeRequireFrameEncryption:(BOOL)sframeRequireFrameEncryption {
-  if (self = [super init]) {
+- (instancetype)
+         initWithSrtpEnableGcmCryptoSuites:(BOOL)srtpEnableGcmCryptoSuites
+                 srtpPreferGcmCryptoSuites:(BOOL)srtpPreferGcmCryptoSuites
+       srtpEnableAes128Sha1_32CryptoCipher:
+           (BOOL)srtpEnableAes128Sha1_32CryptoCipher
+       srtpEnableAes128Sha1_80CryptoCipher:
+           (BOOL)srtpEnableAes128Sha1_80CryptoCipher
+    srtpEnableEncryptedRtpHeaderExtensions:
+        (BOOL)srtpEnableEncryptedRtpHeaderExtensions
+              sframeRequireFrameEncryption:(BOOL)sframeRequireFrameEncryption {
+  self = [super init];
+  if (self) {
     _srtpEnableGcmCryptoSuites = srtpEnableGcmCryptoSuites;
+    _srtpPreferGcmCryptoSuites = srtpPreferGcmCryptoSuites;
     _srtpEnableAes128Sha1_32CryptoCipher = srtpEnableAes128Sha1_32CryptoCipher;
-    _srtpEnableEncryptedRtpHeaderExtensions = srtpEnableEncryptedRtpHeaderExtensions;
+    _srtpEnableAes128Sha1_80CryptoCipher = srtpEnableAes128Sha1_80CryptoCipher;
+    _srtpEnableEncryptedRtpHeaderExtensions =
+        srtpEnableEncryptedRtpHeaderExtensions;
     _sframeRequireFrameEncryption = sframeRequireFrameEncryption;
   }
   return self;

@@ -17,9 +17,9 @@
 // #ifdef unless needed and tested.
 #ifdef WEBRTC_USE_H264
 
-#include <memory>
-
-#include "modules/video_coding/codecs/h264/include/h264.h"
+#if defined(WEBRTC_WIN) && !defined(__clang__)
+#error "See: bugs.webrtc.org/9213#c13."
+#endif
 
 // CAVEAT: According to ffmpeg docs for avcodec_send_packet, ffmpeg requires a
 // few extra padding bytes after the end of input. And in addition, docs for
@@ -34,13 +34,18 @@
 // some way depending on undocumented behavior. If any problems turn up, we may
 // have to add an extra copy operation, to enforce padding before buffers are
 // passed to ffmpeg.
-
 extern "C" {
-#include "libavcodec/avcodec.h"
+#include <libavcodec/avcodec.h>
 }  // extern "C"
 
+#include <cstdint>
+#include <memory>
+
+#include "api/video/encoded_image.h"
+#include "api/video_codecs/video_decoder.h"
 #include "common_video/h264/h264_bitstream_parser.h"
 #include "common_video/include/video_frame_buffer_pool.h"
+#include "modules/video_coding/codecs/h264/include/h264.h"
 
 namespace webrtc {
 
@@ -95,7 +100,7 @@ class H264DecoderImpl : public H264Decoder {
   bool has_reported_init_;
   bool has_reported_error_;
 
-  webrtc::H264BitstreamParser h264_bitstream_parser_;
+  H264BitstreamParser h264_bitstream_parser_;
 };
 
 }  // namespace webrtc

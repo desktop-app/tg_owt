@@ -10,10 +10,15 @@
 
 #include "api/audio_codecs/audio_decoder.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <utility>
+#include <vector>
 
-#include "api/array_view.h"
+#include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/sanitizer.h"
 #include "rtc_base/trace_event.h"
@@ -22,9 +27,12 @@ namespace webrtc {
 
 namespace {
 
+// TODO(peah): Rationale
+static_assert(AudioDecoder::kMaxNumberOfChannels <= 255, "");
+
 class OldStyleEncodedFrame final : public AudioDecoder::EncodedAudioFrame {
  public:
-  OldStyleEncodedFrame(AudioDecoder* decoder, rtc::Buffer&& payload)
+  OldStyleEncodedFrame(AudioDecoder* decoder, Buffer&& payload)
       : decoder_(decoder), payload_(std::move(payload)) {}
 
   size_t Duration() const override {
@@ -32,20 +40,21 @@ class OldStyleEncodedFrame final : public AudioDecoder::EncodedAudioFrame {
     return ret < 0 ? 0 : static_cast<size_t>(ret);
   }
 
-  absl::optional<DecodeResult> Decode(
-      rtc::ArrayView<int16_t> decoded) const override {
+  std::optional<DecodeResult> Decode(
+      std::span<int16_t> decoded) const override {
     auto speech_type = AudioDecoder::kSpeech;
     const int ret = decoder_->Decode(
         payload_.data(), payload_.size(), decoder_->SampleRateHz(),
         decoded.size() * sizeof(int16_t), decoded.data(), &speech_type);
-    return ret < 0 ? absl::nullopt
-                   : absl::optional<DecodeResult>(
-                         {static_cast<size_t>(ret), speech_type});
+    return ret < 0 ? std::nullopt
+                   : std::optional<DecodeResult>(
+                         {.num_decoded_samples = static_cast<size_t>(ret),
+                          .speech_type = speech_type});
   }
 
  private:
   AudioDecoder* const decoder_;
-  const rtc::Buffer payload_;
+  const Buffer payload_;
 };
 
 }  // namespace
@@ -69,13 +78,20 @@ AudioDecoder::ParseResult& AudioDecoder::ParseResult::operator=(
     ParseResult&& b) = default;
 
 std::vector<AudioDecoder::ParseResult> AudioDecoder::ParsePayload(
-    rtc::Buffer&& payload,
+    Buffer&& payload,
     uint32_t timestamp) {
   std::vector<ParseResult> results;
   std::unique_ptr<EncodedAudioFrame> frame(
       new OldStyleEncodedFrame(this, std::move(payload)));
   results.emplace_back(timestamp, 0, std::move(frame));
   return results;
+}
+
+std::vector<AudioDecoder::ParseResult> AudioDecoder::ParsePayloadWithGap(
+    Buffer&& payload,
+    uint32_t timestamp,
+    uint32_t /* missing_samples */) {
+  return ParsePayload(std::move(payload), timestamp);
 }
 
 int AudioDecoder::Decode(const uint8_t* encoded,
@@ -85,7 +101,7 @@ int AudioDecoder::Decode(const uint8_t* encoded,
                          int16_t* decoded,
                          SpeechType* speech_type) {
   TRACE_EVENT0("webrtc", "AudioDecoder::Decode");
-  rtc::MsanCheckInitialized(rtc::MakeArrayView(encoded, encoded_len));
+  MsanCheckInitialized(std::span(encoded, encoded_len));
   int duration = PacketDuration(encoded, encoded_len);
   if (duration >= 0 &&
       duration * Channels() * sizeof(int16_t) > max_decoded_bytes) {
@@ -102,7 +118,7 @@ int AudioDecoder::DecodeRedundant(const uint8_t* encoded,
                                   int16_t* decoded,
                                   SpeechType* speech_type) {
   TRACE_EVENT0("webrtc", "AudioDecoder::DecodeRedundant");
-  rtc::MsanCheckInitialized(rtc::MakeArrayView(encoded, encoded_len));
+  MsanCheckInitialized(std::span(encoded, encoded_len));
   int duration = PacketDurationRedundant(encoded, encoded_len);
   if (duration >= 0 &&
       duration * Channels() * sizeof(int16_t) > max_decoded_bytes) {
@@ -125,30 +141,31 @@ bool AudioDecoder::HasDecodePlc() const {
   return false;
 }
 
-size_t AudioDecoder::DecodePlc(size_t num_frames, int16_t* decoded) {
+size_t AudioDecoder::DecodePlc(size_t /* num_frames */,
+                               int16_t* /* decoded */) {
   return 0;
 }
 
 // TODO(bugs.webrtc.org/9676): Remove default implementation.
 void AudioDecoder::GeneratePlc(size_t /*requested_samples_per_channel*/,
-                               rtc::BufferT<int16_t>* /*concealment_audio*/) {}
+                               BufferT<int16_t>* /*concealment_audio*/) {}
 
 int AudioDecoder::ErrorCode() {
   return 0;
 }
 
-int AudioDecoder::PacketDuration(const uint8_t* encoded,
-                                 size_t encoded_len) const {
+int AudioDecoder::PacketDuration(const uint8_t* /* encoded */,
+                                 size_t /* encoded_len */) const {
   return kNotImplemented;
 }
 
-int AudioDecoder::PacketDurationRedundant(const uint8_t* encoded,
-                                          size_t encoded_len) const {
+int AudioDecoder::PacketDurationRedundant(const uint8_t* /* encoded */,
+                                          size_t /* encoded_len */) const {
   return kNotImplemented;
 }
 
-bool AudioDecoder::PacketHasFec(const uint8_t* encoded,
-                                size_t encoded_len) const {
+bool AudioDecoder::PacketHasFec(const uint8_t* /* encoded */,
+                                size_t /* encoded_len */) const {
   return false;
 }
 
@@ -165,5 +182,4 @@ AudioDecoder::SpeechType AudioDecoder::ConvertSpeechType(int16_t type) {
   }
 }
 
-constexpr int AudioDecoder::kMaxNumberOfChannels;
 }  // namespace webrtc

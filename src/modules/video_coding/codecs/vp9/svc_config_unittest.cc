@@ -13,7 +13,10 @@
 #include <cstddef>
 #include <vector>
 
-#include "api/video_codecs/video_encoder.h"
+#include "api/video/video_codec_type.h"
+#include "api/video_codecs/scalability_mode.h"
+#include "api/video_codecs/spatial_layer.h"
+#include "api/video_codecs/video_codec.h"
 #include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -174,7 +177,7 @@ TEST(SvcConfig, AlwaysSendsAtLeastOneLayerPortrait) {
 
 TEST(SvcConfig, EnforcesMinimalRequiredParity) {
   const size_t max_num_spatial_layers = 3;
-  const size_t kOddSize = 1023;
+  const int kOddSize = 1023;
 
   std::vector<SpatialLayer> spatial_layers =
       GetSvcConfig(kOddSize, kOddSize, 30,

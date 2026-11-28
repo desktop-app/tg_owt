@@ -11,9 +11,11 @@
 #include "modules/audio_processing/aec3/render_delay_controller_metrics.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <optional>
 
 #include "modules/audio_processing/aec3/aec3_common.h"
-#include "rtc_base/checks.h"
+#include "modules/audio_processing/aec3/clockdrift_detector.h"
 #include "system_wrappers/include/metrics.h"
 
 namespace webrtc {
@@ -42,8 +44,8 @@ enum class DelayChangesCategory {
 RenderDelayControllerMetrics::RenderDelayControllerMetrics() = default;
 
 void RenderDelayControllerMetrics::Update(
-    absl::optional<size_t> delay_samples,
-    absl::optional<size_t> buffer_delay_blocks,
+    std::optional<size_t> delay_samples,
+    std::optional<size_t> buffer_delay_blocks,
     ClockdriftDetector::Level clockdrift) {
   ++call_counter_;
 

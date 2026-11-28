@@ -10,21 +10,47 @@
 
 #include "api/transport/goog_cc_factory.h"
 
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 
+#include "api/field_trials_view.h"
+#include "api/transport/network_control.h"
+#include "api/units/time_delta.h"
 #include "modules/congestion_controller/goog_cc/goog_cc_network_control.h"
+#include "modules/congestion_controller/scream/scream_network_controller.h"
+#include "rtc_base/experiments/field_trial_parser.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
-GoogCcNetworkControllerFactory::GoogCcNetworkControllerFactory(
-    RtcEventLog* event_log)
-    : event_log_(event_log) {}
 
-GoogCcNetworkControllerFactory::GoogCcNetworkControllerFactory(
-    NetworkStatePredictorFactoryInterface* network_state_predictor_factory) {
-  factory_config_.network_state_predictor_factory =
-      network_state_predictor_factory;
+namespace {
+
+// If field trial value of the key WebRTC-Bwe-ScreamV2 contain:
+//   Enabled - Scream is used if RFC 8888 congestion control is negotiated.
+//   mode:always - Scream is used regardless of RTCP feedback.
+constexpr char kScreamFieldTrial[] = "WebRTC-Bwe-ScreamV2";
+
+enum class Mode { kGoogCc, kScreamWithTwccOrRfc8888, kScreamWithRfc8888 };
+
+Mode ParseMode(const FieldTrialsView& field_trials) {
+  if (field_trials.IsEnabled(kScreamFieldTrial)) {
+    return Mode::kScreamWithRfc8888;
+  }
+  FieldTrialParameter<std::string> mode("mode", "");
+  ParseFieldTrial({&mode}, field_trials.Lookup(kScreamFieldTrial));
+  if (mode->empty()) {
+    return Mode::kGoogCc;
+  }
+  if (mode.Get() == "always") {
+    RTC_LOG(LS_INFO) << "ScreamV2 enabled always";
+    return Mode::kScreamWithTwccOrRfc8888;
+  }
+  return Mode::kGoogCc;
 }
+
+}  // namespace
 
 GoogCcNetworkControllerFactory::GoogCcNetworkControllerFactory(
     GoogCcFactoryConfig config)
@@ -32,20 +58,22 @@ GoogCcNetworkControllerFactory::GoogCcNetworkControllerFactory(
 
 std::unique_ptr<NetworkControllerInterface>
 GoogCcNetworkControllerFactory::Create(NetworkControllerConfig config) {
-  if (event_log_)
-    config.event_log = event_log_;
   GoogCcConfig goog_cc_config;
-  goog_cc_config.feedback_only = factory_config_.feedback_only;
   if (factory_config_.network_state_estimator_factory) {
-    RTC_DCHECK(config.key_value_config);
     goog_cc_config.network_state_estimator =
         factory_config_.network_state_estimator_factory->Create(
-            config.key_value_config);
+            &config.env.field_trials());
   }
   if (factory_config_.network_state_predictor_factory) {
     goog_cc_config.network_state_predictor =
         factory_config_.network_state_predictor_factory
             ->CreateNetworkStatePredictor();
+  }
+  Mode mode = ParseMode(config.env.field_trials());
+  if (mode == Mode::kScreamWithTwccOrRfc8888 ||
+      (mode == Mode::kScreamWithRfc8888 &&
+       factory_config_.rfc_8888_feedback_negotiated)) {
+    return std::make_unique<ScreamNetworkController>(config);
   }
   return std::make_unique<GoogCcNetworkController>(config,
                                                    std::move(goog_cc_config));
@@ -54,12 +82,6 @@ GoogCcNetworkControllerFactory::Create(NetworkControllerConfig config) {
 TimeDelta GoogCcNetworkControllerFactory::GetProcessInterval() const {
   const int64_t kUpdateIntervalMs = 25;
   return TimeDelta::Millis(kUpdateIntervalMs);
-}
-
-GoogCcFeedbackNetworkControllerFactory::GoogCcFeedbackNetworkControllerFactory(
-    RtcEventLog* event_log)
-    : GoogCcNetworkControllerFactory(event_log) {
-  factory_config_.feedback_only = true;
 }
 
 }  // namespace webrtc

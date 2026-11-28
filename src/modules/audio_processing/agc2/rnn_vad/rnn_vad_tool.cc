@@ -9,7 +9,10 @@
  */
 
 #include <array>
+#include <cstddef>
+#include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/flags/flag.h"
@@ -20,6 +23,7 @@
 #include "modules/audio_processing/agc2/rnn_vad/common.h"
 #include "modules/audio_processing/agc2/rnn_vad/features_extraction.h"
 #include "modules/audio_processing/agc2/rnn_vad/rnn.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_compare.h"
 
@@ -33,7 +37,10 @@ namespace test {
 
 int main(int argc, char* argv[]) {
   absl::ParseCommandLine(argc, argv);
-  rtc::LogMessage::LogToDebug(rtc::LS_INFO);
+  LoggingConfig config;
+  config.set_min_severity(LS_INFO);
+  config.set_debug_severity(LS_INFO);
+  InitializeLogging(std::move(config));
 
   // Open wav input file and check properties.
   const std::string input_wav_file = absl::GetFlag(FLAGS_i);
@@ -58,8 +65,7 @@ int main(int argc, char* argv[]) {
   }
 
   // Initialize.
-  const int frame_size_10ms =
-      rtc::CheckedDivExact(wav_reader.sample_rate(), 100);
+  const int frame_size_10ms = CheckedDivExact(wav_reader.sample_rate(), 100);
   std::vector<float> samples_10ms;
   samples_10ms.resize(frame_size_10ms);
   std::array<float, kFrameSize10ms24kHz> samples_10ms_24kHz;
@@ -74,7 +80,7 @@ int main(int argc, char* argv[]) {
     // Read frame at the input sample rate.
     const size_t read_samples =
         wav_reader.ReadSamples(frame_size_10ms, samples_10ms.data());
-    if (rtc::SafeLt(read_samples, frame_size_10ms)) {
+    if (SafeLt(read_samples, frame_size_10ms)) {
       break;  // EOF.
     }
     // Resample input.

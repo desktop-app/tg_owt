@@ -9,16 +9,20 @@
  */
 
 #include <memory>
+#include <optional>
 
+#include "api/rtp_parameters.h"
+#include "api/task_queue/task_queue_base.h"
 #include "api/test/create_frame_generator.h"
 #include "api/test/frame_generator_interface.h"
 #include "api/test/simulated_network.h"
-#include "call/fake_network_pipe.h"
-#include "call/simulated_network.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_sink_interface.h"
+#include "rtc_base/event.h"
 #include "rtc_base/task_queue_for_test.h"
-#include "system_wrappers/include/sleep.h"
+#include "rtc_base/thread.h"
 #include "test/call_test.h"
-#include "test/field_trial.h"
+#include "test/direct_transport.h"
 #include "test/frame_forwarder.h"
 #include "test/gtest.h"
 #include "test/null_transport.h"
@@ -29,7 +33,7 @@ namespace webrtc {
 class CallOperationEndToEndTest : public test::CallTest {};
 
 TEST_F(CallOperationEndToEndTest, ReceiverCanBeStartedTwice) {
-  CreateCalls();
+  CreateCalls(TaskQueueBase::Current());
 
   test::NullTransport transport;
   CreateSendConfig(1, 0, 0, &transport);
@@ -44,7 +48,7 @@ TEST_F(CallOperationEndToEndTest, ReceiverCanBeStartedTwice) {
 }
 
 TEST_F(CallOperationEndToEndTest, ReceiverCanBeStoppedTwice) {
-  CreateCalls();
+  CreateCalls(TaskQueueBase::Current());
 
   test::NullTransport transport;
   CreateSendConfig(1, 0, 0, &transport);
@@ -59,7 +63,7 @@ TEST_F(CallOperationEndToEndTest, ReceiverCanBeStoppedTwice) {
 }
 
 TEST_F(CallOperationEndToEndTest, ReceiverCanBeStoppedAndRestarted) {
-  CreateCalls();
+  CreateCalls(TaskQueueBase::Current());
 
   test::NullTransport transport;
   CreateSendConfig(1, 0, 0, &transport);
@@ -82,10 +86,10 @@ TEST_F(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
   // frames in the queue.
   static const int kRenderDelayMs = 1000;
 
-  class Renderer : public rtc::VideoSinkInterface<VideoFrame> {
+  class Renderer : public VideoSinkInterface<VideoFrame> {
    public:
     void OnFrame(const VideoFrame& video_frame) override {
-      SleepMs(kRenderDelayMs);
+      Thread::SleepMs(kRenderDelayMs);
       event_.Set();
     }
 
@@ -93,7 +97,7 @@ TEST_F(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
       return event_.Wait(test::VideoTestConstants::kDefaultTimeout);
     }
 
-    rtc::Event event_;
+    Event event_;
   } renderer;
 
   test::FrameForwarder frame_forwarder;
@@ -116,8 +120,8 @@ TEST_F(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
     // Create frames that are smaller than the send width/height, this is
     // done to check that the callbacks are done after processing video.
     std::unique_ptr<test::FrameGeneratorInterface> frame_generator(
-        test::CreateSquareFrameGenerator(kWidth, kHeight, absl::nullopt,
-                                         absl::nullopt));
+        test::CreateSquareFrameGenerator(kWidth, kHeight, std::nullopt,
+                                         std::nullopt));
     GetVideoSendStream()->SetSource(&frame_forwarder,
                                     DegradationPreference::MAINTAIN_FRAMERATE);
 
@@ -141,7 +145,7 @@ TEST_F(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
 }
 
 TEST_F(CallOperationEndToEndTest, TransmitsFirstFrame) {
-  class Renderer : public rtc::VideoSinkInterface<VideoFrame> {
+  class Renderer : public VideoSinkInterface<VideoFrame> {
    public:
     void OnFrame(const VideoFrame& video_frame) override { event_.Set(); }
 
@@ -149,7 +153,7 @@ TEST_F(CallOperationEndToEndTest, TransmitsFirstFrame) {
       return event_.Wait(test::VideoTestConstants::kDefaultTimeout);
     }
 
-    rtc::Event event_;
+    Event event_;
   } renderer;
 
   std::unique_ptr<test::FrameGeneratorInterface> frame_generator;
@@ -175,7 +179,7 @@ TEST_F(CallOperationEndToEndTest, TransmitsFirstFrame) {
 
     frame_generator = test::CreateSquareFrameGenerator(
         test::VideoTestConstants::kDefaultWidth,
-        test::VideoTestConstants::kDefaultHeight, absl::nullopt, absl::nullopt);
+        test::VideoTestConstants::kDefaultHeight, std::nullopt, std::nullopt);
     GetVideoSendStream()->SetSource(&frame_forwarder,
                                     DegradationPreference::MAINTAIN_FRAMERATE);
     test::FrameGeneratorInterface::VideoFrameData frame_data =

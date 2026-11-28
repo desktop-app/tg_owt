@@ -10,16 +10,20 @@
 
 #include <jni.h>
 
+#include "api/environment/environment.h"
 #include "modules/video_coding/codecs/vp9/include/vp9.h"
 #include "sdk/android/generated_libvpx_vp9_jni/LibvpxVp9Decoder_jni.h"
 #include "sdk/android/generated_libvpx_vp9_jni/LibvpxVp9Encoder_jni.h"
+#include "sdk/android/native_api/jni/java_types.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 
 namespace webrtc {
 namespace jni {
 
-static jlong JNI_LibvpxVp9Encoder_CreateEncoder(JNIEnv* jni) {
-  return jlongFromPointer(VP9Encoder::Create().release());
+jlong JNI_LibvpxVp9Encoder_Create(JNIEnv* jni, jlong j_webrtc_env_ref) {
+  return NativeToJavaPointer(
+      CreateVp9Encoder(*reinterpret_cast<const Environment*>(j_webrtc_env_ref))
+          .release());
 }
 
 static jboolean JNI_LibvpxVp9Encoder_IsSupported(JNIEnv* jni) {
@@ -36,3 +40,6 @@ static jboolean JNI_LibvpxVp9Decoder_IsSupported(JNIEnv* jni) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(LibvpxVp9Decoder)
+DEFINE_JNI(LibvpxVp9Encoder)

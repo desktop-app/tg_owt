@@ -10,6 +10,9 @@
 
 #include "logging/rtc_event_log/events/rtc_event_bwe_update_loss_based.h"
 
+#include <cstdint>
+#include <memory>
+
 #include "absl/memory/memory.h"
 
 namespace webrtc {
@@ -21,19 +24,11 @@ RtcEventBweUpdateLossBased::RtcEventBweUpdateLossBased(int32_t bitrate_bps,
       fraction_loss_(fraction_loss),
       total_packets_(total_packets) {}
 
-RtcEventBweUpdateLossBased::RtcEventBweUpdateLossBased(
-    const RtcEventBweUpdateLossBased& other)
-    : RtcEvent(other.timestamp_us_),
-      bitrate_bps_(other.bitrate_bps_),
-      fraction_loss_(other.fraction_loss_),
-      total_packets_(other.total_packets_) {}
-
 RtcEventBweUpdateLossBased::~RtcEventBweUpdateLossBased() = default;
 
 std::unique_ptr<RtcEventBweUpdateLossBased> RtcEventBweUpdateLossBased::Copy()
     const {
-  return absl::WrapUnique<RtcEventBweUpdateLossBased>(
-      new RtcEventBweUpdateLossBased(*this));
+  return absl::WrapUnique(new RtcEventBweUpdateLossBased(*this));
 }
 
 }  // namespace webrtc

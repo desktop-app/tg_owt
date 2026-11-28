@@ -10,10 +10,14 @@
 
 #include "media/base/rid_description.h"
 
-namespace cricket {
+#include <string>
+
+#include "absl/strings/string_view.h"
+
+namespace webrtc {
 
 RidDescription::RidDescription() = default;
-RidDescription::RidDescription(const std::string& rid, RidDirection direction)
+RidDescription::RidDescription(absl::string_view rid, RidDirection direction)
     : rid{rid}, direction{direction} {}
 RidDescription::RidDescription(const RidDescription& other) = default;
 RidDescription::~RidDescription() = default;
@@ -21,8 +25,7 @@ RidDescription& RidDescription::operator=(const RidDescription& other) =
     default;
 bool RidDescription::operator==(const RidDescription& other) const {
   return rid == other.rid && direction == other.direction &&
-         payload_types == other.payload_types &&
-         restrictions == other.restrictions;
+         codecs == other.codecs && restrictions == other.restrictions;
 }
 
-}  // namespace cricket
+}  // namespace webrtc

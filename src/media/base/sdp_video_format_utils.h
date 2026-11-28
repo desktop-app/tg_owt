@@ -11,8 +11,9 @@
 #ifndef MEDIA_BASE_SDP_VIDEO_FORMAT_UTILS_H_
 #define MEDIA_BASE_SDP_VIDEO_FORMAT_UTILS_H_
 
-#include "absl/types/optional.h"
-#include "api/video_codecs/sdp_video_format.h"
+#include <optional>
+
+#include "api/rtp_parameters.h"
 
 namespace webrtc {
 // Generate codec parameters that will be used as answer in an SDP negotiation
@@ -48,14 +49,18 @@ void H265GenerateProfileTierLevelForAnswer(
     CodecParameterMap* answer_params);
 #endif
 
-// Parse max frame rate from SDP FMTP line. absl::nullopt is returned if the
+// Parse max frame rate from SDP FMTP line. std::nullopt is returned if the
 // field is missing or not a number.
-absl::optional<int> ParseSdpForVPxMaxFrameRate(const CodecParameterMap& params);
+std::optional<int> ParseSdpForVPxMaxFrameRate(const CodecParameterMap& params);
 
-// Parse max frame size from SDP FMTP line. absl::nullopt is returned if the
+// Parse max frame size from SDP FMTP line. std::nullopt is returned if the
 // field is missing or not a number. Please note that the value is stored in sub
 // blocks but the returned value is in total number of pixels.
-absl::optional<int> ParseSdpForVPxMaxFrameSize(const CodecParameterMap& params);
+std::optional<int> ParseSdpForVPxMaxFrameSize(const CodecParameterMap& params);
+
+// Determines whether the non-standard x-google-per-layer-pli fmtp is present
+// in the parameters and has a value of "1".
+bool SupportsPerLayerPictureLossIndication(const CodecParameterMap& params);
 
 }  // namespace webrtc
 

@@ -14,8 +14,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
-#include <string>
 
 #include "absl/strings/string_view.h"
 #include "api/environment/environment.h"
@@ -24,8 +24,8 @@
 #include "api/rtc_event_log_output.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_base.h"
-#include "api/task_queue/task_queue_factory.h"
 #include "logging/rtc_event_log/encoder/rtc_event_log_encoder.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -42,8 +42,8 @@ class RtcEventLogImpl final : public RtcEventLog {
 
   explicit RtcEventLogImpl(const Environment& env);
   RtcEventLogImpl(
+      const Environment& env,
       std::unique_ptr<RtcEventLogEncoder> encoder,
-      TaskQueueFactory* task_queue_factory,
       size_t max_events_in_history = kMaxEventsInHistory,
       size_t max_config_events_in_history = kMaxEventsInConfigHistory);
   RtcEventLogImpl(const RtcEventLogImpl&) = delete;
@@ -87,6 +87,8 @@ class RtcEventLogImpl final : public RtcEventLog {
 
   bool ShouldOutputImmediately() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void ScheduleOutput() RTC_RUN_ON(task_queue_);
+
+  const Environment env_;
 
   // Max size of event history.
   const size_t max_events_in_history_;

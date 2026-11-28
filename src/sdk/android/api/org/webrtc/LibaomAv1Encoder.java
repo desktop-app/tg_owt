@@ -10,13 +10,18 @@
 
 package org.webrtc;
 
+import org.jni_zero.NativeMethods;
+
 public class LibaomAv1Encoder extends WrappedNativeVideoEncoder {
   @Override
-  public long createNativeVideoEncoder() {
-    return nativeCreateEncoder();
+  public long createNative(long webrtcEnvRef) {
+    return LibaomAv1EncoderJni.get().create(webrtcEnvRef);
   }
 
-  static native long nativeCreateEncoder();
+  @NativeMethods
+  interface Natives {
+    long create(long webrtcEnvRef);
+  }
 
   @Override
   public boolean isHardwareEncoder() {

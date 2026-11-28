@@ -11,8 +11,12 @@
 #include "rtc_base/numerics/event_based_exponential_moving_average.h"
 
 #include <cmath>
+#include <cstdint>
+#include <limits>
 
 #include "test/gtest.h"
+
+namespace webrtc {
 
 namespace {
 
@@ -20,8 +24,6 @@ constexpr int kHalfTime = 500;
 constexpr double kError = 0.1;
 
 }  // namespace
-
-namespace rtc {
 
 TEST(EventBasedExponentialMovingAverageTest, NoValue) {
   EventBasedExponentialMovingAverage average(kHalfTime);
@@ -224,4 +226,4 @@ TEST(EventBasedExponentialMovingAverageTest, SimultaneousSamples) {
   average.AddSample(time, value);
 }
 
-}  // namespace rtc
+}  // namespace webrtc

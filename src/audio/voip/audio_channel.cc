@@ -10,14 +10,26 @@
 
 #include "audio/voip/audio_channel.h"
 
+#include <cstdint>
+#include <memory>
 #include <utility>
-#include <vector>
 
-#include "api/audio_codecs/audio_format.h"
-#include "api/task_queue/task_queue_factory.h"
+#include "api/audio/audio_mixer.h"
+#include "api/audio_codecs/audio_decoder_factory.h"
+#include "api/call/transport.h"
+#include "api/environment/environment.h"
+#include "api/rtp_headers.h"
+#include "api/scoped_refptr.h"
+#include "api/voip/voip_statistics.h"
+#include "audio/voip/audio_egress.h"
+#include "audio/voip/audio_ingress.h"
+#include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/rtp_rtcp/include/receive_statistics.h"
+#include "modules/rtp_rtcp/include/report_block_data.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_rtcp_impl2.h"
-#include "rtc_base/logging.h"
+#include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -27,37 +39,33 @@ constexpr int kRtcpReportIntervalMs = 5000;
 
 }  // namespace
 
-AudioChannel::AudioChannel(
-    Transport* transport,
-    uint32_t local_ssrc,
-    TaskQueueFactory* task_queue_factory,
-    AudioMixer* audio_mixer,
-    rtc::scoped_refptr<AudioDecoderFactory> decoder_factory)
+AudioChannel::AudioChannel(const Environment& env,
+                           Transport* transport,
+                           uint32_t local_ssrc,
+                           AudioMixer* audio_mixer,
+                           scoped_refptr<AudioDecoderFactory> decoder_factory)
     : audio_mixer_(audio_mixer) {
-  RTC_DCHECK(task_queue_factory);
   RTC_DCHECK(audio_mixer);
 
-  Clock* clock = Clock::GetRealTimeClock();
-  receive_statistics_ = ReceiveStatistics::Create(clock);
+  receive_statistics_ = ReceiveStatistics::Create(&env.clock());
 
   RtpRtcpInterface::Configuration rtp_config;
-  rtp_config.clock = clock;
   rtp_config.audio = true;
   rtp_config.receive_statistics = receive_statistics_.get();
+  rtp_config.report_block_data_observer = this;
   rtp_config.rtcp_report_interval_ms = kRtcpReportIntervalMs;
   rtp_config.outgoing_transport = transport;
   rtp_config.local_media_ssrc = local_ssrc;
+  rtp_config.rtcp_mode = RtcpMode::kCompound;
 
-  rtp_rtcp_ = ModuleRtpRtcpImpl2::Create(rtp_config);
+  rtp_rtcp_ = ModuleRtpRtcpImpl2::CreateSendModule(env, rtp_config);
 
   rtp_rtcp_->SetSendingMediaStatus(false);
-  rtp_rtcp_->SetRTCPStatus(RtcpMode::kCompound);
 
-  ingress_ = std::make_unique<AudioIngress>(rtp_rtcp_.get(), clock,
+  ingress_ = std::make_unique<AudioIngress>(env, rtp_rtcp_.get(),
                                             receive_statistics_.get(),
                                             std::move(decoder_factory));
-  egress_ =
-      std::make_unique<AudioEgress>(rtp_rtcp_.get(), clock, task_queue_factory);
+  egress_ = std::make_unique<AudioEgress>(env, rtp_rtcp_.get());
 
   // Set the instance of audio ingress to be part of audio mixer for ADM to
   // fetch audio samples to play.
@@ -168,6 +176,12 @@ ChannelStatistics AudioChannel::GetChannelStatistics() {
       rtp_stats.transmitted.packets + rtx_stats.transmitted.packets;
 
   return channel_stat;
+}
+
+void AudioChannel::OnReportBlockDataUpdated(ReportBlockData report_block) {
+  if (egress_) {
+    egress_->OnReceivedUplinkPacketLossFraction(report_block.fraction_lost());
+  }
 }
 
 }  // namespace webrtc

@@ -12,20 +12,23 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
+#include <tuple>
 
 #include "common_audio/include/audio_util.h"
+#include "common_audio/resampler/sinc_resampler.h"
 #include "common_audio/resampler/sinusoidal_linear_chirp_source.h"
 #include "rtc_base/time_utils.h"
-#include "test/gmock.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 namespace {
 
 // Almost all conversions have an RMS error of around -14 dbFS.
-const double kResamplingRMSError = -14.42;
+constexpr double kResamplingRMSError = -14.42;
 
 // Used to convert errors to dbFS.
 template <typename T>
@@ -35,14 +38,14 @@ T DBFS(T x) {
 
 }  // namespace
 
-class PushSincResamplerTest : public ::testing::TestWithParam<
-                                  ::testing::tuple<int, int, double, double>> {
+class PushSincResamplerTest
+    : public ::testing::TestWithParam<std::tuple<int, int, double, double>> {
  public:
   PushSincResamplerTest()
-      : input_rate_(::testing::get<0>(GetParam())),
-        output_rate_(::testing::get<1>(GetParam())),
-        rms_error_(::testing::get<2>(GetParam())),
-        low_freq_error_(::testing::get<3>(GetParam())) {}
+      : input_rate_(std::get<0>(GetParam())),
+        output_rate_(std::get<1>(GetParam())),
+        rms_error_(std::get<2>(GetParam())),
+        low_freq_error_(std::get<3>(GetParam())) {}
 
   ~PushSincResamplerTest() override {}
 
@@ -86,17 +89,16 @@ void PushSincResamplerTest::ResampleBenchmarkTest(bool int_format) {
   const double io_ratio = input_rate_ / static_cast<double>(output_rate_);
   SincResampler sinc_resampler(io_ratio, SincResampler::kDefaultRequestSize,
                                &resampler_source);
-  int64_t start = rtc::TimeNanos();
+  int64_t start = TimeNanos();
   for (int i = 0; i < kResampleIterations; ++i) {
     sinc_resampler.Resample(output_samples, resampled_destination.get());
   }
-  double total_time_sinc_us =
-      (rtc::TimeNanos() - start) / rtc::kNumNanosecsPerMicrosec;
+  double total_time_sinc_us = (TimeNanos() - start) / kNumNanosecsPerMicrosec;
   printf("SincResampler took %.2f us per frame.\n",
          total_time_sinc_us / kResampleIterations);
 
   PushSincResampler resampler(input_samples, output_samples);
-  start = rtc::TimeNanos();
+  start = TimeNanos();
   if (int_format) {
     for (int i = 0; i < kResampleIterations; ++i) {
       EXPECT_EQ(output_samples,
@@ -110,8 +112,7 @@ void PushSincResamplerTest::ResampleBenchmarkTest(bool int_format) {
                                                    output_samples));
     }
   }
-  double total_time_us =
-      (rtc::TimeNanos() - start) / rtc::kNumNanosecsPerMicrosec;
+  double total_time_us = (TimeNanos() - start) / kNumNanosecsPerMicrosec;
   printf(
       "PushSincResampler took %.2f us per frame; which is a %.1f%% overhead "
       "on SincResampler.\n\n",
@@ -287,48 +288,48 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(192000, 22000, -20.50, -9.20),
 
         // To 44.1kHz
-        ::testing::make_tuple(8000, 44100, kResamplingRMSError, -62.73),
-        ::testing::make_tuple(11000, 44100, kResamplingRMSError, -63.57),
-        ::testing::make_tuple(16000, 44100, kResamplingRMSError, -62.54),
-        ::testing::make_tuple(22000, 44100, kResamplingRMSError, -62.73),
-        ::testing::make_tuple(32000, 44100, kResamplingRMSError, -63.32),
-        ::testing::make_tuple(44100, 44100, kResamplingRMSError, -73.53),
-        ::testing::make_tuple(48000, 44100, -15.01, -64.04),
-        ::testing::make_tuple(96000, 44100, -18.49, -25.51),
-        ::testing::make_tuple(192000, 44100, -20.50, -13.31),
+        std::make_tuple(8000, 44100, kResamplingRMSError, -62.73),
+        std::make_tuple(11000, 44100, kResamplingRMSError, -63.57),
+        std::make_tuple(16000, 44100, kResamplingRMSError, -62.54),
+        std::make_tuple(22000, 44100, kResamplingRMSError, -62.73),
+        std::make_tuple(32000, 44100, kResamplingRMSError, -63.32),
+        std::make_tuple(44100, 44100, kResamplingRMSError, -73.53),
+        std::make_tuple(48000, 44100, -15.01, -64.04),
+        std::make_tuple(96000, 44100, -18.49, -25.51),
+        std::make_tuple(192000, 44100, -20.50, -13.31),
 
         // To 48kHz
-        ::testing::make_tuple(8000, 48000, kResamplingRMSError, -63.43),
-        ::testing::make_tuple(11000, 48000, kResamplingRMSError, -63.96),
-        ::testing::make_tuple(16000, 48000, kResamplingRMSError, -63.96),
-        ::testing::make_tuple(22000, 48000, kResamplingRMSError, -63.80),
-        ::testing::make_tuple(32000, 48000, kResamplingRMSError, -64.04),
-        ::testing::make_tuple(44100, 48000, kResamplingRMSError, -62.63),
-        ::testing::make_tuple(48000, 48000, kResamplingRMSError, -73.52),
-        ::testing::make_tuple(96000, 48000, -18.40, -28.44),
-        ::testing::make_tuple(192000, 48000, -20.43, -14.11),
+        std::make_tuple(8000, 48000, kResamplingRMSError, -63.43),
+        std::make_tuple(11000, 48000, kResamplingRMSError, -63.96),
+        std::make_tuple(16000, 48000, kResamplingRMSError, -63.96),
+        std::make_tuple(22000, 48000, kResamplingRMSError, -63.80),
+        std::make_tuple(32000, 48000, kResamplingRMSError, -64.04),
+        std::make_tuple(44100, 48000, kResamplingRMSError, -62.63),
+        std::make_tuple(48000, 48000, kResamplingRMSError, -73.52),
+        std::make_tuple(96000, 48000, -18.40, -28.44),
+        std::make_tuple(192000, 48000, -20.43, -14.11),
 
         // To 96kHz
-        ::testing::make_tuple(8000, 96000, kResamplingRMSError, -63.19),
-        ::testing::make_tuple(11000, 96000, kResamplingRMSError, -63.89),
-        ::testing::make_tuple(16000, 96000, kResamplingRMSError, -63.39),
-        ::testing::make_tuple(22000, 96000, kResamplingRMSError, -63.39),
-        ::testing::make_tuple(32000, 96000, kResamplingRMSError, -63.95),
-        ::testing::make_tuple(44100, 96000, kResamplingRMSError, -62.63),
-        ::testing::make_tuple(48000, 96000, kResamplingRMSError, -73.52),
-        ::testing::make_tuple(96000, 96000, kResamplingRMSError, -73.52),
-        ::testing::make_tuple(192000, 96000, kResamplingRMSError, -28.41),
+        std::make_tuple(8000, 96000, kResamplingRMSError, -63.19),
+        std::make_tuple(11000, 96000, kResamplingRMSError, -63.89),
+        std::make_tuple(16000, 96000, kResamplingRMSError, -63.39),
+        std::make_tuple(22000, 96000, kResamplingRMSError, -63.39),
+        std::make_tuple(32000, 96000, kResamplingRMSError, -63.95),
+        std::make_tuple(44100, 96000, kResamplingRMSError, -62.63),
+        std::make_tuple(48000, 96000, kResamplingRMSError, -73.52),
+        std::make_tuple(96000, 96000, kResamplingRMSError, -73.52),
+        std::make_tuple(192000, 96000, kResamplingRMSError, -28.41),
 
         // To 192kHz
-        ::testing::make_tuple(8000, 192000, kResamplingRMSError, -63.10),
-        ::testing::make_tuple(11000, 192000, kResamplingRMSError, -63.17),
-        ::testing::make_tuple(16000, 192000, kResamplingRMSError, -63.14),
-        ::testing::make_tuple(22000, 192000, kResamplingRMSError, -63.14),
-        ::testing::make_tuple(32000, 192000, kResamplingRMSError, -63.38),
-        ::testing::make_tuple(44100, 192000, kResamplingRMSError, -62.63),
-        ::testing::make_tuple(48000, 192000, kResamplingRMSError, -73.44),
-        ::testing::make_tuple(96000, 192000, kResamplingRMSError, -73.52),
-        ::testing::make_tuple(192000, 192000, kResamplingRMSError, -73.52),
+        std::make_tuple(8000, 192000, kResamplingRMSError, -63.10),
+        std::make_tuple(11000, 192000, kResamplingRMSError, -63.17),
+        std::make_tuple(16000, 192000, kResamplingRMSError, -63.14),
+        std::make_tuple(22000, 192000, kResamplingRMSError, -63.14),
+        std::make_tuple(32000, 192000, kResamplingRMSError, -63.38),
+        std::make_tuple(44100, 192000, kResamplingRMSError, -62.63),
+        std::make_tuple(48000, 192000, kResamplingRMSError, -73.44),
+        std::make_tuple(96000, 192000, kResamplingRMSError, -73.52),
+        std::make_tuple(192000, 192000, kResamplingRMSError, -73.52),
 
         // Next run through some additional cases interesting for WebRTC.
         // We skip some extreme downsampled cases (192 -> {8, 16}, 96 -> 8)
@@ -337,31 +338,31 @@ INSTANTIATE_TEST_SUITE_P(
         // practice anyway.
 
         // To 8 kHz
-        ::testing::make_tuple(8000, 8000, kResamplingRMSError, -75.50),
-        ::testing::make_tuple(16000, 8000, -18.56, -28.79),
-        ::testing::make_tuple(32000, 8000, -20.36, -14.13),
-        ::testing::make_tuple(44100, 8000, -21.00, -11.39),
-        ::testing::make_tuple(48000, 8000, -20.96, -11.04),
+        std::make_tuple(8000, 8000, kResamplingRMSError, -75.50),
+        std::make_tuple(16000, 8000, -18.56, -28.79),
+        std::make_tuple(32000, 8000, -20.36, -14.13),
+        std::make_tuple(44100, 8000, -21.00, -11.39),
+        std::make_tuple(48000, 8000, -20.96, -11.04),
 
         // To 16 kHz
-        ::testing::make_tuple(8000, 16000, kResamplingRMSError, -70.30),
-        ::testing::make_tuple(11000, 16000, kResamplingRMSError, -72.31),
-        ::testing::make_tuple(16000, 16000, kResamplingRMSError, -75.51),
-        ::testing::make_tuple(22000, 16000, kResamplingRMSError, -52.08),
-        ::testing::make_tuple(32000, 16000, -18.48, -28.59),
-        ::testing::make_tuple(44100, 16000, -19.30, -19.67),
-        ::testing::make_tuple(48000, 16000, -19.81, -18.11),
-        ::testing::make_tuple(96000, 16000, -20.95, -10.9596),
+        std::make_tuple(8000, 16000, kResamplingRMSError, -70.30),
+        std::make_tuple(11000, 16000, kResamplingRMSError, -72.31),
+        std::make_tuple(16000, 16000, kResamplingRMSError, -75.51),
+        std::make_tuple(22000, 16000, kResamplingRMSError, -52.08),
+        std::make_tuple(32000, 16000, -18.48, -28.59),
+        std::make_tuple(44100, 16000, -19.30, -19.67),
+        std::make_tuple(48000, 16000, -19.81, -18.11),
+        std::make_tuple(96000, 16000, -20.95, -10.9596),
 
         // To 32 kHz
-        ::testing::make_tuple(8000, 32000, kResamplingRMSError, -70.30),
-        ::testing::make_tuple(11000, 32000, kResamplingRMSError, -71.34),
-        ::testing::make_tuple(16000, 32000, kResamplingRMSError, -75.51),
-        ::testing::make_tuple(22000, 32000, kResamplingRMSError, -72.05),
-        ::testing::make_tuple(32000, 32000, kResamplingRMSError, -75.51),
-        ::testing::make_tuple(44100, 32000, -16.44, -51.0349),
-        ::testing::make_tuple(48000, 32000, -16.90, -43.9967),
-        ::testing::make_tuple(96000, 32000, -19.61, -18.04),
-        ::testing::make_tuple(192000, 32000, -21.02, -10.94)));
+        std::make_tuple(8000, 32000, kResamplingRMSError, -70.30),
+        std::make_tuple(11000, 32000, kResamplingRMSError, -71.34),
+        std::make_tuple(16000, 32000, kResamplingRMSError, -75.51),
+        std::make_tuple(22000, 32000, kResamplingRMSError, -72.05),
+        std::make_tuple(32000, 32000, kResamplingRMSError, -75.51),
+        std::make_tuple(44100, 32000, -16.44, -51.0349),
+        std::make_tuple(48000, 32000, -16.90, -43.9967),
+        std::make_tuple(96000, 32000, -19.61, -18.04),
+        std::make_tuple(192000, 32000, -21.02, -10.94)));
 
 }  // namespace webrtc

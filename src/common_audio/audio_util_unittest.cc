@@ -10,7 +10,11 @@
 
 #include "common_audio/include/audio_util.h"
 
-#include "rtc_base/arraysize.h"
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+
+#include "api/audio/audio_view.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -35,8 +39,8 @@ TEST(AudioUtilTest, S16ToFloat) {
   static constexpr int16_t kInput[] = {0, 1, -1, 16384, -16384, 32767, -32768};
   static constexpr float kReference[] = {
       0.f, 1.f / 32767.f, -1.f / 32768.f, 16384.f / 32767.f, -0.5f, 1.f, -1.f};
-  static constexpr size_t kSize = arraysize(kInput);
-  static_assert(arraysize(kReference) == kSize, "");
+  static constexpr size_t kSize = std::size(kInput);
+  static_assert(std::size(kReference) == kSize);
   float output[kSize];
   S16ToFloat(kInput, kSize, output);
   ExpectArraysEq(kReference, output, kSize);
@@ -46,8 +50,8 @@ TEST(AudioUtilTest, FloatS16ToS16) {
   static constexpr float kInput[] = {0.f,   0.4f,    0.5f,    -0.4f,
                                      -0.5f, 32768.f, -32769.f};
   static constexpr int16_t kReference[] = {0, 0, 1, 0, -1, 32767, -32768};
-  static constexpr size_t kSize = arraysize(kInput);
-  static_assert(arraysize(kReference) == kSize, "");
+  static constexpr size_t kSize = std::size(kInput);
+  static_assert(std::size(kReference) == kSize);
   int16_t output[kSize];
   FloatS16ToS16(kInput, kSize, output);
   ExpectArraysEq(kReference, output, kSize);
@@ -65,8 +69,8 @@ TEST(AudioUtilTest, FloatToFloatS16) {
                                      -1.f};
   static constexpr float kReference[] = {
       0.f, 0.4f, 0.6f, -0.4f, -0.6f, 32768.f, -32768.f, 32768.f, -32768.f};
-  static constexpr size_t kSize = arraysize(kInput);
-  static_assert(arraysize(kReference) == kSize, "");
+  static constexpr size_t kSize = std::size(kInput);
+  static_assert(std::size(kReference) == kSize);
   float output[kSize];
   FloatToFloatS16(kInput, kSize, output);
   ExpectArraysEq(kReference, output, kSize);
@@ -84,8 +88,8 @@ TEST(AudioUtilTest, FloatS16ToFloat) {
                                          -1.f,
                                          1.f,
                                          -1.f};
-  static constexpr size_t kSize = arraysize(kInput);
-  static_assert(arraysize(kReference) == kSize, "");
+  static constexpr size_t kSize = std::size(kInput);
+  static_assert(std::size(kReference) == kSize);
   float output[kSize];
   FloatS16ToFloat(kInput, kSize, output);
   ExpectArraysEq(kReference, output, kSize);
@@ -97,8 +101,8 @@ TEST(AudioUtilTest, DbfsToFloatS16) {
   static constexpr float kReference[] = {
       1.036215186f, 10.36215115f, 1036.215088f, 3276.800049f, 10362.15137f,
       18426.80078f, 29204.51172f, 32768.f,      36766.30078f};
-  static constexpr size_t kSize = arraysize(kInput);
-  static_assert(arraysize(kReference) == kSize, "");
+  static constexpr size_t kSize = std::size(kInput);
+  static_assert(std::size(kReference) == kSize);
   float output[kSize];
   for (size_t i = 0; i < kSize; ++i) {
     output[i] = DbfsToFloatS16(kInput[i]);
@@ -113,8 +117,8 @@ TEST(AudioUtilTest, FloatS16ToDbfs) {
 
   static constexpr float kReference[] = {
       -90.f, -70.f, -30.f, -20.f, -10.f, -5.f, -1.f, 0.f, 0.9999923706f};
-  static constexpr size_t kSize = arraysize(kInput);
-  static_assert(arraysize(kReference) == kSize, "");
+  static constexpr size_t kSize = std::size(kInput);
+  static_assert(std::size(kReference) == kSize);
 
   float output[kSize];
   for (size_t i = 0; i < kSize; ++i) {
@@ -124,20 +128,23 @@ TEST(AudioUtilTest, FloatS16ToDbfs) {
 }
 
 TEST(AudioUtilTest, InterleavingStereo) {
-  const int16_t kInterleaved[] = {2, 3, 4, 9, 8, 27, 16, 81};
-  const size_t kSamplesPerChannel = 4;
-  const int kNumChannels = 2;
-  const size_t kLength = kSamplesPerChannel * kNumChannels;
-  int16_t left[kSamplesPerChannel], right[kSamplesPerChannel];
-  int16_t* deinterleaved[] = {left, right};
-  Deinterleave(kInterleaved, kSamplesPerChannel, kNumChannels, deinterleaved);
+  constexpr int16_t kInterleaved[] = {2, 3, 4, 9, 8, 27, 16, 81};
+  constexpr size_t kSamplesPerChannel = 4;
+  constexpr int kNumChannels = 2;
+  constexpr size_t kLength = kSamplesPerChannel * kNumChannels;
+  int16_t deinterleaved[kLength] = {};
+  DeinterleavedView<int16_t> deinterleaved_view(
+      &deinterleaved[0], kSamplesPerChannel, kNumChannels);
+  Deinterleave({&kInterleaved[0], kSamplesPerChannel, kNumChannels},
+               deinterleaved_view);
   const int16_t kRefLeft[] = {2, 4, 8, 16};
   const int16_t kRefRight[] = {3, 9, 27, 81};
-  ExpectArraysEq(kRefLeft, left, kSamplesPerChannel);
-  ExpectArraysEq(kRefRight, right, kSamplesPerChannel);
+  ExpectArraysEq(kRefLeft, deinterleaved_view[0].data(), kSamplesPerChannel);
+  ExpectArraysEq(kRefRight, deinterleaved_view[1].data(), kSamplesPerChannel);
 
   int16_t interleaved[kLength];
-  Interleave(deinterleaved, kSamplesPerChannel, kNumChannels, interleaved);
+  Interleave<int16_t>({&deinterleaved[0], kSamplesPerChannel, kNumChannels},
+                      {&interleaved[0], kSamplesPerChannel, kNumChannels});
   ExpectArraysEq(kInterleaved, interleaved, kLength);
 }
 
@@ -146,12 +153,16 @@ TEST(AudioUtilTest, InterleavingMonoIsIdentical) {
   const size_t kSamplesPerChannel = 5;
   const int kNumChannels = 1;
   int16_t mono[kSamplesPerChannel];
-  int16_t* deinterleaved[] = {mono};
-  Deinterleave(kInterleaved, kSamplesPerChannel, kNumChannels, deinterleaved);
-  ExpectArraysEq(kInterleaved, mono, kSamplesPerChannel);
+  DeinterleavedView<int16_t> deinterleaved_view(&mono[0], kSamplesPerChannel,
+                                                kNumChannels);
+  Deinterleave({kInterleaved, kSamplesPerChannel, kNumChannels},
+               deinterleaved_view);
+  ExpectArraysEq(kInterleaved, deinterleaved_view.AsMono().data(),
+                 kSamplesPerChannel);
 
   int16_t interleaved[kSamplesPerChannel];
-  Interleave(deinterleaved, kSamplesPerChannel, kNumChannels, interleaved);
+  Interleave<int16_t>(deinterleaved_view,
+                      {&interleaved[0], kSamplesPerChannel, kNumChannels});
   ExpectArraysEq(mono, interleaved, kSamplesPerChannel);
 }
 
@@ -191,58 +202,6 @@ TEST(AudioUtilTest, DownmixInterleavedToMono) {
     const int16_t expected[kNumFrames] = {28000, -11, -30333};
 
     EXPECT_THAT(deinterleaved, ElementsAreArray(expected));
-  }
-}
-
-TEST(AudioUtilTest, DownmixToMonoTest) {
-  {
-    const size_t kNumFrames = 4;
-    const int kNumChannels = 1;
-    const float input_data[kNumChannels][kNumFrames] = {{1.f, 2.f, -1.f, -3.f}};
-    const float* input[kNumChannels];
-    for (int i = 0; i < kNumChannels; ++i) {
-      input[i] = input_data[i];
-    }
-
-    float downmixed[kNumFrames];
-
-    DownmixToMono<float, float>(input, kNumFrames, kNumChannels, downmixed);
-
-    EXPECT_THAT(downmixed, ElementsAreArray(input_data[0]));
-  }
-  {
-    const size_t kNumFrames = 3;
-    const int kNumChannels = 2;
-    const float input_data[kNumChannels][kNumFrames] = {{1.f, 2.f, -1.f},
-                                                        {3.f, 0.f, 1.f}};
-    const float* input[kNumChannels];
-    for (int i = 0; i < kNumChannels; ++i) {
-      input[i] = input_data[i];
-    }
-
-    float downmixed[kNumFrames];
-    const float expected[kNumFrames] = {2.f, 1.f, 0.f};
-
-    DownmixToMono<float, float>(input, kNumFrames, kNumChannels, downmixed);
-
-    EXPECT_THAT(downmixed, ElementsAreArray(expected));
-  }
-  {
-    const size_t kNumFrames = 3;
-    const int kNumChannels = 3;
-    const int16_t input_data[kNumChannels][kNumFrames] = {
-        {30000, -5, -30000}, {30000, -10, -30999}, {24001, -20, -30000}};
-    const int16_t* input[kNumChannels];
-    for (int i = 0; i < kNumChannels; ++i) {
-      input[i] = input_data[i];
-    }
-
-    int16_t downmixed[kNumFrames];
-    const int16_t expected[kNumFrames] = {28000, -11, -30333};
-
-    DownmixToMono<int16_t, int32_t>(input, kNumFrames, kNumChannels, downmixed);
-
-    EXPECT_THAT(downmixed, ElementsAreArray(expected));
   }
 }
 

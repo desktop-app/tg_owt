@@ -10,10 +10,14 @@
 
 #include "modules/pacing/prioritized_packet_queue.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <utility>
 
+#include "api/units/data_size.h"
 #include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "rtc_base/checks.h"
@@ -22,6 +26,12 @@
 
 namespace webrtc {
 namespace {
+
+using ::testing::ElementsAre;
+using ::testing::IsEmpty;
+using ::testing::Pointee;
+using ::testing::Property;
+using ::testing::SizeIs;
 
 constexpr uint32_t kDefaultSsrc = 123;
 constexpr int kDefaultPayloadSize = 789;
@@ -390,9 +400,12 @@ TEST(PrioritizedPacketQueue, ClearsPackets) {
   EXPECT_EQ(queue.SizeInPackets(), 2 * int{kNumMediaTypes});
 
   // Remove all of them.
-  queue.RemovePacketsForSsrc(kSsrc);
+  EXPECT_THAT(queue.RemovePacketsForSsrc(kSsrc),
+              SizeIs(2 * size_t{kNumMediaTypes}));
   EXPECT_TRUE(queue.Empty());
-  queue.RemovePacketsForSsrc(kSsrc);
+
+  // There should be no more packets removed when called again.
+  EXPECT_THAT(queue.RemovePacketsForSsrc(kSsrc), IsEmpty());
   EXPECT_TRUE(queue.Empty());
 }
 
@@ -420,13 +433,18 @@ TEST(PrioritizedPacketQueue, ClearPacketsAffectsOnlySpecifiedSsrc) {
   EXPECT_EQ(queue.SizeInPackets(), 4);
 
   // Clear the first two packets.
-  queue.RemovePacketsForSsrc(kRemovingSsrc);
+  EXPECT_THAT(
+      queue.RemovePacketsForSsrc(kRemovingSsrc),
+      ElementsAre(Pointee(Property(&RtpPacketToSend::SequenceNumber, 1)),
+                  Pointee(Property(&RtpPacketToSend::SequenceNumber, 2))));
   EXPECT_EQ(queue.SizeInPackets(), 2);
 
   // We should get the single remaining retransmission first, then the video
   // packet.
-  EXPECT_EQ(queue.Pop()->SequenceNumber(), 4);
-  EXPECT_EQ(queue.Pop()->SequenceNumber(), 3);
+  EXPECT_THAT(queue.Pop(),
+              Pointee(Property(&RtpPacketToSend::SequenceNumber, 4)));
+  EXPECT_THAT(queue.Pop(),
+              Pointee(Property(&RtpPacketToSend::SequenceNumber, 3)));
   EXPECT_TRUE(queue.Empty());
 }
 

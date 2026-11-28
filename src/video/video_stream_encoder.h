@@ -12,42 +12,60 @@
 #define VIDEO_VIDEO_STREAM_ENCODER_H_
 
 #include <atomic>
-#include <map>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
 #include <memory>
-#include <string>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
 #include "api/adaptation/resource.h"
-#include "api/field_trials_view.h"
+#include "api/environment/environment.h"
+#include "api/fec_controller_override.h"
+#include "api/rtp_parameters.h"
 #include "api/rtp_sender_interface.h"
+#include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
+#include "api/task_queue/task_queue_base.h"
 #include "api/units/data_rate.h"
+#include "api/units/data_size.h"
+#include "api/units/timestamp.h"
+#include "api/video/corruption_detection/frame_instrumentation_generator.h"
 #include "api/video/encoded_image.h"
+#include "api/video/video_adaptation_counters.h"
+#include "api/video/video_adaptation_reason.h"
+#include "api/video/video_bitrate_allocation.h"
 #include "api/video/video_bitrate_allocator.h"
-#include "api/video/video_rotation.h"
-#include "api/video/video_sink_interface.h"
+#include "api/video/video_codec_constants.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_frame_type.h"
+#include "api/video/video_source_interface.h"
 #include "api/video/video_stream_encoder_settings.h"
 #include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder.h"
+#include "api/video_codecs/video_encoder_factory.h"
 #include "call/adaptation/adaptation_constraint.h"
-#include "call/adaptation/resource_adaptation_processor.h"
 #include "call/adaptation/resource_adaptation_processor_interface.h"
 #include "call/adaptation/video_source_restrictions.h"
+#include "call/adaptation/video_stream_adapter.h"
 #include "call/adaptation/video_stream_input_state_provider.h"
 #include "modules/video_coding/utility/frame_dropper.h"
 #include "modules/video_coding/utility/qp_parser.h"
+#include "rtc_base/experiments/encoder_speed_experiment.h"
 #include "rtc_base/experiments/rate_control_settings.h"
-#include "rtc_base/numerics/exp_filter.h"
-#include "rtc_base/race_checker.h"
-#include "rtc_base/rate_statistics.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
-#include "system_wrappers/include/clock.h"
+#include "video/adaptation/overuse_frame_detector.h"
 #include "video/adaptation/video_stream_encoder_resource_manager.h"
+#include "video/config/video_encoder_config.h"
 #include "video/encoder_bitrate_adjuster.h"
 #include "video/frame_cadence_adapter.h"
 #include "video/frame_encode_metadata_writer.h"
+#include "video/quality_convergence_controller.h"
 #include "video/video_source_sink_controller.h"
 #include "video/video_stream_encoder_interface.h"
 #include "video/video_stream_encoder_observer.h"
@@ -66,35 +84,41 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
                            private EncodedImageCallback,
                            public VideoSourceRestrictionsListener {
  public:
-  // TODO(bugs.webrtc.org/12000): Reporting of VideoBitrateAllocation is being
-  // deprecated. Instead VideoLayersAllocation should be reported.
   enum class BitrateAllocationCallbackType {
-    kVideoBitrateAllocation,
-    kVideoBitrateAllocationWhenScreenSharing,
+    kNone,
     kVideoLayersAllocation
   };
+
+  // Adaptation resources and constraints to register while constructing the
+  // encoder. Only used by tests; production code leaves this empty.
+  // TODO(eshr): Move all adaptation tests out of VideoStreamEncoder tests.
+  struct AdaptationInjectionsForTest {
+    std::vector<std::pair<scoped_refptr<Resource>, VideoAdaptationReason>>
+        resources;
+    std::vector<AdaptationConstraint*> constraints;
+  };
+
   VideoStreamEncoder(
-      Clock* clock,
+      const Environment& env,
       uint32_t number_of_cores,
       VideoStreamEncoderObserver* encoder_stats_observer,
-      const VideoStreamEncoderSettings& settings,
+      VideoStreamEncoderSettings settings,
       std::unique_ptr<OveruseFrameDetector> overuse_detector,
       std::unique_ptr<FrameCadenceAdapterInterface> frame_cadence_adapter,
-      std::unique_ptr<webrtc::TaskQueueBase, webrtc::TaskQueueDeleter>
-          encoder_queue,
+      std::unique_ptr<TaskQueueBase, TaskQueueDeleter> encoder_queue,
       BitrateAllocationCallbackType allocation_cb_type,
-      const FieldTrialsView& field_trials,
-      webrtc::VideoEncoderFactory::EncoderSelectorInterface* encoder_selector =
-          nullptr);
+      scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>
+          encoder_selector = nullptr,
+      EncoderSwitchRequestCallback encoder_switch_request_callback = nullptr,
+      AdaptationInjectionsForTest adaptation_injections_for_test = {});
   ~VideoStreamEncoder() override;
 
   VideoStreamEncoder(const VideoStreamEncoder&) = delete;
   VideoStreamEncoder& operator=(const VideoStreamEncoder&) = delete;
 
-  void AddAdaptationResource(rtc::scoped_refptr<Resource> resource) override;
-  std::vector<rtc::scoped_refptr<Resource>> GetAdaptationResources() override;
+  void AddAdaptationResource(scoped_refptr<Resource> resource) override;
 
-  void SetSource(rtc::VideoSourceInterface<VideoFrame>* source,
+  void SetSource(VideoSourceInterface<VideoFrame>* source,
                  const DegradationPreference& degradation_preference) override;
 
   void SetSink(EncoderSink* sink, bool rotation_applied) override;
@@ -117,12 +141,8 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
 
   void SendKeyFrame(const std::vector<VideoFrameType>& layers = {}) override;
 
-  void OnLossNotification(
-      const VideoEncoder::LossNotification& loss_notification) override;
-
   void OnBitrateUpdated(DataRate target_bitrate,
-                        DataRate stable_target_bitrate,
-                        DataRate target_headroom,
+                        DataRate link_allocation,
                         uint8_t fraction_lost,
                         int64_t round_trip_time_ms,
                         double cwnd_reduce_ratio) override;
@@ -130,29 +150,18 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   DataRate UpdateTargetBitrate(DataRate target_bitrate,
                                double cwnd_reduce_ratio);
 
+  void OnFramePrepared(size_t frame_identifier);
+  void OnFramePreparedOnEncoderQueue(size_t frame_identifier)
+      RTC_RUN_ON(encoder_queue_);
+
  protected:
   friend class VideoStreamEncoderFrameCadenceRestrictionTest;
-
-  // Used for testing. For example the `ScalingObserverInterface` methods must
-  // be called on `encoder_queue_`.
-  TaskQueueBase* encoder_queue() { return encoder_queue_.get(); }
 
   void OnVideoSourceRestrictionsUpdated(
       VideoSourceRestrictions restrictions,
       const VideoAdaptationCounters& adaptation_counters,
-      rtc::scoped_refptr<Resource> reason,
+      scoped_refptr<Resource> reason,
       const VideoSourceRestrictions& unfiltered_restrictions) override;
-
-  // Used for injected test resources.
-  // TODO(eshr): Move all adaptation tests out of VideoStreamEncoder tests.
-  void InjectAdaptationResource(rtc::scoped_refptr<Resource> resource,
-                                VideoAdaptationReason reason);
-  void InjectAdaptationConstraint(AdaptationConstraint* adaptation_constraint);
-
-  void AddRestrictionsListenerForTesting(
-      VideoSourceRestrictionsListener* restrictions_listener);
-  void RemoveRestrictionsListenerForTesting(
-      VideoSourceRestrictionsListener* restrictions_listener);
 
  private:
   class CadenceCallback : public FrameCadenceAdapterInterface::Callback {
@@ -191,8 +200,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
     EncoderRateSettings(const VideoBitrateAllocation& bitrate,
                         double framerate_fps,
                         DataRate bandwidth_allocation,
-                        DataRate encoder_target,
-                        DataRate stable_encoder_target);
+                        DataRate encoder_target);
     bool operator==(const EncoderRateSettings& rhs) const;
     bool operator!=(const EncoderRateSettings& rhs) const;
 
@@ -204,7 +212,20 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
     // |using last_encoder_rate_setings_->bitrate.get_sum_bps()|, may trick it
     // into thinking the available bitrate has decreased since the last call.
     DataRate encoder_target;
-    DataRate stable_encoder_target;
+  };
+
+  class PreparedFramesProcessor
+      : public VideoFrameBuffer::PreparedFrameHandler {
+   public:
+    explicit PreparedFramesProcessor(VideoStreamEncoder* parent);
+
+    void StopCallbacks();
+
+    void OnFramePrepared(size_t frame_identifier) override;
+
+   private:
+    VideoStreamEncoder* parent_ RTC_GUARDED_BY(lock_);
+    Mutex lock_;
   };
 
   class DegradationPreferenceManager;
@@ -217,11 +238,15 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   void OnDiscardedFrame();
   void RequestRefreshFrame();
 
+  void MaybePrepareVideoFrame(const VideoFrame& frame,
+                              int64_t time_when_posted_in_ms);
+
   void MaybeEncodeVideoFrame(const VideoFrame& frame,
                              int64_t time_when_posted_in_ms);
 
   void EncodeVideoFrame(const VideoFrame& frame,
                         int64_t time_when_posted_in_ms);
+
   // Indicates whether frame should be dropped because the pixel count is too
   // large for the current bitrate configuration.
   bool DropDueToSize(uint32_t pixel_count) const RTC_RUN_ON(encoder_queue_);
@@ -231,7 +256,9 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
       const EncodedImage& encoded_image,
       const CodecSpecificInfo* codec_specific_info) override;
 
-  void OnDroppedFrame(EncodedImageCallback::DropReason reason) override;
+  void OnFrameDropped(uint32_t rtp_timestamp,
+                      int spatial_id,
+                      bool is_end_of_temporal_unit) override;
 
   bool EncoderPaused() const;
   void TraceFrameDropStart();
@@ -254,10 +281,6 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   // After calling this function `resource_adaptation_processor_` will be null.
   void ShutdownResourceAdaptationQueue();
 
-  void CheckForAnimatedContent(const VideoFrame& frame,
-                               int64_t time_when_posted_in_ms)
-      RTC_RUN_ON(encoder_queue_);
-
   void RequestEncoderSwitch() RTC_RUN_ON(encoder_queue_);
 
   // Augments an EncodedImage received from an encoder with parsable
@@ -270,23 +293,21 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
                            VideoStreamEncoderObserver::DropReason reason)
       RTC_RUN_ON(encoder_queue_);
 
-  const FieldTrialsView& field_trials_;
+  const Environment env_;
   TaskQueueBase* const worker_queue_;
 
   const int number_of_cores_;
 
   EncoderSink* sink_ = nullptr;
   const VideoStreamEncoderSettings settings_;
+  EncoderSwitchRequestCallback encoder_switch_request_callback_;
   const BitrateAllocationCallbackType allocation_cb_type_;
   const RateControlSettings rate_control_settings_;
 
-  webrtc::VideoEncoderFactory::EncoderSelectorInterface* const
-      encoder_selector_from_constructor_;
-  std::unique_ptr<VideoEncoderFactory::EncoderSelectorInterface> const
-      encoder_selector_from_factory_;
-  // Pointing to either encoder_selector_from_constructor_ or
-  // encoder_selector_from_factory_ but can be nullptr.
-  VideoEncoderFactory::EncoderSelectorInterface* const encoder_selector_;
+  // Pointing to either encoder_selector from constructor or
+  // encoder_selector from_factory_ but can be nullptr.
+  const scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>
+      encoder_selector_;
 
   VideoStreamEncoderObserver* const encoder_stats_observer_;
   // Adapter that avoids public inheritance of the cadence adapter's callback
@@ -314,14 +335,13 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   absl::InlinedVector<SetParametersCallback, 2> encoder_configuration_callbacks_
       RTC_GUARDED_BY(encoder_queue_);
 
-  absl::optional<VideoFrameInfo> last_frame_info_
-      RTC_GUARDED_BY(encoder_queue_);
+  std::optional<VideoFrameInfo> last_frame_info_ RTC_GUARDED_BY(encoder_queue_);
   int crop_width_ RTC_GUARDED_BY(encoder_queue_) = 0;
   int crop_height_ RTC_GUARDED_BY(encoder_queue_) = 0;
-  absl::optional<uint32_t> encoder_target_bitrate_bps_
+  std::optional<uint32_t> encoder_target_bitrate_bps_
       RTC_GUARDED_BY(encoder_queue_);
   size_t max_data_payload_length_ RTC_GUARDED_BY(encoder_queue_) = 0;
-  absl::optional<EncoderRateSettings> last_encoder_rate_settings_
+  std::optional<EncoderRateSettings> last_encoder_rate_settings_
       RTC_GUARDED_BY(encoder_queue_);
   bool encoder_paused_and_dropped_frame_ RTC_GUARDED_BY(encoder_queue_) = false;
 
@@ -329,9 +349,6 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   // initialization.
   bool was_encode_called_since_last_initialization_
       RTC_GUARDED_BY(encoder_queue_) = false;
-
-  bool encoder_failed_ RTC_GUARDED_BY(encoder_queue_) = false;
-  Clock* const clock_;
 
   // Used to make sure incoming time stamp is increasing for every frame.
   int64_t last_captured_timestamp_ RTC_GUARDED_BY(encoder_queue_) = 0;
@@ -342,37 +359,23 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   int captured_frame_count_ RTC_GUARDED_BY(encoder_queue_) = 0;
   int dropped_frame_cwnd_pushback_count_ RTC_GUARDED_BY(encoder_queue_) = 0;
   int dropped_frame_encoder_block_count_ RTC_GUARDED_BY(encoder_queue_) = 0;
-  absl::optional<VideoFrame> pending_frame_ RTC_GUARDED_BY(encoder_queue_);
+  std::optional<VideoFrame> pending_frame_ RTC_GUARDED_BY(encoder_queue_);
   int64_t pending_frame_post_time_us_ RTC_GUARDED_BY(encoder_queue_) = 0;
 
   VideoFrame::UpdateRect accumulated_update_rect_
       RTC_GUARDED_BY(encoder_queue_);
   bool accumulated_update_rect_is_valid_ RTC_GUARDED_BY(encoder_queue_) = true;
 
-  // Used for automatic content type detection.
-  absl::optional<VideoFrame::UpdateRect> last_update_rect_
-      RTC_GUARDED_BY(encoder_queue_);
-  Timestamp animation_start_time_ RTC_GUARDED_BY(encoder_queue_) =
-      Timestamp::PlusInfinity();
-  bool cap_resolution_due_to_video_content_ RTC_GUARDED_BY(encoder_queue_) =
-      false;
-  // Used to correctly ignore changes in update_rect introduced by
-  // resize triggered by animation detection.
-  enum class ExpectResizeState {
-    kNoResize,              // Normal operation.
-    kResize,                // Resize was triggered by the animation detection.
-    kFirstFrameAfterResize  // Resize observed.
-  } expect_resize_state_ RTC_GUARDED_BY(encoder_queue_) =
-      ExpectResizeState::kNoResize;
-
   FecControllerOverride* fec_controller_override_
       RTC_GUARDED_BY(encoder_queue_) = nullptr;
-  absl::optional<int64_t> last_parameters_update_ms_
+  std::optional<int64_t> last_parameters_update_ms_
       RTC_GUARDED_BY(encoder_queue_);
-  absl::optional<int64_t> last_encode_info_ms_ RTC_GUARDED_BY(encoder_queue_);
+  std::optional<int64_t> last_encode_info_ms_ RTC_GUARDED_BY(encoder_queue_);
 
   VideoEncoder::EncoderInfo encoder_info_ RTC_GUARDED_BY(encoder_queue_);
   VideoCodec send_codec_ RTC_GUARDED_BY(encoder_queue_);
+  std::optional<absl::InlinedVector<VideoCodecComplexity, kMaxSimulcastStreams>>
+      encoder_complexity_ RTC_GUARDED_BY(encoder_queue_);
 
   FrameDropper frame_dropper_ RTC_GUARDED_BY(encoder_queue_);
   // If frame dropper is not force disabled, frame dropping might still be
@@ -388,7 +391,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
 
   // Congestion window frame drop ratio (drop 1 in every
   // cwnd_frame_drop_interval_ frames).
-  absl::optional<int> cwnd_frame_drop_interval_ RTC_GUARDED_BY(encoder_queue_);
+  std::optional<int> cwnd_frame_drop_interval_ RTC_GUARDED_BY(encoder_queue_);
   // Frame counter for congestion window frame drop.
   int cwnd_frame_counter_ RTC_GUARDED_BY(encoder_queue_) = 0;
 
@@ -399,30 +402,12 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   // turn this into a simple bool `pending_keyframe_request_`.
   std::vector<VideoFrameType> next_frame_types_ RTC_GUARDED_BY(encoder_queue_);
 
-  FrameEncodeMetadataWriter frame_encode_metadata_writer_{this};
-
-  struct AutomaticAnimationDetectionExperiment {
-    bool enabled = false;
-    int min_duration_ms = 2000;
-    double min_area_ratio = 0.8;
-    int min_fps = 10;
-    std::unique_ptr<StructParametersParser> Parser() {
-      return StructParametersParser::Create(
-          "enabled", &enabled,                  //
-          "min_duration_ms", &min_duration_ms,  //
-          "min_area_ratio", &min_area_ratio,    //
-          "min_fps", &min_fps);
-    }
-  };
-
-  AutomaticAnimationDetectionExperiment
-  ParseAutomatincAnimationDetectionFieldTrial() const;
-
-  AutomaticAnimationDetectionExperiment
-      automatic_animation_detection_experiment_ RTC_GUARDED_BY(encoder_queue_);
+  FrameEncodeMetadataWriter frame_encode_metadata_writer_{env_, this};
 
   // Provides video stream input states: current resolution and frame rate.
   VideoStreamInputStateProvider input_state_provider_;
+
+  bool encoder_fallback_requested_ RTC_GUARDED_BY(encoder_queue_) = false;
 
   const std::unique_ptr<VideoStreamAdapter> video_stream_adapter_
       RTC_GUARDED_BY(encoder_queue_);
@@ -444,7 +429,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   // and its resource list is accessible from any thread.
   VideoStreamEncoderResourceManager stream_resource_manager_
       RTC_GUARDED_BY(encoder_queue_);
-  std::vector<rtc::scoped_refptr<Resource>> additional_resources_
+  std::vector<scoped_refptr<Resource>> additional_resources_
       RTC_GUARDED_BY(encoder_queue_);
   // Carries out the VideoSourceRestrictions provided by the
   // ResourceAdaptationProcessor, i.e. reconfigures the source of video frames
@@ -453,41 +438,62 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   VideoSourceSinkController video_source_sink_controller_
       RTC_GUARDED_BY(worker_queue_);
 
-  // Default bitrate limits in EncoderInfoSettings allowed.
-  const bool default_limits_allowed_;
-
   // QP parser is used to extract QP value from encoded frame when that is not
   // provided by encoder.
   QpParser qp_parser_;
   const bool qp_parsing_allowed_;
 
+  // The quality convergence controller is used to determine if a codec has
+  // reached its target quality. This is used for screenshare to determine when
+  // there's no need to continue encoding the same repeated frame.
+  QualityConvergenceController quality_convergence_controller_
+      RTC_GUARDED_BY(encoder_queue_);
+  // TODO(crbug.com/328598314): Remove once the feature is fully deployed.
+  const bool qcm_ignore_enhancement_temporal_layers_;
+
   // Enables encoder switching on initialization failures.
   bool switch_encoder_on_init_failures_;
 
-  const absl::optional<int> vp9_low_tier_core_threshold_;
-  const absl::optional<int> experimental_encoder_thread_limit_;
+  const std::optional<int> vp9_low_tier_core_threshold_;
+  const std::optional<int> experimental_encoder_thread_limit_;
+  const EncoderSpeedExperiment speed_experiment_;
 
-  // These are copies of restrictions (glorified max_pixel_count) set by
-  // a) OnVideoSourceRestrictionsUpdated
-  // b) CheckForAnimatedContent
-  // They are used to scale down encoding resolution if needed when using
-  // requested_resolution.
+  // This is a copy of restrictions (glorified max_pixel_count) set by
+  // OnVideoSourceRestrictionsUpdated. It is used to scale down encoding
+  // resolution if needed when using requested_resolution.
   //
   // TODO(webrtc:14451) Split video_source_sink_controller_
   // so that ownership on restrictions/wants is kept on &encoder_queue_, that
   // these extra copies would not be needed.
-  absl::optional<VideoSourceRestrictions> latest_restrictions_
-      RTC_GUARDED_BY(encoder_queue_);
-  absl::optional<VideoSourceRestrictions> animate_restrictions_
+  std::optional<VideoSourceRestrictions> latest_restrictions_
       RTC_GUARDED_BY(encoder_queue_);
 
   // Used to cancel any potentially pending tasks to the worker thread.
-  // Refrenced by tasks running on `encoder_queue_` so need to be destroyed
+  // Referenced by tasks running on `encoder_queue_` so need to be destroyed
   // after stopping that queue. Must be created and destroyed on
   // `worker_queue_`.
   ScopedTaskSafety task_safety_;
 
   std::unique_ptr<TaskQueueBase, TaskQueueDeleter> encoder_queue_;
+
+  //  Required for automatic corruption detection.
+  std::unique_ptr<FrameInstrumentationGenerator>
+      frame_instrumentation_generator_;
+
+  scoped_refptr<PreparedFramesProcessor> prepared_frames_processor_;
+
+  size_t frame_counter_ = 0;
+
+  struct PreparingFrame {
+    const VideoFrame frame;
+    bool can_send;
+    size_t frame_id;
+    int64_t time_when_posted_us;
+  };
+
+  std::deque<PreparingFrame> pending_mapped_frames_;
+
+  std::atomic<bool> is_stopped_ = false;
 };
 
 }  // namespace webrtc

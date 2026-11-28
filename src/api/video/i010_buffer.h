@@ -26,21 +26,25 @@ namespace webrtc {
 class I010Buffer : public I010BufferInterface {
  public:
   // Create a new buffer.
-  static rtc::scoped_refptr<I010Buffer> Create(int width, int height);
+  static scoped_refptr<I010Buffer> Create(int width, int height);
 
   // Create a new buffer and copy the pixel data.
-  static rtc::scoped_refptr<I010Buffer> Copy(const I010BufferInterface& buffer);
+  static scoped_refptr<I010Buffer> Copy(const I010BufferInterface& buffer);
 
   // Convert and put I420 buffer into a new buffer.
-  static rtc::scoped_refptr<I010Buffer> Copy(const I420BufferInterface& buffer);
+  static scoped_refptr<I010Buffer> Copy(const I420BufferInterface& buffer);
 
   // Return a rotated copy of `src`.
-  static rtc::scoped_refptr<I010Buffer> Rotate(const I010BufferInterface& src,
-                                               VideoRotation rotation);
+  static scoped_refptr<I010Buffer> Rotate(const I010BufferInterface& src,
+                                          VideoRotation rotation);
 
   // VideoFrameBuffer implementation.
-  rtc::scoped_refptr<I420BufferInterface> ToI420() override;
+  scoped_refptr<I420BufferInterface> ToI420() override;
 
+  // Sets all three planes to all zeros. Used to work around for
+  // quirks in memory checkers
+  // (https://bugs.chromium.org/p/libyuv/issues/detail?id=377) and
+  // ffmpeg (http://crbug.com/390941).
   void InitializeData();
 
   // PlanarYuv16BBuffer implementation.

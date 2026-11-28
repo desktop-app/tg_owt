@@ -10,39 +10,62 @@
 
 #include "modules/video_coding/codecs/vp8/libvpx_vp8_encoder.h"
 
-#include <string.h>
-
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/container/inlined_vector.h"
+#include "api/environment/environment.h"
+#include "api/fec_controller_override.h"
+#include "api/field_trials_view.h"
 #include "api/scoped_refptr.h"
-#include "api/video/video_content_type.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "api/video/corruption_detection/corruption_detection_settings_generator.h"
+#include "api/video/encoded_image.h"
+#include "api/video/render_resolution.h"
+#include "api/video/video_bitrate_allocation.h"
+#include "api/video/video_bitrate_allocator.h"
+#include "api/video/video_codec_constants.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
-#include "api/video/video_timing.h"
+#include "api/video/video_frame_type.h"
 #include "api/video_codecs/scalability_mode.h"
-#include "api/video_codecs/vp8_temporal_layers.h"
+#include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_encoder.h"
+#include "api/video_codecs/vp8_frame_buffer_controller.h"
+#include "api/video_codecs/vp8_frame_config.h"
 #include "api/video_codecs/vp8_temporal_layers_factory.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/video_coding/codecs/interface/common_constants.h"
+#include "modules/video_coding/codecs/interface/libvpx_interface.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "modules/video_coding/codecs/vp8/vp8_scalability.h"
+#include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
-#include "modules/video_coding/svc/scalability_mode_util.h"
+#include "modules/video_coding/utility/frame_sampler.h"
 #include "modules/video_coding/utility/simulcast_rate_allocator.h"
 #include "modules/video_coding/utility/simulcast_utility.h"
+#include "modules/video_coding/utility/vp8_constants.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/experiments/field_trial_parser.h"
-#include "rtc_base/experiments/field_trial_units.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/trace_event.h"
-#include "system_wrappers/include/field_trial.h"
-#include "third_party/libyuv/include/libyuv/scale.h"
-#include "vpx/vp8cx.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8cx.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_codec.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_encoder.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_image.h"
 
 #if (defined(WEBRTC_ARCH_ARM) || defined(WEBRTC_ARCH_ARM64)) && \
     (defined(WEBRTC_ANDROID) || defined(WEBRTC_IOS))
@@ -57,6 +80,11 @@ constexpr char kVP8IosMaxNumberOfThreadFieldTrial[] =
 constexpr char kVP8IosMaxNumberOfThreadFieldTrialParameter[] = "max_thread";
 #endif
 
+namespace variable_framerate_screenshare {
+constexpr double kMinFps = 5.0;
+constexpr int kUndershootPct = 30;
+}  // namespace variable_framerate_screenshare
+
 constexpr char kVp8ForcePartitionResilience[] =
     "WebRTC-VP8-ForcePartitionResilience";
 
@@ -64,12 +92,12 @@ constexpr char kVp8ForcePartitionResilience[] =
 // bitstream range of [0, 127] and not the user-level range of [0,63].
 constexpr int kLowVp8QpThreshold = 29;
 constexpr int kHighVp8QpThreshold = 95;
+constexpr int kScreenshareMinQp = 15;
 
 constexpr int kTokenPartitions = VP8_ONE_TOKENPARTITION;
 constexpr uint32_t kVp832ByteAlign = 32u;
 
-constexpr int kRtpTicksPerSecond = 90000;
-constexpr int kRtpTicksPerMs = kRtpTicksPerSecond / 1000;
+constexpr int kRtpTicksPerMs = kVideoPayloadTypeFrequency / 1000;
 
 // If internal frame dropping is enabled, force the encoder to output a frame
 // on an encode request after this timeout even if this causes some
@@ -112,8 +140,8 @@ static_assert(Vp8EncoderConfig::TemporalLayerConfig::kMaxLayers ==
 // Allow a newer value to override a current value only if the new value
 // is set.
 template <typename T>
-bool MaybeSetNewValue(const absl::optional<T>& new_value,
-                      absl::optional<T>* base_value) {
+bool MaybeSetNewValue(const std::optional<T>& new_value,
+                      std::optional<T>* base_value) {
   if (new_value.has_value() && new_value != *base_value) {
     *base_value = new_value;
     return true;
@@ -249,30 +277,26 @@ class FrameDropConfigOverride {
   const uint32_t original_frame_drop_threshold_;
 };
 
-absl::optional<TimeDelta> ParseFrameDropInterval() {
+std::optional<TimeDelta> ParseFrameDropInterval(
+    const FieldTrialsView& field_trials) {
   FieldTrialFlag disabled = FieldTrialFlag("Disabled");
   FieldTrialParameter<TimeDelta> interval("interval",
                                           kDefaultMaxFrameDropInterval);
   ParseFieldTrial({&disabled, &interval},
-                  field_trial::FindFullName("WebRTC-VP8-MaxFrameInterval"));
+                  field_trials.Lookup("WebRTC-VP8-MaxFrameInterval"));
   if (disabled.Get()) {
     // Kill switch set, don't use any max frame interval.
-    return absl::nullopt;
+    return std::nullopt;
   }
   return interval.Get();
 }
 
 }  // namespace
 
-std::unique_ptr<VideoEncoder> VP8Encoder::Create() {
-  return std::make_unique<LibvpxVp8Encoder>(LibvpxInterface::Create(),
-                                            VP8Encoder::Settings());
-}
-
-std::unique_ptr<VideoEncoder> VP8Encoder::Create(
-    VP8Encoder::Settings settings) {
-  return std::make_unique<LibvpxVp8Encoder>(LibvpxInterface::Create(),
-                                            std::move(settings));
+std::unique_ptr<VideoEncoder> CreateVp8Encoder(const Environment& env,
+                                               Vp8EncoderSettings settings) {
+  return std::make_unique<LibvpxVp8Encoder>(env, std::move(settings),
+                                            LibvpxInterface::Create());
 }
 
 vpx_enc_frame_flags_t LibvpxVp8Encoder::EncodeFlags(
@@ -304,22 +328,22 @@ vpx_enc_frame_flags_t LibvpxVp8Encoder::EncodeFlags(
   return flags;
 }
 
-LibvpxVp8Encoder::LibvpxVp8Encoder(std::unique_ptr<LibvpxInterface> interface,
-                                   VP8Encoder::Settings settings)
-    : libvpx_(std::move(interface)),
-      rate_control_settings_(RateControlSettings::ParseFromFieldTrials()),
-      frame_buffer_controller_factory_(
-          std::move(settings.frame_buffer_controller_factory)),
+LibvpxVp8Encoder::LibvpxVp8Encoder(const Environment& env,
+                                   Vp8EncoderSettings settings,
+                                   std::unique_ptr<LibvpxInterface> interface)
+    : env_(env),
+      libvpx_(std::move(interface)),
+      rate_control_settings_(env_.field_trials()),
       resolution_bitrate_limits_(std::move(settings.resolution_bitrate_limits)),
       key_frame_request_(kMaxSimulcastStreams, false),
       last_encoder_output_time_(kMaxSimulcastStreams,
                                 Timestamp::MinusInfinity()),
-      variable_framerate_experiment_(ParseVariableFramerateConfig(
-          "WebRTC-VP8VariableFramerateScreenshare")),
-      framerate_controller_(variable_framerate_experiment_.framerate_limit),
-      max_frame_drop_interval_(ParseFrameDropInterval()) {
-  // TODO(eladalon/ilnik): These reservations might be wasting memory.
-  // InitEncode() is resizing to the actual size, which might be smaller.
+      framerate_controller_(variable_framerate_screenshare::kMinFps),
+      encoder_info_override_(env_.field_trials()),
+      max_frame_drop_interval_(ParseFrameDropInterval(env_.field_trials())),
+      android_specific_threading_settings_(env_.field_trials().IsEnabled(
+          "WebRTC-LibvpxVp8Encoder-AndroidSpecificThreadingSettings")),
+      psnr_frame_sampler_(FrameSampler::kDefaultPsnrFrameSamplingInterval) {
   raw_images_.reserve(kMaxSimulcastStreams);
   encoded_images_.reserve(kMaxSimulcastStreams);
   send_stream_.reserve(kMaxSimulcastStreams);
@@ -434,6 +458,40 @@ void LibvpxVp8Encoder::SetRates(const RateControlParameters& parameters) {
   }
 }
 
+void LibvpxVp8Encoder::SetComplexity(
+    std::span<const VideoCodecComplexity> complexity_by_spatial_layer,
+    ComplexityControlMode /*complexity_control_mode*/) {
+  if (!inited_) {
+    return;
+  }
+  for (size_t i = 0; i < encoders_.size(); ++i) {
+    const size_t stream_idx = encoders_.size() - 1 - i;
+    const VideoCodecComplexity complexity =
+        complexity_by_spatial_layer.empty()
+            ? VideoCodecComplexity::kComplexityNormal
+            : complexity_by_spatial_layer[std::min(
+                  stream_idx, complexity_by_spatial_layer.size() - 1)];
+    switch (complexity) {
+      case VideoCodecComplexity::kComplexityLow:
+        cpu_speed_[i] = -12;
+        break;
+      case VideoCodecComplexity::kComplexityNormal:
+        cpu_speed_[i] = -10;
+        break;
+      case VideoCodecComplexity::kComplexityHigh:
+        cpu_speed_[i] = -7;
+        break;
+      case VideoCodecComplexity::kComplexityHigher:
+        cpu_speed_[i] = -5;
+        break;
+      case VideoCodecComplexity::kComplexityMax:
+        cpu_speed_[i] = -4;
+        break;
+    }
+    libvpx_->codec_control(&encoders_[i], VP8E_SET_CPUUSED, cpu_speed_[i]);
+  }
+}
+
 void LibvpxVp8Encoder::OnPacketLossRateUpdate(float packet_loss_rate) {
   // TODO(bugs.webrtc.org/10431): Replace condition by DCHECK.
   if (frame_buffer_controller_) {
@@ -445,13 +503,6 @@ void LibvpxVp8Encoder::OnRttUpdate(int64_t rtt_ms) {
   // TODO(bugs.webrtc.org/10431): Replace condition by DCHECK.
   if (frame_buffer_controller_) {
     frame_buffer_controller_->OnRttUpdate(rtt_ms);
-  }
-}
-
-void LibvpxVp8Encoder::OnLossNotification(
-    const LossNotification& loss_notification) {
-  if (frame_buffer_controller_) {
-    frame_buffer_controller_->OnLossNotification(loss_notification);
   }
 }
 
@@ -475,7 +526,7 @@ void LibvpxVp8Encoder::SetFecControllerOverride(
 // TODO(eladalon): s/inst/codec_settings/g.
 int LibvpxVp8Encoder::InitEncode(const VideoCodec* inst,
                                  const VideoEncoder::Settings& settings) {
-  if (inst == NULL) {
+  if (inst == nullptr) {
     return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
   }
   if (inst->maxFramerate < 1) {
@@ -492,7 +543,7 @@ int LibvpxVp8Encoder::InitEncode(const VideoCodec* inst,
     return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
   }
 
-  if (absl::optional<ScalabilityMode> scalability_mode =
+  if (std::optional<ScalabilityMode> scalability_mode =
           inst->GetScalabilityMode();
       scalability_mode.has_value() &&
       !VP8SupportsScalabilityMode(*scalability_mode)) {
@@ -529,14 +580,9 @@ int LibvpxVp8Encoder::InitEncode(const VideoCodec* inst,
   }
 
   RTC_DCHECK(!frame_buffer_controller_);
-  if (frame_buffer_controller_factory_) {
-    frame_buffer_controller_ = frame_buffer_controller_factory_->Create(
-        *inst, settings, fec_controller_override_);
-  } else {
-    Vp8TemporalLayersFactory factory;
-    frame_buffer_controller_ =
-        factory.Create(*inst, settings, fec_controller_override_);
-  }
+  Vp8TemporalLayersFactory factory;
+  frame_buffer_controller_ =
+      factory.Create(env_, *inst, settings, fec_controller_override_);
   RTC_DCHECK(frame_buffer_controller_);
 
   number_of_cores_ = settings.number_of_cores;
@@ -584,7 +630,7 @@ int LibvpxVp8Encoder::InitEncode(const VideoCodec* inst,
   }
   // setting the time base of the codec
   vpx_configs_[0].g_timebase.num = 1;
-  vpx_configs_[0].g_timebase.den = kRtpTicksPerSecond;
+  vpx_configs_[0].g_timebase.den = kVideoPayloadTypeFrequency;
   vpx_configs_[0].g_lag_in_frames = 0;  // 0- no frame lagging
 
   // Set the error resilience mode for temporal layers (but not simulcast).
@@ -595,7 +641,7 @@ int LibvpxVp8Encoder::InitEncode(const VideoCodec* inst,
 
   // Override the error resilience mode if this is not simulcast, but we are
   // using temporal layers.
-  if (field_trial::IsEnabled(kVp8ForcePartitionResilience) &&
+  if (env_.field_trials().IsEnabled(kVp8ForcePartitionResilience) &&
       (number_of_streams == 1) &&
       (SimulcastUtility::NumberOfTemporalLayers(*inst, 0) > 1)) {
     RTC_LOG(LS_INFO) << "Overriding g_error_resilient from "
@@ -677,12 +723,12 @@ int LibvpxVp8Encoder::InitEncode(const VideoCodec* inst,
   // Actual pointer will be set in encode. Setting align to 1, as it
   // is meaningless (no memory allocation is done here).
   libvpx_->img_wrap(&raw_images_[0], pixel_format, inst->width, inst->height, 1,
-                    NULL);
+                    nullptr);
 
   // Note the order we use is different from webm, we have lowest resolution
   // at position 0 and they have highest resolution at position 0.
   const size_t stream_idx_cfg_0 = encoders_.size() - 1;
-  SimulcastRateAllocator init_allocator(codec_);
+  SimulcastRateAllocator init_allocator(env_, codec_);
   VideoBitrateAllocation allocation =
       init_allocator.Allocate(VideoBitrateAllocationParameters(
           inst->startBitrate * 1000, inst->maxFramerate));
@@ -745,6 +791,31 @@ int LibvpxVp8Encoder::InitEncode(const VideoCodec* inst,
     UpdateVpxConfiguration(stream_idx);
   }
 
+  corruption_detection_settings_generator_ =
+      std::make_unique<CorruptionDetectionSettingsGenerator>(
+          CorruptionDetectionSettingsGenerator::ExponentialFunctionParameters{
+              .scale = 0.006,
+              .exponent_factor = 0.01857465,
+              .exponent_offset = -4.26470513},
+          CorruptionDetectionSettingsGenerator::ErrorThresholds{.luma = 5,
+                                                                .chroma = 6},
+          // On large changes, increase error threshold by one and std_dev
+          // by 2.0. Trigger on qp changes larger than 30, and fade down the
+          // adjusted value over 4 * num_temporal_layers to allow the base layer
+          // to converge somewhat. Set a minim filter size of 1.25 since some
+          // outlier pixels deviate a bit from truth even at very low QP,
+          // seeminly by bleeding into neighbours.
+          CorruptionDetectionSettingsGenerator::TransientParameters{
+              .max_qp = 127,
+              .keyframe_threshold_offset = 1,
+              .keyframe_stddev_offset = 2.0,
+              .keyframe_offset_duration_frames =
+                  std::max(1,
+                           SimulcastUtility::NumberOfTemporalLayers(*inst, 0)) *
+                  4,
+              .large_qp_change_threshold = 30,
+              .std_dev_lower_bound = 1.25});
+
   return InitAndSetControlSettings();
 }
 
@@ -753,13 +824,6 @@ int LibvpxVp8Encoder::GetCpuSpeed(int width, int height) {
   // On mobile platform, use a lower speed setting for lower resolutions for
   // CPUs with 4 or more cores.
   RTC_DCHECK_GT(number_of_cores_, 0);
-  if (experimental_cpu_speed_config_arm_
-          .GetValue(width * height, number_of_cores_)
-          .has_value()) {
-    return experimental_cpu_speed_config_arm_
-        .GetValue(width * height, number_of_cores_)
-        .value();
-  }
 
   if (number_of_cores_ <= 3)
     return -12;
@@ -783,22 +847,23 @@ int LibvpxVp8Encoder::GetCpuSpeed(int width, int height) {
 
 int LibvpxVp8Encoder::NumberOfThreads(int width, int height, int cpus) {
 #if defined(WEBRTC_ANDROID)
-  if (width * height >= 320 * 180) {
-    if (cpus >= 4) {
-      // 3 threads for CPUs with 4 and more cores since most of times only 4
-      // cores will be active.
-      return 3;
-    } else if (cpus == 3 || cpus == 2) {
-      return 2;
-    } else {
-      return 1;
+  if (android_specific_threading_settings_) {
+    if (width * height >= 320 * 180) {
+      if (cpus >= 4) {
+        // 3 threads for CPUs with 4 and more cores since most of times only 4
+        // cores will be active.
+        return 3;
+      } else if (cpus == 3 || cpus == 2) {
+        return 2;
+      } else {
+        return 1;
+      }
     }
+    return 1;
   }
-  return 1;
-#else
-#if defined(WEBRTC_IOS)
+#elif defined(WEBRTC_IOS)
   std::string trial_string =
-      field_trial::FindFullName(kVP8IosMaxNumberOfThreadFieldTrial);
+      env_.field_trials().Lookup(kVP8IosMaxNumberOfThreadFieldTrial);
   FieldTrialParameter<int> max_thread_number(
       kVP8IosMaxNumberOfThreadFieldTrialParameter, 0);
   ParseFieldTrial({&max_thread_number}, trial_string);
@@ -823,11 +888,10 @@ int LibvpxVp8Encoder::NumberOfThreads(int width, int height, int cpus) {
       return 3;
     }
     return 2;
-  } else {
-    // 1 thread for VGA or less.
-    return 1;
   }
-#endif
+
+  // 1 thread for VGA or less.
+  return 1;
 }
 
 int LibvpxVp8Encoder::InitAndSetControlSettings() {
@@ -946,9 +1010,7 @@ size_t LibvpxVp8Encoder::SteadyStateSize(int sid, int tid) {
     return 0;
   return static_cast<size_t>(
       bitrate_bps / (8 * fps) *
-          (100 -
-           variable_framerate_experiment_.steady_state_undershoot_percentage) /
-          100 +
+          (100 - variable_framerate_screenshare::kUndershootPct) / 100 +
       0.5);
 }
 
@@ -985,9 +1047,11 @@ int LibvpxVp8Encoder::Encode(const VideoFrame& frame,
 
   if (!inited_)
     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
-  if (encoded_complete_callback_ == NULL)
+  if (encoded_complete_callback_ == nullptr)
     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
 
+  // A keyframe request on any stream triggers a keyframe on all streams
+  // in order to keep the temporal layering structure aligned.
   bool key_frame_requested = false;
   for (size_t i = 0; i < key_frame_request_.size() && i < send_stream_.size();
        ++i) {
@@ -1026,12 +1090,12 @@ int LibvpxVp8Encoder::Encode(const VideoFrame& frame,
 
   if (frame.update_rect().IsEmpty() && num_steady_state_frames_ >= 3 &&
       !key_frame_requested) {
-    if (variable_framerate_experiment_.enabled &&
-        framerate_controller_.DropFrame(frame.timestamp() / kRtpTicksPerMs) &&
+    if (framerate_controller_.DropFrame(frame.rtp_timestamp() /
+                                        kRtpTicksPerMs) &&
         frame_drop_overrides_.empty()) {
       return WEBRTC_VIDEO_CODEC_OK;
     }
-    framerate_controller_.AddFrame(frame.timestamp() / kRtpTicksPerMs);
+    framerate_controller_.AddFrame(frame.rtp_timestamp() / kRtpTicksPerMs);
   }
 
   bool send_key_frame = key_frame_requested;
@@ -1040,7 +1104,7 @@ int LibvpxVp8Encoder::Encode(const VideoFrame& frame,
   Vp8FrameConfig tl_configs[kMaxSimulcastStreams];
   for (size_t i = 0; i < encoders_.size(); ++i) {
     tl_configs[i] =
-        frame_buffer_controller_->NextFrameConfig(i, frame.timestamp());
+        frame_buffer_controller_->NextFrameConfig(i, frame.rtp_timestamp());
     send_key_frame |= tl_configs[i].IntraFrame();
     drop_frame |= tl_configs[i].drop_frame;
     RTC_DCHECK(i == 0 ||
@@ -1057,11 +1121,19 @@ int LibvpxVp8Encoder::Encode(const VideoFrame& frame,
     flags[i] = send_key_frame ? VPX_EFLAG_FORCE_KF : EncodeFlags(tl_configs[i]);
   }
 
+#if defined(WEBRTC_ENCODER_PSNR_STATS) && defined(VPX_EFLAG_CALCULATE_PSNR)
+  if (psnr_frame_sampler_.ShouldBeSampled(frame)) {
+    for (size_t i = 0; i < encoders_.size(); ++i) {
+      flags[i] |= VPX_EFLAG_CALCULATE_PSNR;
+    }
+  }
+#endif
+
   // Scale and map buffers and set `raw_images_` to hold pointers to the result.
   // Because `raw_images_` are set to hold pointers to the prepared buffers, we
   // need to keep these buffers alive through reference counting until after
   // encoding is complete.
-  std::vector<rtc::scoped_refptr<VideoFrameBuffer>> prepared_buffers =
+  std::vector<scoped_refptr<VideoFrameBuffer>> prepared_buffers =
       PrepareBuffers(frame.video_frame_buffer());
   if (prepared_buffers.empty()) {
     return WEBRTC_VIDEO_CODEC_ERROR;
@@ -1069,7 +1141,7 @@ int LibvpxVp8Encoder::Encode(const VideoFrame& frame,
   struct CleanUpOnExit {
     explicit CleanUpOnExit(
         vpx_image_t* raw_image,
-        std::vector<rtc::scoped_refptr<VideoFrameBuffer>> prepared_buffers)
+        std::vector<scoped_refptr<VideoFrameBuffer>> prepared_buffers)
         : raw_image_(raw_image),
           prepared_buffers_(std::move(prepared_buffers)) {}
     ~CleanUpOnExit() {
@@ -1078,7 +1150,7 @@ int LibvpxVp8Encoder::Encode(const VideoFrame& frame,
       raw_image_->planes[VPX_PLANE_V] = nullptr;
     }
     vpx_image_t* raw_image_;
-    std::vector<rtc::scoped_refptr<VideoFrameBuffer>> prepared_buffers_;
+    std::vector<scoped_refptr<VideoFrameBuffer>> prepared_buffers_;
   } clean_up_on_exit(&raw_images_[0], std::move(prepared_buffers));
 
   if (send_key_frame) {
@@ -1118,7 +1190,7 @@ int LibvpxVp8Encoder::Encode(const VideoFrame& frame,
   // rate control seems to be off with that setup. Using the average input
   // frame rate to calculate an average duration for now.
   RTC_DCHECK_GT(codec_.maxFramerate, 0);
-  uint32_t duration = kRtpTicksPerSecond / codec_.maxFramerate;
+  uint32_t duration = kVideoPayloadTypeFrequency / codec_.maxFramerate;
 
   int error = WEBRTC_VIDEO_CODEC_OK;
   int num_tries = 0;
@@ -1167,7 +1239,7 @@ void LibvpxVp8Encoder::PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
   frame_buffer_controller_->OnEncodeDone(stream_idx, timestamp,
                                          encoded_images_[encoder_idx].size(),
                                          is_keyframe, qp, codec_specific);
-  if (is_keyframe && codec_specific->template_structure != absl::nullopt) {
+  if (is_keyframe && codec_specific->template_structure != std::nullopt) {
     // Number of resolutions must match number of spatial layers, VP8 structures
     // expected to use single spatial layer. Templates must be ordered by
     // spatial_id, so assumption there is exactly one spatial layer is same as
@@ -1201,15 +1273,17 @@ int LibvpxVp8Encoder::GetEncodedPartitions(const VideoFrame& input_image,
   int result = WEBRTC_VIDEO_CODEC_OK;
   for (size_t encoder_idx = 0; encoder_idx < encoders_.size();
        ++encoder_idx, --stream_idx) {
-    vpx_codec_iter_t iter = NULL;
+    vpx_codec_iter_t iter = nullptr;
     encoded_images_[encoder_idx].set_size(0);
-    encoded_images_[encoder_idx]._frameType = VideoFrameType::kVideoFrameDelta;
+    encoded_images_[encoder_idx].set_psnr(std::nullopt);
+    encoded_images_[encoder_idx].set_frame_type(
+        VideoFrameType::kVideoFrameDelta);
     CodecSpecificInfo codec_specific;
-    const vpx_codec_cx_pkt_t* pkt = NULL;
+    const vpx_codec_cx_pkt_t* pkt = nullptr;
 
     size_t encoded_size = 0;
     while ((pkt = libvpx_->codec_get_cx_data(&encoders_[encoder_idx], &iter)) !=
-           NULL) {
+           nullptr) {
       if (pkt->kind == VPX_CODEC_CX_FRAME_PKT) {
         encoded_size += pkt->data.frame.sz;
       }
@@ -1217,10 +1291,10 @@ int LibvpxVp8Encoder::GetEncodedPartitions(const VideoFrame& input_image,
 
     auto buffer = EncodedImageBuffer::Create(encoded_size);
 
-    iter = NULL;
+    iter = nullptr;
     size_t encoded_pos = 0;
     while ((pkt = libvpx_->codec_get_cx_data(&encoders_[encoder_idx], &iter)) !=
-           NULL) {
+           nullptr) {
       switch (pkt->kind) {
         case VPX_CODEC_CX_FRAME_PKT: {
           RTC_CHECK_LE(encoded_pos + pkt->data.frame.sz, buffer->size());
@@ -1229,21 +1303,29 @@ int LibvpxVp8Encoder::GetEncodedPartitions(const VideoFrame& input_image,
           encoded_pos += pkt->data.frame.sz;
           break;
         }
+        case VPX_CODEC_PSNR_PKT:
+          // PSNR index: 0: total, 1: Y, 2: U, 3: V
+          encoded_images_[encoder_idx].set_psnr(
+              EncodedImage::Psnr({.y = pkt->data.psnr.psnr[1],
+                                  .u = pkt->data.psnr.psnr[2],
+                                  .v = pkt->data.psnr.psnr[3]}));
+          break;
         default:
           break;
       }
       // End of frame
-      if ((pkt->data.frame.flags & VPX_FRAME_IS_FRAGMENT) == 0) {
+      if (pkt->kind == VPX_CODEC_CX_FRAME_PKT &&
+          (pkt->data.frame.flags & VPX_FRAME_IS_FRAGMENT) == 0) {
         // check if encoded frame is a key frame
         if (pkt->data.frame.flags & VPX_FRAME_IS_KEY) {
-          encoded_images_[encoder_idx]._frameType =
-              VideoFrameType::kVideoFrameKey;
+          encoded_images_[encoder_idx].set_frame_type(
+              VideoFrameType::kVideoFrameKey);
         }
         encoded_images_[encoder_idx].SetEncodedData(buffer);
         encoded_images_[encoder_idx].set_size(encoded_pos);
         encoded_images_[encoder_idx].SetSimulcastIndex(stream_idx);
         PopulateCodecSpecific(&codec_specific, *pkt, stream_idx, encoder_idx,
-                              input_image.timestamp());
+                              input_image.rtp_timestamp());
         if (codec_specific.codecSpecific.VP8.temporalIdx != kNoTemporalIdx) {
           encoded_images_[encoder_idx].SetTemporalIndex(
               codec_specific.codecSpecific.VP8.temporalIdx);
@@ -1251,9 +1333,9 @@ int LibvpxVp8Encoder::GetEncodedPartitions(const VideoFrame& input_image,
         break;
       }
     }
-    encoded_images_[encoder_idx].SetRtpTimestamp(input_image.timestamp());
-    encoded_images_[encoder_idx].SetCaptureTimeIdentifier(
-        input_image.capture_time_identifier());
+    encoded_images_[encoder_idx].SetRtpTimestamp(input_image.rtp_timestamp());
+    encoded_images_[encoder_idx].SetPresentationTimestamp(
+        input_image.presentation_timestamp());
     encoded_images_[encoder_idx].SetColorSpace(input_image.color_space());
     encoded_images_[encoder_idx].SetRetransmissionAllowed(
         retransmission_allowed);
@@ -1273,11 +1355,17 @@ int LibvpxVp8Encoder::GetEncodedPartitions(const VideoFrame& input_image,
         last_encoder_output_time_[stream_idx] =
             Timestamp::Micros(input_image.timestamp_us());
 
+        encoded_images_[encoder_idx].set_corruption_detection_filter_settings(
+            corruption_detection_settings_generator_->OnFrame(
+                encoded_images_[encoder_idx].IsKey(),
+
+                qp_128));
+
         encoded_complete_callback_->OnEncodedImage(encoded_images_[encoder_idx],
                                                    &codec_specific);
         const size_t steady_state_size = SteadyStateSize(
             stream_idx, codec_specific.codecSpecific.VP8.temporalIdx);
-        if (qp_128 > variable_framerate_experiment_.steady_state_qp ||
+        if (qp_128 > kVp8SteadyStateQpThreshold ||
             encoded_images_[encoder_idx].size() > steady_state_size) {
           num_steady_state_frames_ = 0;
         } else {
@@ -1289,7 +1377,7 @@ int LibvpxVp8Encoder::GetEncodedPartitions(const VideoFrame& input_image,
         if (encoded_images_[encoder_idx].size() == 0) {
           // Dropped frame that will be re-encoded.
           frame_buffer_controller_->OnFrameDropped(stream_idx,
-                                                   input_image.timestamp());
+                                                   input_image.rtp_timestamp());
         }
       }
     }
@@ -1354,12 +1442,19 @@ VideoEncoder::EncoderInfo LibvpxVp8Encoder::GetEncoderInfo() const {
         for (size_t ti = 0; ti < vpx_configs_[encoder_idx].ts_number_layers;
              ++ti) {
           RTC_DCHECK_GT(vpx_configs_[encoder_idx].ts_rate_decimator[ti], 0);
-          info.fps_allocation[si].push_back(rtc::saturated_cast<uint8_t>(
+          info.fps_allocation[si].push_back(saturated_cast<uint8_t>(
               EncoderInfo::kMaxFramerateFraction /
                   vpx_configs_[encoder_idx].ts_rate_decimator[ti] +
               0.5));
         }
       }
+    }
+
+    info.mapped_resolution =
+        VideoEncoder::Resolution(raw_images_[0].d_w, raw_images_[0].d_h);
+
+    if (codec_.mode == VideoCodecMode::kScreensharing) {
+      info.min_qp = kScreenshareMinQp;
     }
   }
 
@@ -1390,22 +1485,22 @@ void LibvpxVp8Encoder::MaybeUpdatePixelFormat(vpx_img_fmt fmt) {
     libvpx_->img_free(&img);
     // First image is wrapping the input frame, the rest are allocated.
     if (i == 0) {
-      libvpx_->img_wrap(&img, fmt, d_w, d_h, 1, NULL);
+      libvpx_->img_wrap(&img, fmt, d_w, d_h, 1, nullptr);
     } else {
       libvpx_->img_alloc(&img, fmt, d_w, d_h, kVp832ByteAlign);
     }
   }
 }
 
-std::vector<rtc::scoped_refptr<VideoFrameBuffer>>
-LibvpxVp8Encoder::PrepareBuffers(rtc::scoped_refptr<VideoFrameBuffer> buffer) {
+std::vector<scoped_refptr<VideoFrameBuffer>> LibvpxVp8Encoder::PrepareBuffers(
+    scoped_refptr<VideoFrameBuffer> buffer) {
   RTC_DCHECK_EQ(buffer->width(), raw_images_[0].d_w);
   RTC_DCHECK_EQ(buffer->height(), raw_images_[0].d_h);
   absl::InlinedVector<VideoFrameBuffer::Type, kMaxPreferredPixelFormats>
       supported_formats = {VideoFrameBuffer::Type::kI420,
                            VideoFrameBuffer::Type::kNV12};
 
-  rtc::scoped_refptr<VideoFrameBuffer> mapped_buffer;
+  scoped_refptr<VideoFrameBuffer> mapped_buffer;
   if (buffer->type() != VideoFrameBuffer::Type::kNative) {
     // `buffer` is already mapped.
     mapped_buffer = buffer;
@@ -1426,6 +1521,13 @@ LibvpxVp8Encoder::PrepareBuffers(rtc::scoped_refptr<VideoFrameBuffer> buffer) {
                         << " image to I420. Can't encode frame.";
       return {};
     }
+
+    // TODO: crbug.com/492213293 - Remove once the root cause is fixed.
+    if (converted_buffer->StrideU() != converted_buffer->StrideV()) {
+      RTC_LOG(LS_ERROR) << "Libvpx requires the U and V strides to be equal.";
+      return {};
+    }
+
     RTC_CHECK(converted_buffer->type() == VideoFrameBuffer::Type::kI420 ||
               converted_buffer->type() == VideoFrameBuffer::Type::kI420A);
 
@@ -1450,7 +1552,7 @@ LibvpxVp8Encoder::PrepareBuffers(rtc::scoped_refptr<VideoFrameBuffer> buffer) {
 
   // Prepare `raw_images_` from `mapped_buffer` and, if simulcast, scaled
   // versions of `buffer`.
-  std::vector<rtc::scoped_refptr<VideoFrameBuffer>> prepared_buffers;
+  std::vector<scoped_refptr<VideoFrameBuffer>> prepared_buffers;
   SetRawImagePlanes(&raw_images_[0], mapped_buffer.get());
   prepared_buffers.push_back(mapped_buffer);
   for (size_t i = 1; i < encoders_.size(); ++i) {
@@ -1497,25 +1599,22 @@ LibvpxVp8Encoder::PrepareBuffers(rtc::scoped_refptr<VideoFrameBuffer> buffer) {
     SetRawImagePlanes(&raw_images_[i], scaled_buffer.get());
     prepared_buffers.push_back(scaled_buffer);
   }
+
+  // TODO: crbug.com/492213293 - Remove once the root cause is fixed.
+  for (const scoped_refptr<VideoFrameBuffer>& prepared_buffer :
+       prepared_buffers) {
+    if (prepared_buffer->type() == VideoFrameBuffer::Type::kI420 ||
+        prepared_buffer->type() == VideoFrameBuffer::Type::kI420A) {
+      auto i420_buffer = prepared_buffer->GetI420();
+      RTC_DCHECK(i420_buffer);
+      if (i420_buffer->StrideU() != i420_buffer->StrideV()) {
+        RTC_LOG(LS_ERROR) << "Libvpx requires the U and V strides to be equal.";
+        return {};
+      }
+    }
+  }
+
   return prepared_buffers;
-}
-
-// static
-LibvpxVp8Encoder::VariableFramerateExperiment
-LibvpxVp8Encoder::ParseVariableFramerateConfig(std::string group_name) {
-  FieldTrialFlag disabled = FieldTrialFlag("Disabled");
-  FieldTrialParameter<double> framerate_limit("min_fps", 5.0);
-  FieldTrialParameter<int> qp("min_qp", 15);
-  FieldTrialParameter<int> undershoot_percentage("undershoot", 30);
-  ParseFieldTrial({&disabled, &framerate_limit, &qp, &undershoot_percentage},
-                  field_trial::FindFullName(group_name));
-  VariableFramerateExperiment config;
-  config.enabled = !disabled.Get();
-  config.framerate_limit = framerate_limit.Get();
-  config.steady_state_qp = qp.Get();
-  config.steady_state_undershoot_percentage = undershoot_percentage.Get();
-
-  return config;
 }
 
 }  // namespace webrtc

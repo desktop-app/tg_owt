@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "modules/audio_coding/codecs/opus/opus_inst.h"
+#include "modules/audio_coding/codecs/opus/opus_inst.h"  // IWYU pragma: export
 
 #ifdef __cplusplus
 extern "C" {
@@ -135,6 +135,17 @@ int16_t WebRtcOpus_SetBitRate(OpusEncInst* inst, int32_t rate);
 int16_t WebRtcOpus_SetPacketLossRate(OpusEncInst* inst, int32_t loss_rate);
 
 /****************************************************************************
+ * WebRtcOpus_SetDredDuration(...)  (TGCALLS PATCH: Opus DRED)
+ *
+ * The most 10 ms frames of DRED (Deep REDundancy) the encoder may add to each
+ * packet; 0 turns DRED off.
+ *
+ * Return value              :  0 - Success
+ *                             -1 - Error
+ */
+int16_t WebRtcOpus_SetDredDuration(OpusEncInst* inst, int32_t duration_10ms);
+
+/****************************************************************************
  * WebRtcOpus_SetMaxPlaybackRate(...)
  *
  * Configures the maximum playback rate for encoding. Due to hardware
@@ -162,18 +173,23 @@ int16_t WebRtcOpus_SetMaxPlaybackRate(OpusEncInst* inst, int32_t frequency_hz);
 /****************************************************************************
  * WebRtcOpus_GetMaxPlaybackRate(...)
  *
- * Queries the maximum playback rate for encoding. If different single-stream
- * encoders have different maximum playback rates, this function fails.
+ * Queries the maximum band for encoding. If different single-stream
+ * encoders have different maximum bands, this function fails.
  *
  * Input:
  *      - inst               : Encoder context.
  * Output:
- *      - result_hz          : The maximum playback rate in Hz.
+ *      - result_bandwidth   : Band identifier, not a rate in Hz. One of:
+ *                             OPUS_BANDWIDTH_NARROWBAND
+ *                             OPUS_BANDWIDTH_MEDIUMBAND
+ *                             OPUS_BANDWIDTH_WIDEBAND
+ *                             OPUS_BANDWIDTH_SUPERWIDEBAND
+ *                             OPUS_BANDWIDTH_FULLBAND
  * Return value              :  0 - Success
  *                             -1 - Error
  */
 int16_t WebRtcOpus_GetMaxPlaybackRate(OpusEncInst* const inst,
-                                      int32_t* result_hz);
+                                      int32_t* result_bandwidth);
 
 /* TODO(minyue): Check whether an API to check the FEC and the packet loss rate
  * is needed. It might not be very useful since there are not many use cases and
@@ -244,6 +260,20 @@ int16_t WebRtcOpus_DisableDtx(OpusEncInst* inst);
  *                             -1 - Error.
  */
 int16_t WebRtcOpus_GetUseDtx(OpusEncInst* inst);
+
+/****************************************************************************
+ * WebRtcOpus_GetUseDtx()
+ *
+ * This function gets if the encoder is in DTX.
+ *
+ * Input:
+ *      - inst               : Encoder context
+ *
+ * Return value              :  0 - Encoder is not DTX.
+ *                              1 - Encoder is in DTX.
+ *                             -1 - Error.
+ */
+int16_t WebRtcOpus_GetInDtx(OpusEncInst* inst);
 
 /****************************************************************************
  * WebRtcOpus_EnableCbr()
@@ -321,20 +351,6 @@ int32_t WebRtcOpus_GetBandwidth(OpusEncInst* inst);
 int16_t WebRtcOpus_SetBandwidth(OpusEncInst* inst, int32_t bandwidth);
 
 /*
- * WebRtcOpus_GetInDtx(...)
- *
- * Gets the DTX state of the encoder.
- *
- * Input:
- *      - inst   : Encoder context
- *
- * Return value  : -1 - Error.
- *                 1  - Last encoded frame was comfort noise update during DTX.
- *                 0  - Last encoded frame was encoded with encoder not in DTX.
- */
-int32_t WebRtcOpus_GetInDtx(OpusEncInst* inst);
-
-/*
  * WebRtcOpus_SetForceChannels(...)
  *
  * If the encoder is initialized as a stereo encoder, Opus will by default
@@ -392,6 +408,59 @@ int16_t WebRtcOpus_MultistreamDecoderCreate(
 int16_t WebRtcOpus_DecoderFree(OpusDecInst* inst);
 
 /****************************************************************************
+ * TGCALLS PATCH: Opus DRED.
+ *
+ * libopus is built without its neural weights (USE_WEIGHTS_FILE): DRED and
+ * the neural concealment take them from a blob (the one libopus's
+ * dnn/write_lpcnet_weights.c writes), which the caller keeps alive for the
+ * encoder's or decoder's lifetime (libopus reads the models in place).
+ *
+ * WebRtcOpus_DnnWeightsAreWellFormed(...): whether `weights` is such a blob,
+ * 4-byte aligned, every record whole. libopus parses a blob without checking
+ * the result and crashes on one that does not parse, so every blob is checked
+ * here first. Returns 1 or 0.
+ *
+ * WebRtcOpus_EncoderLoadDnnWeights(...): gives a single-stream encoder the
+ * weights, for DRED. Returns 0 on success, -1 when the blob is not well formed
+ * or libopus did not load it (the encoder then sends no DRED).
+ *
+ * WebRtcOpus_DecoderEnableDred(...): gives the decoder the weights (its neural
+ * concealment), creates a DRED decoder with them and sets decoder complexity
+ * 5 (libopus's neural concealment and DRED decoding need it). Single-stream
+ * decoders only. Returns 0 on success, -1 on error (nothing changed).
+ *
+ * WebRtcOpus_DredParse(...): parses the DRED of `encoded` into `dred`
+ * (processed at once, not deferred), looking back at most `max_samples`.
+ * Returns how many samples before the packet the DRED reaches (> 0), 0 when
+ * the packet carries none, < 0 on error. `dred_end` receives the number of
+ * samples right before the packet that the DRED leaves silent.
+ *
+ * WebRtcOpus_DredDecode(...): decodes `samples_per_channel` samples of `dred`
+ * starting `offset_samples` before the packet that carried it, into
+ * `decoded`, continuing the decoder's own state. Returns the samples per
+ * channel decoded, < 0 on error.
+ */
+int WebRtcOpus_DnnWeightsAreWellFormed(const uint8_t* weights,
+                                       size_t weights_size);
+int16_t WebRtcOpus_EncoderLoadDnnWeights(OpusEncInst* inst,
+                                         const uint8_t* weights,
+                                         size_t weights_size);
+int16_t WebRtcOpus_DecoderEnableDred(OpusDecInst* inst,
+                                     const uint8_t* weights,
+                                     size_t weights_size);
+int WebRtcOpus_DredParse(OpusDecInst* inst,
+                         OpusDRED* dred,
+                         const uint8_t* encoded,
+                         size_t encoded_len,
+                         int max_samples,
+                         int* dred_end);
+int WebRtcOpus_DredDecode(OpusDecInst* inst,
+                          const OpusDRED* dred,
+                          int offset_samples,
+                          int16_t* decoded,
+                          int samples_per_channel);
+
+/****************************************************************************
  * WebRtcOpus_DecoderChannels(...)
  *
  * This function returns the number of channels created for Opus decoder.
@@ -421,9 +490,7 @@ void WebRtcOpus_DecoderInit(OpusDecInst* inst);
  *
  * Output:
  *      - decoded            : The decoded vector
- *      - audio_type         : 1 normal, 2 CNG (for Opus it should
- *                             always return 1 since we're not using Opus's
- *                             built-in DTX/CNG scheme)
+ *      - audio_type         : 1 normal, 2 CNG
  *
  * Return value              : >0 - Samples per channel in decoded vector
  *                             -1 - Error
@@ -523,22 +590,6 @@ int WebRtcOpus_FecDurationEst(const uint8_t* payload,
  */
 int WebRtcOpus_PacketHasFec(const uint8_t* payload,
                             size_t payload_length_bytes);
-
-/****************************************************************************
- * WebRtcOpus_PacketHasVoiceActivity(...)
- *
- * This function returns the SILK VAD information encoded in the opus packet.
- * For CELT-only packets that do not have VAD information, it returns -1.
- * Input:
- *        - payload              : Encoded data pointer
- *        - payload_length_bytes : Bytes of encoded data
- *
- * Return value                  : 0 - no frame had the VAD flag set.
- *                                 1 - at least one frame had the VAD flag set.
- *                                -1 - VAD status could not be determined.
- */
-int WebRtcOpus_PacketHasVoiceActivity(const uint8_t* payload,
-                                      size_t payload_length_bytes);
 
 #ifdef __cplusplus
 }  // extern "C"

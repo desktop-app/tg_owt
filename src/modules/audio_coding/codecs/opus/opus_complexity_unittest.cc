@@ -8,28 +8,38 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <utility>
+
+#include "api/audio_codecs/audio_encoder.h"
 #include "api/audio_codecs/opus/audio_encoder_opus.h"
+#include "api/audio_codecs/opus/audio_encoder_opus_config.h"
+#include "api/environment/environment.h"
 #include "api/test/metrics/global_metrics_logger_and_exporter.h"
 #include "api/test/metrics/metric.h"
 #include "modules/audio_coding/neteq/tools/audio_loop.h"
-#include "rtc_base/time_utils.h"
+#include "rtc_base/buffer.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 namespace {
 
-using ::webrtc::test::GetGlobalMetricsLogger;
-using ::webrtc::test::ImprovementDirection;
-using ::webrtc::test::Unit;
+using test::GetGlobalMetricsLogger;
+using test::ImprovementDirection;
+using test::Unit;
 
-int64_t RunComplexityTest(const AudioEncoderOpusConfig& config) {
+int64_t RunComplexityTest(const Environment& env,
+                          AudioEncoderOpusConfig config) {
   // Create encoder.
-  constexpr int payload_type = 17;
-  const auto encoder = AudioEncoderOpus::MakeAudioEncoder(config, payload_type);
+  const auto encoder = AudioEncoderOpus::MakeAudioEncoder(
+      env, std::move(config), {.payload_type = 17});
   // Open speech file.
   const std::string kInputFileName =
-      webrtc::test::ResourcePath("audio_coding/speech_mono_32_48kHz", "pcm");
+      test::ResourcePath("audio_coding/speech_mono_32_48kHz", "pcm");
   test::AudioLoop audio_loop;
   constexpr int kSampleRateHz = 48000;
   EXPECT_EQ(kSampleRateHz, encoder->SampleRateHz());
@@ -40,16 +50,16 @@ int64_t RunComplexityTest(const AudioEncoderOpusConfig& config) {
   EXPECT_TRUE(audio_loop.Init(kInputFileName, kMaxLoopLengthSamples,
                               kInputBlockSizeSamples));
   // Encode.
-  const int64_t start_time_ms = rtc::TimeMillis();
+  const int64_t start_time_ms = env.clock().TimeInMilliseconds();
   AudioEncoder::EncodedInfo info;
-  rtc::Buffer encoded(500);
+  Buffer encoded = Buffer::CreateWithCapacity(500);
   uint32_t rtp_timestamp = 0u;
   for (size_t i = 0; i < 10000; ++i) {
     encoded.Clear();
     info = encoder->Encode(rtp_timestamp, audio_loop.GetNextBlock(), &encoded);
     rtp_timestamp += kInputBlockSizeSamples;
   }
-  return rtc::TimeMillis() - start_time_ms;
+  return env.clock().TimeInMilliseconds() - start_time_ms;
 }
 
 // This test encodes an audio file using Opus twice with different bitrates
@@ -63,16 +73,17 @@ int64_t RunComplexityTest(const AudioEncoderOpusConfig& config) {
 // be higher, since we have explicitly asked for a higher complexity setting at
 // the lower rate.
 TEST(AudioEncoderOpusComplexityAdaptationTest, Adaptation_On) {
+  const Environment env = CreateTestEnvironment();
   // Create config.
-  AudioEncoderOpusConfig config;
   // The limit -- including the hysteresis window -- at which the complexity
   // shuold be increased.
-  config.bitrate_bps = 11000 - 1;
-  config.low_rate_complexity = 9;
-  int64_t runtime_10999bps = RunComplexityTest(config);
+  int64_t runtime_10999bps = RunComplexityTest(
+      env, {.bitrate_bps = 11000 - 1, .low_rate_complexity = 9});
 
-  config.bitrate_bps = 15500;
-  int64_t runtime_15500bps = RunComplexityTest(config);
+  // Re-create config because RunComplexityTest consumed the previous one.
+  // Re-create config because RunComplexityTest consumed the previous one.
+  int64_t runtime_15500bps =
+      RunComplexityTest(env, {.bitrate_bps = 15500, .low_rate_complexity = 9});
 
   GetGlobalMetricsLogger()->LogSingleValueMetric(
       "opus_encoding_complexity_ratio", "adaptation_on",
@@ -84,16 +95,14 @@ TEST(AudioEncoderOpusComplexityAdaptationTest, Adaptation_On) {
 // adaptation enabled (neither on desktop, nor on mobile). The expectation is
 // that the resulting ratio is less than 100% at all times.
 TEST(AudioEncoderOpusComplexityAdaptationTest, Adaptation_Off) {
+  const Environment env = CreateTestEnvironment();
   // Create config.
-  AudioEncoderOpusConfig config;
   // The limit -- including the hysteresis window -- at which the complexity
   // shuold be increased (but not in this test since complexity adaptation is
   // disabled).
-  config.bitrate_bps = 11000 - 1;
-  int64_t runtime_10999bps = RunComplexityTest(config);
+  int64_t runtime_10999bps = RunComplexityTest(env, {.bitrate_bps = 11000 - 1});
 
-  config.bitrate_bps = 15500;
-  int64_t runtime_15500bps = RunComplexityTest(config);
+  int64_t runtime_15500bps = RunComplexityTest(env, {.bitrate_bps = 15500});
 
   GetGlobalMetricsLogger()->LogSingleValueMetric(
       "opus_encoding_complexity_ratio", "adaptation_off",

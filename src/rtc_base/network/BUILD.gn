@@ -9,12 +9,12 @@
 import("../../webrtc.gni")
 
 rtc_library("sent_packet") {
+  visibility = [ "*" ]
   sources = [
     "sent_packet.cc",
     "sent_packet.h",
   ]
   deps = [ "../system:rtc_export" ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_library("received_packet") {
@@ -24,13 +24,10 @@ rtc_library("received_packet") {
     "received_packet.h",
   ]
   deps = [
+    "..:checks",
     "..:socket_address",
-    "../../api:array_view",
+    "../../api/transport:ecn_marking",
     "../../api/units:timestamp",
     "../system:rtc_export",
-  ]
-  absl_deps = [
-    "//third_party/abseil-cpp/absl/functional:any_invocable",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }

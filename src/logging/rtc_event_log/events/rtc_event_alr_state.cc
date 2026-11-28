@@ -10,22 +10,22 @@
 
 #include "logging/rtc_event_log/events/rtc_event_alr_state.h"
 
+#include <memory>
+#include <vector>
+
 #include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
+#include "logging/rtc_event_log/events/rtc_event_definition.h"
+#include "logging/rtc_event_log/events/rtc_event_log_parse_status.h"
 
 namespace webrtc {
-constexpr RtcEvent::Type RtcEventAlrState::kType;
-constexpr RtcEventDefinition<RtcEventAlrState, LoggedAlrStateEvent, bool>
-    RtcEventAlrState::definition_;
 
 RtcEventAlrState::RtcEventAlrState(bool in_alr) : in_alr_(in_alr) {}
-
-RtcEventAlrState::RtcEventAlrState(const RtcEventAlrState& other)
-    : RtcEvent(other.timestamp_us_), in_alr_(other.in_alr_) {}
 
 RtcEventAlrState::~RtcEventAlrState() = default;
 
 std::unique_ptr<RtcEventAlrState> RtcEventAlrState::Copy() const {
-  return absl::WrapUnique<RtcEventAlrState>(new RtcEventAlrState(*this));
+  return absl::WrapUnique(new RtcEventAlrState(*this));
 }
 
 RtcEventLogParseStatus RtcEventAlrState::Parse(

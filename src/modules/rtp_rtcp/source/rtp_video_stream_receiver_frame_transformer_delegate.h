@@ -11,13 +11,16 @@
 #ifndef MODULES_RTP_RTCP_SOURCE_RTP_VIDEO_STREAM_RECEIVER_FRAME_TRANSFORMER_DELEGATE_H_
 #define MODULES_RTP_RTCP_SOURCE_RTP_VIDEO_STREAM_RECEIVER_FRAME_TRANSFORMER_DELEGATE_H_
 
+#include <cstdint>
 #include <memory>
 
 #include "api/frame_transformer_interface.h"
+#include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
 #include "rtc_base/system/no_unique_address.h"
-#include "rtc_base/thread.h"
+#include "rtc_base/thread_annotations.h"
 #include "system_wrappers/include/clock.h"
 
 namespace webrtc {
@@ -33,15 +36,15 @@ class RtpVideoFrameReceiver {
 };
 
 // Delegates calls to FrameTransformerInterface to transform frames, and to
-// RtpVideoStreamReceiver to manage transformed frames on the `network_thread_`.
+// RtpVideoStreamReceiver to manage transformed frames on the `task_queue`.
 class RtpVideoStreamReceiverFrameTransformerDelegate
     : public TransformedFrameCallback {
  public:
   RtpVideoStreamReceiverFrameTransformerDelegate(
       RtpVideoFrameReceiver* receiver,
       Clock* clock,
-      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer,
-      rtc::Thread* network_thread,
+      scoped_refptr<FrameTransformerInterface> frame_transformer,
+      TaskQueueBase* task_queue,
       uint32_t ssrc);
 
   void Init();
@@ -56,6 +59,7 @@ class RtpVideoStreamReceiverFrameTransformerDelegate
       std::unique_ptr<TransformableFrameInterface> frame) override;
 
   void StartShortCircuiting() override;
+  void StopShortCircuiting() override;
 
   // Delegates the call to RtpVideoFrameReceiver::ManageFrame on the
   // `network_thread_`.
@@ -65,13 +69,14 @@ class RtpVideoStreamReceiverFrameTransformerDelegate
   ~RtpVideoStreamReceiverFrameTransformerDelegate() override = default;
 
  private:
-  void StartShortCircuitingOnNetworkSequence();
+  // Posts a task to update `short_circuit_` on the `network_thread_`.
+  void SetShortCircuiting(bool short_circuit);
 
   RTC_NO_UNIQUE_ADDRESS SequenceChecker network_sequence_checker_;
   RtpVideoFrameReceiver* receiver_ RTC_GUARDED_BY(network_sequence_checker_);
-  rtc::scoped_refptr<FrameTransformerInterface> frame_transformer_
+  scoped_refptr<FrameTransformerInterface> frame_transformer_
       RTC_GUARDED_BY(network_sequence_checker_);
-  rtc::Thread* const network_thread_;
+  TaskQueueBase* const network_thread_;
   const uint32_t ssrc_;
   Clock* const clock_;
   bool short_circuit_ RTC_GUARDED_BY(network_sequence_checker_) = false;

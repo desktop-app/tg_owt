@@ -13,13 +13,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/field_trials_view.h"
 #include "api/network_state_predictor.h"
 #include "api/rtc_event_log/rtc_event_log.h"
+#include "api/transport/bandwidth_usage.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_rate.h"
 #include "api/units/data_size.h"
@@ -30,7 +31,6 @@
 #include "modules/congestion_controller/goog_cc/inter_arrival_delta.h"
 #include "modules/congestion_controller/goog_cc/trendline_estimator.h"
 #include "modules/remote_bitrate_estimator/include/bwe_defines.h"
-#include "modules/remote_bitrate_estimator/test/bwe_test_logging.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/experiments/struct_parameters_parser.h"
 #include "rtc_base/logging.h"
@@ -46,8 +46,6 @@ constexpr TimeDelta kSendTimeGroupLength = TimeDelta::Millis(5);
 // after the API has been changed.
 constexpr uint32_t kFixedSsrc = 0;
 }  // namespace
-
-constexpr char BweSeparateAudioPacketsSettings::kKey[];
 
 BweSeparateAudioPacketsSettings::BweSeparateAudioPacketsSettings(
     const FieldTrialsView* key_value_config) {
@@ -80,9 +78,9 @@ DelayBasedBwe::DelayBasedBwe(const FieldTrialsView* key_value_config,
       last_video_packet_recv_time_(Timestamp::MinusInfinity()),
       network_state_predictor_(network_state_predictor),
       video_delay_detector_(
-          new TrendlineEstimator(key_value_config_, network_state_predictor_)),
+          new TrendlineEstimator(*key_value_config_, network_state_predictor_)),
       audio_delay_detector_(
-          new TrendlineEstimator(key_value_config_, network_state_predictor_)),
+          new TrendlineEstimator(*key_value_config_, network_state_predictor_)),
       active_delay_detector_(video_delay_detector_.get()),
       last_seen_packet_(Timestamp::MinusInfinity()),
       uma_recorded_(false),
@@ -98,9 +96,9 @@ DelayBasedBwe::~DelayBasedBwe() {}
 
 DelayBasedBwe::Result DelayBasedBwe::IncomingPacketFeedbackVector(
     const TransportPacketsFeedback& msg,
-    absl::optional<DataRate> acked_bitrate,
-    absl::optional<DataRate> probe_bitrate,
-    absl::optional<NetworkStateEstimate> network_estimate,
+    std::optional<DataRate> acked_bitrate,
+    std::optional<DataRate> probe_bitrate,
+    std::optional<NetworkStateEstimate> network_estimate,
     bool in_alr) {
   RTC_DCHECK_RUNS_SERIALIZED(&network_race_);
 
@@ -155,9 +153,9 @@ void DelayBasedBwe::IncomingPacketFeedback(const PacketResult& packet_feedback,
         std::make_unique<InterArrivalDelta>(kSendTimeGroupLength);
 
     video_delay_detector_.reset(
-        new TrendlineEstimator(key_value_config_, network_state_predictor_));
+        new TrendlineEstimator(*key_value_config_, network_state_predictor_));
     audio_delay_detector_.reset(
-        new TrendlineEstimator(key_value_config_, network_state_predictor_));
+        new TrendlineEstimator(*key_value_config_, network_state_predictor_));
     active_delay_detector_ = video_delay_detector_.get();
   }
   last_seen_packet_ = at_time;
@@ -204,17 +202,17 @@ void DelayBasedBwe::IncomingPacketFeedback(const PacketResult& packet_feedback,
 }
 
 DataRate DelayBasedBwe::TriggerOveruse(Timestamp at_time,
-                                       absl::optional<DataRate> link_capacity) {
+                                       std::optional<DataRate> link_capacity) {
   RateControlInput input(BandwidthUsage::kBwOverusing, link_capacity);
   return rate_control_.Update(input, at_time);
 }
 
 DelayBasedBwe::Result DelayBasedBwe::MaybeUpdateEstimate(
-    absl::optional<DataRate> acked_bitrate,
-    absl::optional<DataRate> probe_bitrate,
-    absl::optional<NetworkStateEstimate> state_estimate,
+    std::optional<DataRate> acked_bitrate,
+    std::optional<DataRate> probe_bitrate,
+    std::optional<NetworkStateEstimate> /* state_estimate */,
     bool recovered_from_overuse,
-    bool in_alr,
+    bool /* in_alr */,
     Timestamp at_time) {
   Result result;
 
@@ -252,8 +250,6 @@ DelayBasedBwe::Result DelayBasedBwe::MaybeUpdateEstimate(
       detector_state != prev_state_) {
     DataRate bitrate = result.updated ? result.target_bitrate : prev_bitrate_;
 
-    BWE_TEST_LOGGING_PLOT(1, "target_bitrate_bps", at_time.ms(), bitrate.bps());
-
     if (event_log_) {
       event_log_->Log(std::make_unique<RtcEventBweUpdateDelayBased>(
           bitrate.bps(), detector_state));
@@ -268,7 +264,7 @@ DelayBasedBwe::Result DelayBasedBwe::MaybeUpdateEstimate(
 }
 
 bool DelayBasedBwe::UpdateEstimate(Timestamp at_time,
-                                   absl::optional<DataRate> acked_bitrate,
+                                   std::optional<DataRate> acked_bitrate,
                                    DataRate* target_rate) {
   const RateControlInput input(active_delay_detector_->State(), acked_bitrate);
   *target_rate = rate_control_.Update(input, at_time);
@@ -305,10 +301,6 @@ void DelayBasedBwe::SetMinBitrate(DataRate min_bitrate) {
   // Called from both the configuration thread and the network thread. Shouldn't
   // be called from the network thread in the future.
   rate_control_.SetMinBitrate(min_bitrate);
-}
-
-TimeDelta DelayBasedBwe::GetExpectedBwePeriod() const {
-  return rate_control_.GetExpectedBandwidthPeriod();
 }
 
 }  // namespace webrtc

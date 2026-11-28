@@ -34,8 +34,8 @@ class MediaFactory {
  public:
   virtual ~MediaFactory() = default;
 
-  virtual std::unique_ptr<Call> CreateCall(const CallConfig& config) = 0;
-  virtual std::unique_ptr<cricket::MediaEngineInterface> CreateMediaEngine(
+  virtual std::unique_ptr<Call> CreateCall(CallConfig config) = 0;
+  virtual std::unique_ptr<MediaEngineInterface> CreateMediaEngine(
       const Environment& env,
       PeerConnectionFactoryDependencies& dependencies) = 0;
 };

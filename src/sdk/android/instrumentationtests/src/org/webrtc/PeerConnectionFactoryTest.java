@@ -62,4 +62,54 @@ public class PeerConnectionFactoryTest {
                                          .createInitializationOptions());
     PeerConnectionFactory.shutdownInternalTracer();
   }
+
+  // Tests that the JNI glue between Java and C++ does not crash when creating a
+  // PeerConnectionFactory.
+  @Test
+  @SmallTest
+  public void testCreation() throws Exception {
+    PeerConnectionFactory.initialize(
+        PeerConnectionFactory.InitializationOptions.builder(
+                InstrumentationRegistry.getTargetContext())
+            .setNativeLibraryName(TestConstants.NATIVE_LIBRARY)
+            .createInitializationOptions());
+
+    PeerConnectionFactory factory = PeerConnectionFactory.builder().createPeerConnectionFactory();
+  }
+
+  @Test
+  @SmallTest
+  public void testCreationWithFieldTrials() throws Exception {
+    PeerConnectionFactory.initialize(
+        PeerConnectionFactory.InitializationOptions.builder(
+                InstrumentationRegistry.getTargetContext())
+            .setNativeLibraryName(TestConstants.NATIVE_LIBRARY)
+            .createInitializationOptions());
+
+    PeerConnectionFactory factory =
+        PeerConnectionFactory.builder().setFieldTrials("").createPeerConnectionFactory();
+  }
+
+  @Test
+  @SmallTest
+  public void testCreationWithAudioFrameProcessor() throws Exception {
+    PeerConnectionFactory.initialize(
+        PeerConnectionFactory.InitializationOptions.builder(
+                InstrumentationRegistry.getTargetContext())
+            .setNativeLibraryName(TestConstants.NATIVE_LIBRARY)
+            .createInitializationOptions());
+
+    final AudioFrameProcessor audioFrameProcessor =
+        new AudioFrameProcessor() {
+          @Override
+          public long getNativeAudioFrameProcessor() {
+            return 0;
+          }
+        };
+
+    PeerConnectionFactory factory =
+        PeerConnectionFactory.builder()
+            .setAudioFrameProcessor(audioFrameProcessor)
+            .createPeerConnectionFactory();
+  }
 }

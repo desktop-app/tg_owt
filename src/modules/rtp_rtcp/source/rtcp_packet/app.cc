@@ -10,9 +10,8 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet/app.h"
 
-#include <string.h>
-
 #include <cstdint>
+#include <cstring>
 
 #include "modules/rtp_rtcp/source/byte_io.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/common_header.h"
@@ -21,8 +20,6 @@
 
 namespace webrtc {
 namespace rtcp {
-constexpr uint8_t App::kPacketType;
-constexpr size_t App::kMaxDataSize;
 // Application-Defined packet (APP) (RFC 3550).
 //
 //     0                   1                   2                   3

@@ -9,15 +9,13 @@
  */
 #include "net/dcsctp/packet/parameter/reconfiguration_response_parameter.h"
 
-#include <stdint.h>
-
-#include <type_traits>
+#include <cstdint>
+#include <optional>
 #include <vector>
 
-#include "absl/types/optional.h"
+#include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/testing/testing_macros.h"
-#include "rtc_base/gunit.h"
-#include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace dcsctp {
 namespace {
@@ -37,8 +35,8 @@ TEST(ReconfigurationResponseParameterTest, SerializeAndDeserializeFirstForm) {
   EXPECT_EQ(*deserialized.response_sequence_number(), 1u);
   EXPECT_EQ(deserialized.result(),
             ReconfigurationResponseParameter::Result::kSuccessPerformed);
-  EXPECT_EQ(deserialized.sender_next_tsn(), absl::nullopt);
-  EXPECT_EQ(deserialized.receiver_next_tsn(), absl::nullopt);
+  EXPECT_EQ(deserialized.sender_next_tsn(), std::nullopt);
+  EXPECT_EQ(deserialized.receiver_next_tsn(), std::nullopt);
 }
 
 TEST(ReconfigurationResponseParameterTest,

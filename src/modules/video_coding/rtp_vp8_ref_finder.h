@@ -11,15 +11,19 @@
 #ifndef MODULES_VIDEO_CODING_RTP_VP8_REF_FINDER_H_
 #define MODULES_VIDEO_CODING_RTP_VP8_REF_FINDER_H_
 
+#include <array>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <memory>
 #include <set>
 
-#include "absl/container/inlined_vector.h"
+#include "api/video/video_codec_constants.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
+#include "modules/video_coding/codecs/vp8/include/vp8_globals.h"
 #include "modules/video_coding/rtp_frame_reference_finder.h"
 #include "rtc_base/numerics/sequence_number_unwrapper.h"
+#include "rtc_base/numerics/sequence_number_util.h"
 
 namespace webrtc {
 
@@ -36,7 +40,6 @@ class RtpVp8RefFinder {
   static constexpr int kMaxLayerInfo = 50;
   static constexpr int kMaxNotYetReceivedFrames = 100;
   static constexpr int kMaxStashedFrames = 100;
-  static constexpr int kMaxTemporalLayers = 5;
 
   struct UnwrappedTl0Frame {
     int64_t unwrapped_tl0;
@@ -53,6 +56,8 @@ class RtpVp8RefFinder {
                           int64_t unwrapped_tl0,
                           uint8_t temporal_idx);
   void UnwrapPictureIds(RtpFrameObject* frame);
+  void CleanupOldPictures(int64_t frame_id);
+  void CleanupOldBaseLayers(int64_t unwrapped_tl0);
 
   // Save the last picture id in order to detect when there is a gap in frames
   // that have not yet been fully received.
@@ -69,7 +74,7 @@ class RtpVp8RefFinder {
 
   // Holds the information about the last completed frame for a given temporal
   // layer given an unwrapped Tl0 picture index.
-  std::map<int64_t, std::array<int64_t, kMaxTemporalLayers>> layer_info_;
+  std::map<int64_t, std::array<int64_t, kMaxTemporalStreams>> layer_info_;
 
   // Unwrapper used to unwrap VP8/VP9 streams which have their picture id
   // specified.

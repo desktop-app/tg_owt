@@ -10,15 +10,18 @@
 
 #include "rtc_base/ssl_fingerprint.h"
 
-#include <ctype.h>
-
+#include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <utility>
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
+#include "rtc_base/buffer.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/message_digest.h"
 #include "rtc_base/rtc_certificate.h"
@@ -26,57 +29,50 @@
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/string_encode.h"
 
-namespace rtc {
+namespace webrtc {
 
-SSLFingerprint* SSLFingerprint::Create(absl::string_view algorithm,
-                                       const rtc::SSLIdentity* identity) {
-  return CreateUnique(algorithm, *identity).release();
-}
-
-std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateUnique(
+std::unique_ptr<SSLFingerprint> SSLFingerprint::Create(
     absl::string_view algorithm,
-    const rtc::SSLIdentity& identity) {
+    const SSLIdentity& identity) {
   return Create(algorithm, identity.certificate());
 }
 
 std::unique_ptr<SSLFingerprint> SSLFingerprint::Create(
     absl::string_view algorithm,
-    const rtc::SSLCertificate& cert) {
-  uint8_t digest_val[64];
-  size_t digest_len;
-  bool ret = cert.ComputeDigest(algorithm, digest_val, sizeof(digest_val),
-                                &digest_len);
+    const SSLCertificate& cert) {
+  Buffer digest = Buffer::CreateWithCapacity(MessageDigest::kMaxSize);
+  bool ret = cert.ComputeDigest(algorithm, digest);
   if (!ret) {
     return nullptr;
   }
-  return std::make_unique<SSLFingerprint>(
-      algorithm, ArrayView<const uint8_t>(digest_val, digest_len));
+  return std::make_unique<SSLFingerprint>(algorithm, digest);
 }
 
-SSLFingerprint* SSLFingerprint::CreateFromRfc4572(
+std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromRfc4572(
     absl::string_view algorithm,
     absl::string_view fingerprint) {
-  return CreateUniqueFromRfc4572(algorithm, fingerprint).release();
-}
-
-std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateUniqueFromRfc4572(
-    absl::string_view algorithm,
-    absl::string_view fingerprint) {
-  if (algorithm.empty() || !rtc::IsFips180DigestAlgorithm(algorithm))
+  if (algorithm.empty() || !IsFips180DigestAlgorithm(algorithm))
     return nullptr;
 
   if (fingerprint.empty())
     return nullptr;
 
-  char value[rtc::MessageDigest::kMaxSize];
-  size_t value_len =
-      rtc::hex_decode_with_delimiter(ArrayView<char>(value), fingerprint, ':');
-  if (!value_len)
+  uint8_t buffer[MessageDigest::kMaxSize];
+  std::span<uint8_t> value = HexDecodeWithDelimiter(buffer, fingerprint, ':');
+  if (value.empty()) {
     return nullptr;
+  }
 
-  return std::make_unique<SSLFingerprint>(
-      algorithm,
-      ArrayView<const uint8_t>(reinterpret_cast<uint8_t*>(value), value_len));
+  return std::make_unique<SSLFingerprint>(algorithm, value);
+}
+
+std::optional<SSLFingerprint> SSLFingerprint::CreateOptionalFromRfc4572(
+    absl::string_view algorithm,
+    absl::string_view fingerprint) {
+  if (auto parsed = CreateFromRfc4572(algorithm, fingerprint)) {
+    return std::move(*parsed);
+  }
+  return std::nullopt;
 }
 
 std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromCertificate(
@@ -89,8 +85,8 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromCertificate(
   }
 
   std::unique_ptr<SSLFingerprint> fingerprint =
-      CreateUnique(digest_alg, *cert.identity());
-  if (!fingerprint) {
+      Create(digest_alg, *cert.identity());
+  if (fingerprint == nullptr) {
     RTC_LOG(LS_ERROR) << "Failed to create identity fingerprint, alg="
                       << digest_alg;
   }
@@ -98,21 +94,15 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromCertificate(
 }
 
 SSLFingerprint::SSLFingerprint(absl::string_view algorithm,
-                               ArrayView<const uint8_t> digest_view)
-    : algorithm(algorithm), digest(digest_view.data(), digest_view.size()) {}
-
-SSLFingerprint::SSLFingerprint(absl::string_view algorithm,
-                               const uint8_t* digest_in,
-                               size_t digest_len)
-    : SSLFingerprint(algorithm, MakeArrayView(digest_in, digest_len)) {}
+                               std::span<const uint8_t> digest_view)
+    : algorithm(algorithm), digest(digest_view) {}
 
 bool SSLFingerprint::operator==(const SSLFingerprint& other) const {
   return algorithm == other.algorithm && digest == other.digest;
 }
 
 std::string SSLFingerprint::GetRfc4572Fingerprint() const {
-  std::string fingerprint = rtc::hex_encode_with_delimiter(
-      absl::string_view(digest.data<char>(), digest.size()), ':');
+  std::string fingerprint = HexEncodeWithDelimiter(digest, ':');
   absl::c_transform(fingerprint, fingerprint.begin(), ::toupper);
   return fingerprint;
 }
@@ -124,4 +114,4 @@ std::string SSLFingerprint::ToString() const {
   return fp_str;
 }
 
-}  // namespace rtc
+}  // namespace webrtc

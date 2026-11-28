@@ -11,6 +11,7 @@
 #ifndef API_FUNCTION_VIEW_H_
 #define API_FUNCTION_VIEW_H_
 
+#include <cstddef>
 #include <type_traits>
 #include <utility>
 
@@ -28,7 +29,7 @@
 //
 // Example use:
 //
-//   void SomeFunction(rtc::FunctionView<int(int)> index_transform);
+//   void SomeFunction(webrtc::FunctionView<int(int)> index_transform);
 //   ...
 //   SomeFunction([](int i) { return 2 * i + 1; });
 //
@@ -36,7 +37,7 @@
 // copyable, so it's probably cheaper to pass it by value than by const
 // reference.
 
-namespace rtc {
+namespace webrtc {
 
 template <typename T>
 class FunctionView;  // Undefined.
@@ -72,11 +73,23 @@ class FunctionView<RetT(ArgT...)> final {
   // result is an empty FunctionView.
   template <
       typename F,
-      typename std::enable_if<std::is_function<typename std::remove_pointer<
-          typename std::remove_reference<F>::type>::type>::value>::type* =
+      typename std::enable_if<
+          std::is_pointer<typename std::remove_reference<F>::type>::value &&
+          std::is_function<typename std::remove_pointer<
+              typename std::remove_reference<F>::type>::type>::value>::type* =
           nullptr>
   FunctionView(F&& f)
       : call_(f ? CallFunPtr<typename std::remove_pointer<F>::type> : nullptr) {
+    f_.fun_ptr = reinterpret_cast<void (*)()>(f);
+  }
+
+  // Constructor that accepts function references.
+  template <
+      typename F,
+      typename std::enable_if<std::is_function<
+          typename std::remove_reference<F>::type>::value>::type* = nullptr>
+  FunctionView(F&& f)
+      : call_(CallFunPtr<typename std::remove_reference<F>::type>) {
     f_.fun_ptr = reinterpret_cast<void (*)()>(f);
   }
 
@@ -85,7 +98,7 @@ class FunctionView<RetT(ArgT...)> final {
             typename std::enable_if<std::is_same<
                 std::nullptr_t,
                 typename std::remove_cv<F>::type>::value>::type* = nullptr>
-  FunctionView(F&& f) : call_(nullptr) {}
+  FunctionView(F&& /* f */) : call_(nullptr) {}
 
   // Default constructor. Creates an empty FunctionView.
   FunctionView() : call_(nullptr) {}
@@ -125,6 +138,7 @@ class FunctionView<RetT(ArgT...)> final {
   RetT (*call_)(VoidUnion, ArgT...);
 };
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // API_FUNCTION_VIEW_H_

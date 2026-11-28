@@ -10,7 +10,11 @@
 
 #include "modules/remote_bitrate_estimator/remote_bitrate_estimator_abs_send_time.h"
 
+#include <cstdint>
+#include <memory>
+
 #include "modules/remote_bitrate_estimator/remote_bitrate_estimator_unittest_helper.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -25,12 +29,10 @@ class RemoteBitrateEstimatorAbsSendTimeTest
   RemoteBitrateEstimatorAbsSendTimeTest& operator=(
       const RemoteBitrateEstimatorAbsSendTimeTest&) = delete;
 
-  virtual void SetUp() {
-    bitrate_estimator_.reset(new RemoteBitrateEstimatorAbsSendTime(
-        bitrate_observer_.get(), &clock_));
+  void SetUp() override {
+    bitrate_estimator_ = std::make_unique<RemoteBitrateEstimatorAbsSendTime>(
+        CreateTestEnvironment({.time = &clock_}), bitrate_observer_.get());
   }
-
- protected:
 };
 
 TEST_F(RemoteBitrateEstimatorAbsSendTimeTest, InitialBehavior) {

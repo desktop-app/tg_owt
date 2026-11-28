@@ -10,8 +10,16 @@
 
 #include "modules/desktop_capture/full_screen_window_detector.h"
 
+#include <cstdint>
+
+#include "api/function_view.h"
+#include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/full_screen_application_handler.h"
 #include "rtc_base/time_utils.h"
+
+#if defined(WEBRTC_WIN)
+#include "modules/desktop_capture/win/full_screen_win_application_handler.h"
+#endif
 
 namespace webrtc {
 
@@ -31,10 +39,21 @@ DesktopCapturer::SourceId FullScreenWindowDetector::FindFullScreenWindow(
   return app_handler_->FindFullScreenWindow(window_list_, last_update_time_ms_);
 }
 
+DesktopCapturer::SourceId FullScreenWindowDetector::FindEditorWindow(
+    DesktopCapturer::SourceId original_source_id) {
+  if (app_handler_ == nullptr ||
+      app_handler_->GetSourceId() != original_source_id) {
+    return 0;
+  }
+  return app_handler_->FindEditorWindow(window_list_);
+}
+
 void FullScreenWindowDetector::UpdateWindowListIfNeeded(
     DesktopCapturer::SourceId original_source_id,
-    rtc::FunctionView<bool(DesktopCapturer::SourceList*)> get_sources) {
-  const bool skip_update = previous_source_id_ != original_source_id;
+    FunctionView<bool(DesktopCapturer::SourceList*)> get_sources) {
+  // Don't skip update if app_handler_ exists.
+  const bool skip_update =
+      !app_handler_ && (previous_source_id_ != original_source_id);
   previous_source_id_ = original_source_id;
 
   // Here is an attempt to avoid redundant creating application handler in case
@@ -54,14 +73,33 @@ void FullScreenWindowDetector::UpdateWindowListIfNeeded(
 
   constexpr int64_t kUpdateIntervalMs = 500;
 
-  if ((rtc::TimeMillis() - last_update_time_ms_) <= kUpdateIntervalMs) {
+  if ((TimeMillis() - last_update_time_ms_) <= kUpdateIntervalMs) {
     return;
   }
 
   DesktopCapturer::SourceList window_list;
   if (get_sources(&window_list)) {
-    last_update_time_ms_ = rtc::TimeMillis();
-    window_list_.swap(window_list);
+    last_update_time_ms_ = TimeMillis();
+
+    bool should_swap_windows = true;
+#if defined(WEBRTC_WIN)
+    bool is_original_source_window_alive =
+        ::IsWindow(reinterpret_cast<HWND>(original_source_id));
+    bool is_original_source_enumerated = false;
+    for (auto& source : window_list) {
+      if (source.id == original_source_id) {
+        is_original_source_enumerated = true;
+        break;
+      }
+    }
+    // Don't swap window list if there is a mismatch between original window's
+    // state and its enumerated state.
+    should_swap_windows =
+        (is_original_source_enumerated == is_original_source_window_alive);
+#endif
+    if (should_swap_windows) {
+      window_list_.swap(window_list);
+    }
   }
 }
 
@@ -71,15 +109,36 @@ void FullScreenWindowDetector::CreateApplicationHandlerIfNeeded(
     return;
   }
 
-  if (app_handler_ == nullptr || app_handler_->GetSourceId() != source_id) {
-    app_handler_ = application_handler_factory_
-                       ? application_handler_factory_(source_id)
-                       : nullptr;
+  if (app_handler_ && app_handler_->GetSourceId() == source_id) {
+    return;
   }
+
+  app_handler_ = application_handler_factory_
+                     ? application_handler_factory_(source_id)
+                     : nullptr;
 
   if (app_handler_ == nullptr) {
     no_handler_source_id_ = source_id;
+  } else if (found_editor_for_chosen_slide_show_) {
+      app_handler_->SetEditorWasFound();
   }
+}
+
+void FullScreenWindowDetector::SetEditorWasFoundForChosenSlideShow() {
+  found_editor_for_chosen_slide_show_ = true;
+}
+
+void FullScreenWindowDetector::CreateFullScreenApplicationHandlerForTest(
+    DesktopCapturer::SourceId source_id,
+    bool fullscreen_slide_show_started_after_capture_start) {
+  if (app_handler_) {
+    return;
+  }
+#if defined(WEBRTC_WIN)
+  app_handler_ = std::make_unique<FullScreenPowerPointHandler>(source_id);
+  app_handler_->SetSlideShowCreationStateForTest(
+      fullscreen_slide_show_started_after_capture_start);
+#endif
 }
 
 }  // namespace webrtc

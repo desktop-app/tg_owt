@@ -17,11 +17,16 @@
 #include <X11/extensions/Xfixes.h>
 #include <X11/extensions/Xrandr.h>
 
+// X11 creates a CurrentTime macro, which causes compilation errors when
+// including webrtc::Clock.
+#undef CurrentTime
+
 #include <memory>
 
 #include "modules/desktop_capture/desktop_capture_options.h"
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_geometry.h"
 #include "modules/desktop_capture/desktop_region.h"
 #include "modules/desktop_capture/linux/x11/shared_x_display.h"
 #include "modules/desktop_capture/linux/x11/x_atom_cache.h"
@@ -29,6 +34,7 @@
 #include "modules/desktop_capture/screen_capture_frame_queue.h"
 #include "modules/desktop_capture/screen_capturer_helper.h"
 #include "modules/desktop_capture/shared_desktop_frame.h"
+#include "modules/desktop_capture/shared_memory.h"
 
 namespace webrtc {
 
@@ -42,7 +48,7 @@ namespace webrtc {
 class ScreenCapturerX11 : public DesktopCapturer,
                           public SharedXDisplay::XEventHandler {
  public:
-  ScreenCapturerX11();
+  explicit ScreenCapturerX11(const DesktopCaptureOptions& options);
   ~ScreenCapturerX11() override;
 
   ScreenCapturerX11(const ScreenCapturerX11&) = delete;
@@ -56,6 +62,8 @@ class ScreenCapturerX11 : public DesktopCapturer,
 
   // DesktopCapturer interface.
   void Start(Callback* delegate) override;
+  void SetSharedMemoryFactory(
+      std::unique_ptr<SharedMemoryFactory> shared_memory_factory) override;
   void CaptureFrame() override;
   bool GetSourceList(SourceList* sources) override;
   bool SelectSource(SourceId id) override;
@@ -90,8 +98,10 @@ class ScreenCapturerX11 : public DesktopCapturer,
   void DeinitXlib();
 
   DesktopCaptureOptions options_;
+  Clock& clock_;
 
   Callback* callback_ = nullptr;
+  std::unique_ptr<SharedMemoryFactory> shared_memory_factory_;
 
   // X11 graphics context.
   GC gc_ = nullptr;
@@ -108,6 +118,10 @@ class ScreenCapturerX11 : public DesktopCapturer,
   // selected_monitor_rect_ should be updated as well.
   // Setting it to kFullDesktopScreenId here might be misleading.
   Atom selected_monitor_name_ = 0;
+  typedef XRRMonitorInfo* (*get_monitors_func)(Display*, Window, Bool, int*);
+  typedef void (*free_monitors_func)(XRRMonitorInfo*);
+  get_monitors_func get_monitors_ = nullptr;
+  free_monitors_func free_monitors_ = nullptr;
 
   // XFixes.
   bool has_xfixes_ = false;

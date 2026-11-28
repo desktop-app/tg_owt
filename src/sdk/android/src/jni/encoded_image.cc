@@ -10,10 +10,20 @@
 
 #include "sdk/android/src/jni/encoded_image.h"
 
+#include <jni.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+#include "api/make_ref_counted.h"
 #include "api/video/encoded_image.h"
+#include "api/video/video_frame_type.h"
+#include "api/video/video_rotation.h"
 #include "rtc_base/time_utils.h"
 #include "sdk/android/generated_video_jni/EncodedImage_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 #include "sdk/android/src/jni/scoped_java_ref_counted.h"
 
@@ -29,19 +39,17 @@ class JavaEncodedImageBuffer : public EncodedImageBufferInterface {
                          const uint8_t* payload,
                          size_t size)
       : j_encoded_image_(ScopedJavaRefCounted::Retain(env, j_encoded_image)),
-        data_(const_cast<uint8_t*>(payload)),
+        data_(payload),
         size_(size) {}
 
   const uint8_t* data() const override { return data_; }
-  uint8_t* data() override { return data_; }
   size_t size() const override { return size_; }
 
  private:
   // The Java object owning the buffer.
   const ScopedJavaRefCounted j_encoded_image_;
 
-  // TODO(bugs.webrtc.org/9378): Make const, and delete above const_cast.
-  uint8_t* const data_;
+  const uint8_t* const data_;
   size_t const size_;
 };
 }  // namespace
@@ -57,7 +65,7 @@ ScopedJavaLocalRef<jobject> NativeToJavaEncodedImage(
   ScopedJavaLocalRef<jobject> buffer = NewDirectByteBuffer(
       jni, const_cast<uint8_t*>(image.data()), image.size());
   ScopedJavaLocalRef<jobject> frame_type =
-      NativeToJavaFrameType(jni, image._frameType);
+      NativeToJavaFrameType(jni, image.frame_type());
   ScopedJavaLocalRef<jobject> qp;
   if (image.qp_ != -1)
     qp = NativeToJavaInteger(jni, image.qp_);
@@ -68,7 +76,7 @@ ScopedJavaLocalRef<jobject> NativeToJavaEncodedImage(
       /*releaseCallback=*/ScopedJavaGlobalRef<jobject>(nullptr),
       static_cast<int>(image._encodedWidth),
       static_cast<int>(image._encodedHeight),
-      image.capture_time_ms_ * rtc::kNumNanosecsPerMillisec, frame_type,
+      image.capture_time_ms_ * kNumNanosecsPerMillisec, frame_type,
       static_cast<jint>(image.rotation_), qp);
 }
 
@@ -89,7 +97,7 @@ EncodedImage JavaToNativeEncodedImage(JNIEnv* env,
   const size_t buffer_size = env->GetDirectBufferCapacity(j_buffer.obj());
 
   EncodedImage frame;
-  frame.SetEncodedData(rtc::make_ref_counted<JavaEncodedImageBuffer>(
+  frame.SetEncodedData(make_ref_counted<JavaEncodedImageBuffer>(
       env, j_encoded_image, buffer, buffer_size));
 
   frame._encodedWidth = Java_EncodedImage_getEncodedWidth(env, j_encoded_image);
@@ -102,8 +110,8 @@ EncodedImage JavaToNativeEncodedImage(JNIEnv* env,
                   env, Java_EncodedImage_getQp(env, j_encoded_image))
                   .value_or(-1);
 
-  frame._frameType =
-      (VideoFrameType)Java_EncodedImage_getFrameType(env, j_encoded_image);
+  frame.set_frame_type(
+      (VideoFrameType)Java_EncodedImage_getFrameType(env, j_encoded_image));
   return frame;
 }
 
@@ -115,3 +123,5 @@ int64_t GetJavaEncodedImageCaptureTimeNs(
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(EncodedImage)

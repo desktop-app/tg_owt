@@ -14,16 +14,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <span>
 #include <string>
 
 #include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/byte_order.h"
+#include "rtc_base/span_helpers.h"
 
 // Reads/Writes from/to buffer using network byte order (big endian)
-namespace rtc {
+namespace webrtc {
 
 template <class BufferClassT>
 class ByteBufferWriterT {
@@ -41,15 +42,15 @@ class ByteBufferWriterT {
   const value_type* Data() const { return buffer_.data(); }
   size_t Length() const { return buffer_.size(); }
   size_t Capacity() const { return buffer_.capacity(); }
-  rtc::ArrayView<const value_type> DataView() const {
-    return rtc::MakeArrayView(Data(), Length());
+  std::span<const value_type> DataView() const {
+    return std::span(Data(), Length());
   }
   // Accessor that returns a string_view, independent of underlying type.
   // Intended to provide access for existing users that expect char*
   // when the underlying type changes to uint8_t.
   // TODO(bugs.webrtc.org/15665): Delete when users are converted.
   absl::string_view DataAsStringView() const {
-    return absl::string_view(reinterpret_cast<const char*>(Data()), Length());
+    return AsStringView(DataView());
   }
   const char* DataAsCharPointer() const {
     return reinterpret_cast<const char*>(Data());
@@ -97,8 +98,9 @@ class ByteBufferWriterT {
                        val.size());
   }
   // Write an array of bytes (uint8_t)
-  void WriteBytes(const uint8_t* val, size_t len) {
-    WriteBytesInternal(reinterpret_cast<const value_type*>(val), len);
+
+  void Write(std::span<const value_type> data) {
+    WriteBytesInternal(data.data(), data.size());
   }
 
   // Reserves the given number of bytes and returns a value_type* that can be
@@ -114,6 +116,8 @@ class ByteBufferWriterT {
 
   // Clears the contents of the buffer. After this, Length() will be 0.
   void Clear() { buffer_.Clear(); }
+
+  BufferClassT Extract() && { return std::move(buffer_); }
 
  private:
   static constexpr size_t kDefaultCapacity = 4096;
@@ -150,7 +154,7 @@ class ByteBufferWriter : public ByteBufferWriterT<BufferT<uint8_t>> {
 class ByteBufferReader {
  public:
   explicit ByteBufferReader(
-      rtc::ArrayView<const uint8_t> bytes ABSL_ATTRIBUTE_LIFETIME_BOUND);
+      std::span<const uint8_t> bytes ABSL_ATTRIBUTE_LIFETIME_BOUND);
 
   explicit ByteBufferReader(const ByteBufferWriter& buf);
 
@@ -161,8 +165,8 @@ class ByteBufferReader {
   // Returns number of unprocessed bytes.
   size_t Length() const { return end_ - start_; }
   // Returns a view of the unprocessed data. Does not move current position.
-  rtc::ArrayView<const uint8_t> DataView() const {
-    return rtc::ArrayView<const uint8_t>(bytes_ + start_, end_ - start_);
+  std::span<const uint8_t> DataView() const {
+    return std::span<const uint8_t>(bytes_ + start_, end_ - start_);
   }
 
   // Read a next value from the buffer. Return false if there isn't
@@ -174,7 +178,7 @@ class ByteBufferReader {
   bool ReadUInt64(uint64_t* val);
   bool ReadUVarint(uint64_t* val);
   // Copies the val.size() next bytes into val.data().
-  bool ReadBytes(rtc::ArrayView<uint8_t> val);
+  bool ReadBytes(std::span<uint8_t> val);
   // Appends next `len` bytes from the buffer to `val`. Returns false
   // if there is less than `len` bytes left.
   bool ReadString(std::string* val, size_t len);
@@ -198,6 +202,6 @@ class ByteBufferReader {
   size_t end_;
 };
 
-}  // namespace rtc
+}  //  namespace webrtc
 
 #endif  // RTC_BASE_BYTE_BUFFER_H_

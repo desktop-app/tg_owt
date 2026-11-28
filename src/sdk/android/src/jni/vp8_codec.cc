@@ -14,13 +14,15 @@
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "sdk/android/generated_libvpx_vp8_jni/LibvpxVp8Decoder_jni.h"
 #include "sdk/android/generated_libvpx_vp8_jni/LibvpxVp8Encoder_jni.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/java_types.h"
 
 namespace webrtc {
 namespace jni {
 
-static jlong JNI_LibvpxVp8Encoder_CreateEncoder(JNIEnv* jni) {
-  return jlongFromPointer(VP8Encoder::Create().release());
+jlong JNI_LibvpxVp8Encoder_Create(JNIEnv* jni, jlong j_webrtc_env_ref) {
+  return NativeToJavaPointer(
+      CreateVp8Encoder(*reinterpret_cast<const Environment*>(j_webrtc_env_ref))
+          .release());
 }
 
 static jlong JNI_LibvpxVp8Decoder_CreateDecoder(JNIEnv* jni,
@@ -32,3 +34,6 @@ static jlong JNI_LibvpxVp8Decoder_CreateDecoder(JNIEnv* jni,
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(LibvpxVp8Decoder)
+DEFINE_JNI(LibvpxVp8Encoder)

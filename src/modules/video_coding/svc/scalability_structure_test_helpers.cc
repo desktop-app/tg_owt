@@ -9,14 +9,15 @@
  */
 #include "modules/video_coding/svc/scalability_structure_test_helpers.h"
 
-#include <stdint.h>
-
+#include <bitset>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "api/array_view.h"
-#include "api/transport/rtp/dependency_descriptor.h"
 #include "api/video/video_bitrate_allocation.h"
+#include "common_video/generic_frame_descriptor/generic_frame_info.h"
 #include "modules/video_coding/chain_diff_calculator.h"
 #include "modules/video_coding/frame_dependencies_calculator.h"
 #include "modules/video_coding/svc/scalable_video_controller.h"
@@ -42,30 +43,37 @@ void ScalabilityStructureWrapper::GenerateFrames(
     int num_temporal_units,
     std::vector<GenericFrameInfo>& frames) {
   for (int i = 0; i < num_temporal_units; ++i) {
-    for (auto& layer_frame :
-         structure_controller_.NextFrameConfig(/*restart=*/false)) {
-      int64_t frame_id = ++frame_id_;
-      bool is_keyframe = layer_frame.IsKeyframe();
+    EncodeTemporalUnit(structure_controller_.NextFrameConfig(/*restart=*/false),
+                       frames);
+  }
+}
 
-      GenericFrameInfo frame_info =
-          structure_controller_.OnEncodeDone(layer_frame);
-      if (is_keyframe) {
-        chain_diff_calculator_.Reset(frame_info.part_of_chain);
-      }
-      frame_info.chain_diffs =
-          chain_diff_calculator_.From(frame_id, frame_info.part_of_chain);
-      for (int64_t base_frame_id : frame_deps_calculator_.FromBuffersUsage(
-               frame_id, frame_info.encoder_buffers)) {
-        frame_info.frame_diffs.push_back(frame_id - base_frame_id);
-      }
+void ScalabilityStructureWrapper::EncodeTemporalUnit(
+    std::span<const ScalableVideoController::LayerFrameConfig> layer_frames,
+    std::vector<GenericFrameInfo>& frames) {
+  for (const ScalableVideoController::LayerFrameConfig& layer_frame :
+       layer_frames) {
+    int64_t frame_id = ++frame_id_;
+    bool is_keyframe = layer_frame.IsKeyframe();
 
-      frames.push_back(std::move(frame_info));
+    GenericFrameInfo frame_info =
+        structure_controller_.OnEncodeDone(layer_frame);
+    if (is_keyframe) {
+      chain_diff_calculator_.Reset(frame_info.part_of_chain);
     }
+    frame_info.chain_diffs =
+        chain_diff_calculator_.From(frame_id, frame_info.part_of_chain);
+    for (int64_t base_frame_id : frame_deps_calculator_.FromBuffersUsage(
+             frame_id, frame_info.encoder_buffers)) {
+      frame_info.frame_diffs.push_back(frame_id - base_frame_id);
+    }
+
+    frames.push_back(std::move(frame_info));
   }
 }
 
 bool ScalabilityStructureWrapper::FrameReferencesAreValid(
-    rtc::ArrayView<const GenericFrameInfo> frames) const {
+    std::span<const GenericFrameInfo> frames) const {
   bool valid = true;
   // VP9 and AV1 supports up to 8 buffers. Expect no more buffers are not used.
   std::bitset<8> buffer_contains_frame;

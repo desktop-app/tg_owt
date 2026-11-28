@@ -12,42 +12,58 @@
 #define API_AUDIO_CODECS_OPUS_AUDIO_ENCODER_OPUS_CONFIG_H_
 
 #include <stddef.h>
+#include <stdint.h>
 
+#include <memory>
+#include <optional>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
 struct RTC_EXPORT AudioEncoderOpusConfig {
+  static const int kDefaultLowRateComplexity;
   static constexpr int kDefaultFrameSizeMs = 20;
 
   // Opus API allows a min bitrate of 500bps, but Opus documentation suggests
   // bitrate should be in the range of 6000 to 510000, inclusive.
-  static constexpr int kMinBitrateBps = 6000;
-  static constexpr int kMaxBitrateBps = 510000;
-
-  AudioEncoderOpusConfig();
-  AudioEncoderOpusConfig(const AudioEncoderOpusConfig&);
-  ~AudioEncoderOpusConfig();
-  AudioEncoderOpusConfig& operator=(const AudioEncoderOpusConfig&);
+  static constexpr int kMinBitrateBps = 6'000;
+  static constexpr int kMaxBitrateBps = 510'000;
+#if defined(WEBRTC_ANDROID) || defined(WEBRTC_IOS)
+  static constexpr int kDefaultComplexity = 5;
+#else
+  static constexpr int kDefaultComplexity = 9;
+#endif
 
   bool IsOk() const;  // Checks if the values are currently OK.
 
-  int frame_size_ms;
-  int sample_rate_hz;
-  size_t num_channels;
+  int frame_size_ms = kDefaultFrameSizeMs;
+  int sample_rate_hz = 48'000;
+  size_t num_channels = 1;
   enum class ApplicationMode { kVoip, kAudio };
-  ApplicationMode application;
+  ApplicationMode application = ApplicationMode::kVoip;
 
   // NOTE: This member must always be set.
   // TODO(kwiberg): Turn it into just an int.
-  absl::optional<int> bitrate_bps;
+  std::optional<int> bitrate_bps = 32'000;
 
-  bool fec_enabled;
-  bool cbr_enabled;
-  int max_playback_rate_hz;
+  bool fec_enabled = false;
+
+  // TGCALLS PATCH: Opus DRED (Deep REDundancy), the 10 ms frames of redundancy libopus may add to each packet:
+  // 0 = off, at most 104 (~1 s). libopus sizes it, like in-band FEC, from the loss figure, and adds none at 0%.
+  int dred_duration_10ms = 0;
+  // TGCALLS PATCH: Opus DRED. A loss figure (percent) given to libopus in place of the measured uplink loss, from the
+  // first packet on; 0 = the measured figure, as upstream. A group-call sender never learns about loss on the
+  // listeners' legs, so it fixes the figure to keep DRED's rate fixed.
+  int fixed_packet_loss_percent = 0;
+  // TGCALLS PATCH: Opus DRED. libopus's neural weights (the blob its dnn/write_lpcnet_weights.c writes): libopus is
+  // built without them (USE_WEIGHTS_FILE), and DRED needs them. With none, or a blob that is not well formed, the
+  // encoder sends no DRED whatever dred_duration_10ms says. Kept for the encoder's lifetime: libopus reads the
+  // models in place.
+  std::shared_ptr<const std::vector<uint8_t>> dnn_weights;
+  bool cbr_enabled = false;
+  int max_playback_rate_hz = 48'000;
 
   // `complexity` is used when the bitrate goes above
   // `complexity_threshold_bps` + `complexity_threshold_window_bps`;
@@ -55,18 +71,18 @@ struct RTC_EXPORT AudioEncoderOpusConfig {
   // `complexity_threshold_bps` - `complexity_threshold_window_bps`. In the
   // interval in the middle, we keep using the most recent of the two
   // complexity settings.
-  int complexity;
-  int low_rate_complexity;
-  int complexity_threshold_bps;
-  int complexity_threshold_window_bps;
+  int complexity = kDefaultComplexity;
+  int low_rate_complexity = kDefaultLowRateComplexity;
+  int complexity_threshold_bps = 12500;
+  int complexity_threshold_window_bps = 1500;
 
-  bool dtx_enabled;
+  bool dtx_enabled = false;
   std::vector<int> supported_frame_lengths_ms;
-  int uplink_bandwidth_update_interval_ms;
+  int uplink_bandwidth_update_interval_ms = 200;
 
   // NOTE: This member isn't necessary, and will soon go away. See
   // https://bugs.chromium.org/p/webrtc/issues/detail?id=7847
-  int payload_type;
+  int payload_type = -1;
 };
 
 }  // namespace webrtc

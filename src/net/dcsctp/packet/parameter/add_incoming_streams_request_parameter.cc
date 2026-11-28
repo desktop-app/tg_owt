@@ -9,18 +9,15 @@
  */
 #include "net/dcsctp/packet/parameter/add_incoming_streams_request_parameter.h"
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
-#include <type_traits>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/packet/bounded_byte_reader.h"
 #include "net/dcsctp/packet/bounded_byte_writer.h"
-#include "net/dcsctp/packet/tlv_trait.h"
 #include "rtc_base/strings/string_builder.h"
 
 namespace dcsctp {
@@ -36,13 +33,12 @@ namespace dcsctp {
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //  |      Number of new streams    |         Reserved              |
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int AddIncomingStreamsRequestParameter::kType;
 
-absl::optional<AddIncomingStreamsRequestParameter>
-AddIncomingStreamsRequestParameter::Parse(rtc::ArrayView<const uint8_t> data) {
-  absl::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
+std::optional<AddIncomingStreamsRequestParameter>
+AddIncomingStreamsRequestParameter::Parse(std::span<const uint8_t> data) {
+  std::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
   if (!reader.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   ReconfigRequestSN request_sequence_number(reader->Load32<4>());
   uint16_t nbr_of_new_streams = reader->Load16<8>();
@@ -59,7 +55,7 @@ void AddIncomingStreamsRequestParameter::SerializeTo(
 }
 
 std::string AddIncomingStreamsRequestParameter::ToString() const {
-  rtc::StringBuilder sb;
+  webrtc::StringBuilder sb;
   sb << "Add Incoming Streams Request, req_seq_nbr="
      << *request_sequence_number();
   return sb.Release();

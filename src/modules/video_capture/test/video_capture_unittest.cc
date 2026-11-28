@@ -10,51 +10,58 @@
 
 #include "modules/video_capture/video_capture.h"
 
-#include <stdio.h>
-
+#include <cstdint>
+#include <cstdio>
 #include <map>
 #include <memory>
-#include <sstream>
+#include <string>
+#include <vector>
 
-#include "absl/memory/memory.h"
 #include "api/scoped_refptr.h"
-#include "api/video/i420_buffer.h"
+#include "api/test/rtc_error_matchers.h"
+#include "api/units/time_delta.h"
 #include "api/video/video_frame.h"
-#include "common_video/libyuv/include/webrtc_libyuv.h"
+#include "api/video/video_rotation.h"
+#include "api/video/video_sink_interface.h"
+#include "modules/video_capture/video_capture_defines.h"
 #include "modules/video_capture/video_capture_factory.h"
-#include "rtc_base/gunit.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/strings/string_builder.h"
 #include "rtc_base/synchronization/mutex.h"
-#include "rtc_base/time_utils.h"
+#include "system_wrappers/include/clock.h"
 #include "test/frame_utils.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/wait_until.h"
 
-using webrtc::VideoCaptureCapability;
-using webrtc::VideoCaptureFactory;
-using webrtc::VideoCaptureModule;
+namespace webrtc {
+namespace {
 
-static const int kTimeOut = 5000;
+using ::testing::Ge;
+
+const int kTimeOut = 5000;
 #ifdef WEBRTC_MAC
 static const int kTestHeight = 288;
 static const int kTestWidth = 352;
 static const int kTestFramerate = 30;
 #endif
 
-class TestVideoCaptureCallback
-    : public rtc::VideoSinkInterface<webrtc::VideoFrame> {
+class TestVideoCaptureCallback : public VideoSinkInterface<webrtc::VideoFrame> {
  public:
-  TestVideoCaptureCallback()
-      : last_render_time_ms_(0),
+  explicit TestVideoCaptureCallback(Clock& clock)
+      : clock_(clock),
+        last_render_time_ms_(0),
         incoming_frames_(0),
         timing_warnings_(0),
-        rotate_frame_(webrtc::kVideoRotation_0) {}
+        rotate_frame_(kVideoRotation_0) {}
 
   ~TestVideoCaptureCallback() override {
     if (timing_warnings_ > 0)
       printf("No of timing warnings %d\n", timing_warnings_);
   }
 
-  void OnFrame(const webrtc::VideoFrame& videoFrame) override {
-    webrtc::MutexLock lock(&capture_lock_);
+  void OnFrame(const VideoFrame& videoFrame) override {
+    MutexLock lock(&capture_lock_);
     int height = videoFrame.height();
     int width = videoFrame.width();
 #if defined(WEBRTC_ANDROID) && WEBRTC_ANDROID
@@ -68,8 +75,9 @@ class TestVideoCaptureCallback
     EXPECT_EQ(rotate_frame_, videoFrame.rotation());
 #endif
     // RenderTimstamp should be the time now.
-    EXPECT_TRUE(videoFrame.render_time_ms() >= rtc::TimeMillis() - 30 &&
-                videoFrame.render_time_ms() <= rtc::TimeMillis());
+    EXPECT_TRUE(videoFrame.render_time_ms() >=
+                    clock_.TimeInMilliseconds() - 30 &&
+                videoFrame.render_time_ms() <= clock_.TimeInMilliseconds());
 
     if ((videoFrame.render_time_ms() >
              last_render_time_ms_ + (1000 * 1.1) / capability_.maxFPS &&
@@ -86,49 +94,50 @@ class TestVideoCaptureCallback
   }
 
   void SetExpectedCapability(VideoCaptureCapability capability) {
-    webrtc::MutexLock lock(&capture_lock_);
+    MutexLock lock(&capture_lock_);
     capability_ = capability;
     incoming_frames_ = 0;
     last_render_time_ms_ = 0;
   }
   int incoming_frames() {
-    webrtc::MutexLock lock(&capture_lock_);
+    MutexLock lock(&capture_lock_);
     return incoming_frames_;
   }
 
   int timing_warnings() {
-    webrtc::MutexLock lock(&capture_lock_);
+    MutexLock lock(&capture_lock_);
     return timing_warnings_;
   }
   VideoCaptureCapability capability() {
-    webrtc::MutexLock lock(&capture_lock_);
+    MutexLock lock(&capture_lock_);
     return capability_;
   }
 
-  bool CompareLastFrame(const webrtc::VideoFrame& frame) {
-    webrtc::MutexLock lock(&capture_lock_);
-    return webrtc::test::FrameBufsEqual(last_frame_,
-                                        frame.video_frame_buffer());
+  bool CompareLastFrame(const VideoFrame& frame) {
+    MutexLock lock(&capture_lock_);
+    return test::FrameBufsEqual(last_frame_, frame.video_frame_buffer());
   }
 
-  void SetExpectedCaptureRotation(webrtc::VideoRotation rotation) {
-    webrtc::MutexLock lock(&capture_lock_);
+  void SetExpectedCaptureRotation(VideoRotation rotation) {
+    MutexLock lock(&capture_lock_);
     rotate_frame_ = rotation;
   }
 
  private:
-  webrtc::Mutex capture_lock_;
+  Mutex capture_lock_;
   VideoCaptureCapability capability_;
+  Clock& clock_;
   int64_t last_render_time_ms_;
   int incoming_frames_;
   int timing_warnings_;
-  rtc::scoped_refptr<webrtc::VideoFrameBuffer> last_frame_;
-  webrtc::VideoRotation rotate_frame_;
+  scoped_refptr<webrtc::VideoFrameBuffer> last_frame_;
+  VideoRotation rotate_frame_;
 };
 
 class VideoCaptureTest : public ::testing::Test {
  public:
-  VideoCaptureTest() : number_of_devices_(0) {}
+  VideoCaptureTest()
+      : clock_(*Clock::GetRealTimeClock()), number_of_devices_(0) {}
 
   void SetUp() override {
     device_info_.reset(VideoCaptureFactory::CreateDeviceInfo());
@@ -137,18 +146,18 @@ class VideoCaptureTest : public ::testing::Test {
     ASSERT_GT(number_of_devices_, 0u);
   }
 
-  rtc::scoped_refptr<VideoCaptureModule> OpenVideoCaptureDevice(
+  scoped_refptr<VideoCaptureModule> OpenVideoCaptureDevice(
       unsigned int device,
-      rtc::VideoSinkInterface<webrtc::VideoFrame>* callback) {
+      VideoSinkInterface<webrtc::VideoFrame>* callback) {
     char device_name[256];
     char unique_name[256];
 
     EXPECT_EQ(0, device_info_->GetDeviceName(device, device_name, 256,
                                              unique_name, 256));
 
-    rtc::scoped_refptr<VideoCaptureModule> module(
+    scoped_refptr<VideoCaptureModule> module(
         VideoCaptureFactory::Create(unique_name));
-    if (module.get() == NULL)
+    if (module.get() == nullptr)
       return nullptr;
 
     EXPECT_FALSE(module->CaptureStarted());
@@ -168,6 +177,7 @@ class VideoCaptureTest : public ::testing::Test {
     EXPECT_EQ(capability.height, resulting_capability.height);
   }
 
+  Clock& clock_;
   std::unique_ptr<VideoCaptureModule::DeviceInfo> device_info_;
   unsigned int number_of_devices_;
 };
@@ -181,11 +191,11 @@ class VideoCaptureTest : public ::testing::Test {
 #endif
 TEST_F(VideoCaptureTest, MAYBE_CreateDelete) {
   for (int i = 0; i < 5; ++i) {
-    int64_t start_time = rtc::TimeMillis();
-    TestVideoCaptureCallback capture_observer;
-    rtc::scoped_refptr<VideoCaptureModule> module(
+    int64_t start_time = clock_.TimeInMilliseconds();
+    TestVideoCaptureCallback capture_observer(clock_);
+    scoped_refptr<VideoCaptureModule> module(
         OpenVideoCaptureDevice(0, &capture_observer));
-    ASSERT_TRUE(module.get() != NULL);
+    ASSERT_TRUE(module.get() != nullptr);
 
     VideoCaptureCapability capability;
 #ifndef WEBRTC_MAC
@@ -194,23 +204,25 @@ TEST_F(VideoCaptureTest, MAYBE_CreateDelete) {
     capability.width = kTestWidth;
     capability.height = kTestHeight;
     capability.maxFPS = kTestFramerate;
-    capability.videoType = webrtc::VideoType::kUnknown;
+    capability.videoType = VideoType::kUnknown;
 #endif
     capture_observer.SetExpectedCapability(capability);
     ASSERT_NO_FATAL_FAILURE(StartCapture(module.get(), capability));
 
     // Less than 4s to start the camera.
-    EXPECT_LE(rtc::TimeMillis() - start_time, 4000);
+    EXPECT_LE(clock_.TimeInMilliseconds() - start_time, 4000);
 
     // Make sure 5 frames are captured.
-    EXPECT_TRUE_WAIT(capture_observer.incoming_frames() >= 5, kTimeOut);
+    EXPECT_THAT(WaitUntil([&] { return capture_observer.incoming_frames(); },
+                          Ge(5), {.timeout = TimeDelta::Millis(kTimeOut)}),
+                IsRtcOk());
 
-    int64_t stop_time = rtc::TimeMillis();
+    int64_t stop_time = clock_.TimeInMilliseconds();
     EXPECT_EQ(0, module->StopCapture());
     EXPECT_FALSE(module->CaptureStarted());
 
     // Less than 3s to stop the camera.
-    EXPECT_LE(rtc::TimeMillis() - stop_time, 3000);
+    EXPECT_LE(clock_.TimeInMilliseconds() - stop_time, 3000);
   }
 }
 
@@ -222,11 +234,11 @@ TEST_F(VideoCaptureTest, MAYBE_CreateDelete) {
 #define MAYBE_Capabilities Capabilities
 #endif
 TEST_F(VideoCaptureTest, MAYBE_Capabilities) {
-  TestVideoCaptureCallback capture_observer;
+  TestVideoCaptureCallback capture_observer(clock_);
 
-  rtc::scoped_refptr<VideoCaptureModule> module(
+  scoped_refptr<VideoCaptureModule> module(
       OpenVideoCaptureDevice(0, &capture_observer));
-  ASSERT_TRUE(module.get() != NULL);
+  ASSERT_TRUE(module.get() != nullptr);
 
   int number_of_capabilities =
       device_info_->NumberOfCapabilities(module->CurrentDeviceName());
@@ -239,10 +251,9 @@ TEST_F(VideoCaptureTest, MAYBE_Capabilities) {
     VideoCaptureCapability capability;
     EXPECT_EQ(0, device_info_->GetCapability(module->CurrentDeviceName(), i,
                                              capability));
-    std::ostringstream resolutionStream;
-    resolutionStream << capability.width << "x" << capability.height;
-    resolutionStream.flush();
-    std::string resolution = resolutionStream.str();
+    StringBuilder sb;
+    sb << capability.width << "x" << capability.height;
+    std::string resolution = sb.Release();
     frame_rates_by_resolution[resolution].push_back(capability.maxFPS);
 
     // Since Android presents so many resolution/FPS combinations and the test
@@ -254,7 +265,9 @@ TEST_F(VideoCaptureTest, MAYBE_Capabilities) {
     capture_observer.SetExpectedCapability(capability);
     ASSERT_NO_FATAL_FAILURE(StartCapture(module.get(), capability));
     // Make sure at least one frame is captured.
-    EXPECT_TRUE_WAIT(capture_observer.incoming_frames() >= 1, kTimeOut);
+    EXPECT_THAT(WaitUntil([&] { return capture_observer.incoming_frames(); },
+                          Ge(1), {.timeout = TimeDelta::Millis(kTimeOut)}),
+                IsRtcOk());
 
     EXPECT_EQ(0, module->StopCapture());
   }
@@ -284,10 +297,10 @@ TEST_F(VideoCaptureTest, DISABLED_TestTwoCameras) {
     return;
   }
 
-  TestVideoCaptureCallback capture_observer1;
-  rtc::scoped_refptr<VideoCaptureModule> module1(
+  TestVideoCaptureCallback capture_observer1(clock_);
+  scoped_refptr<VideoCaptureModule> module1(
       OpenVideoCaptureDevice(0, &capture_observer1));
-  ASSERT_TRUE(module1.get() != NULL);
+  ASSERT_TRUE(module1.get() != nullptr);
   VideoCaptureCapability capability1;
 #ifndef WEBRTC_MAC
   device_info_->GetCapability(module1->CurrentDeviceName(), 0, capability1);
@@ -295,14 +308,14 @@ TEST_F(VideoCaptureTest, DISABLED_TestTwoCameras) {
   capability1.width = kTestWidth;
   capability1.height = kTestHeight;
   capability1.maxFPS = kTestFramerate;
-  capability1.videoType = webrtc::VideoType::kUnknown;
+  capability1.videoType = VideoType::kUnknown;
 #endif
   capture_observer1.SetExpectedCapability(capability1);
 
-  TestVideoCaptureCallback capture_observer2;
-  rtc::scoped_refptr<VideoCaptureModule> module2(
+  TestVideoCaptureCallback capture_observer2(clock_);
+  scoped_refptr<VideoCaptureModule> module2(
       OpenVideoCaptureDevice(1, &capture_observer2));
-  ASSERT_TRUE(module1.get() != NULL);
+  ASSERT_TRUE(module1.get() != nullptr);
 
   VideoCaptureCapability capability2;
 #ifndef WEBRTC_MAC
@@ -311,14 +324,18 @@ TEST_F(VideoCaptureTest, DISABLED_TestTwoCameras) {
   capability2.width = kTestWidth;
   capability2.height = kTestHeight;
   capability2.maxFPS = kTestFramerate;
-  capability2.videoType = webrtc::VideoType::kUnknown;
+  capability2.videoType = VideoType::kUnknown;
 #endif
   capture_observer2.SetExpectedCapability(capability2);
 
   ASSERT_NO_FATAL_FAILURE(StartCapture(module1.get(), capability1));
   ASSERT_NO_FATAL_FAILURE(StartCapture(module2.get(), capability2));
-  EXPECT_TRUE_WAIT(capture_observer1.incoming_frames() >= 5, kTimeOut);
-  EXPECT_TRUE_WAIT(capture_observer2.incoming_frames() >= 5, kTimeOut);
+  EXPECT_THAT(WaitUntil([&] { return capture_observer1.incoming_frames(); },
+                        Ge(5), {.timeout = TimeDelta::Millis(kTimeOut)}),
+              IsRtcOk());
+  EXPECT_THAT(WaitUntil([&] { return capture_observer2.incoming_frames(); },
+                        Ge(5), {.timeout = TimeDelta::Millis(kTimeOut)}),
+              IsRtcOk());
   EXPECT_EQ(0, module2->StopCapture());
   EXPECT_EQ(0, module1->StopCapture());
 }
@@ -330,28 +347,35 @@ TEST_F(VideoCaptureTest, DISABLED_TestTwoCameras) {
 #define MAYBE_ConcurrentAccess ConcurrentAccess
 #endif
 TEST_F(VideoCaptureTest, MAYBE_ConcurrentAccess) {
-  TestVideoCaptureCallback capture_observer1;
-  rtc::scoped_refptr<VideoCaptureModule> module1(
+  TestVideoCaptureCallback capture_observer1(clock_);
+  scoped_refptr<VideoCaptureModule> module1(
       OpenVideoCaptureDevice(0, &capture_observer1));
-  ASSERT_TRUE(module1.get() != NULL);
+  ASSERT_TRUE(module1.get() != nullptr);
   VideoCaptureCapability capability;
   device_info_->GetCapability(module1->CurrentDeviceName(), 0, capability);
   capture_observer1.SetExpectedCapability(capability);
 
-  TestVideoCaptureCallback capture_observer2;
-  rtc::scoped_refptr<VideoCaptureModule> module2(
+  TestVideoCaptureCallback capture_observer2(clock_);
+  scoped_refptr<VideoCaptureModule> module2(
       OpenVideoCaptureDevice(0, &capture_observer2));
-  ASSERT_TRUE(module2.get() != NULL);
+  ASSERT_TRUE(module2.get() != nullptr);
   capture_observer2.SetExpectedCapability(capability);
 
   // Starting module1 should work.
   ASSERT_NO_FATAL_FAILURE(StartCapture(module1.get(), capability));
-  EXPECT_TRUE_WAIT(capture_observer1.incoming_frames() >= 5, kTimeOut);
+  EXPECT_THAT(WaitUntil([&] { return capture_observer1.incoming_frames(); },
+                        Ge(5), {.timeout = TimeDelta::Millis(kTimeOut)}),
+              IsRtcOk());
 
   // When module1 is stopped, starting module2 for the same device should work.
   EXPECT_EQ(0, module1->StopCapture());
   ASSERT_NO_FATAL_FAILURE(StartCapture(module2.get(), capability));
-  EXPECT_TRUE_WAIT(capture_observer2.incoming_frames() >= 5, kTimeOut);
+  EXPECT_THAT(WaitUntil([&] { return capture_observer2.incoming_frames(); },
+                        Ge(5), {.timeout = TimeDelta::Millis(kTimeOut)}),
+              IsRtcOk());
 
   EXPECT_EQ(0, module2->StopCapture());
 }
+
+}  // namespace
+}  // namespace webrtc

@@ -11,10 +11,15 @@
 #include "video/alignment_adjuster.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdlib>
 #include <limits>
+#include <optional>
 
 #include "absl/algorithm/container.h"
+#include "api/video_codecs/video_encoder.h"
 #include "rtc_base/logging.h"
+#include "video/config/video_encoder_config.h"
 
 namespace webrtc {
 namespace {
@@ -67,7 +72,7 @@ double RoundToMultiple(int alignment,
 int AlignmentAdjuster::GetAlignmentAndMaybeAdjustScaleFactors(
     const VideoEncoder::EncoderInfo& encoder_info,
     VideoEncoderConfig* config,
-    absl::optional<size_t> max_layers) {
+    std::optional<size_t> max_layers) {
   const int requested_alignment = encoder_info.requested_resolution_alignment;
   if (!encoder_info.apply_alignment_to_all_simulcast_layers) {
     return requested_alignment;
@@ -79,8 +84,8 @@ int AlignmentAdjuster::GetAlignmentAndMaybeAdjustScaleFactors(
   }
 
   // Update alignment to also apply to simulcast layers.
-  const bool has_scale_resolution_down_by = absl::c_any_of(
-      config->simulcast_layers, [](const webrtc::VideoStream& layer) {
+  const bool has_scale_resolution_down_by =
+      absl::c_any_of(config->simulcast_layers, [](const VideoStream& layer) {
         return layer.scale_resolution_down_by >= 1.0;
       });
 

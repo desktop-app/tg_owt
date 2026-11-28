@@ -12,7 +12,7 @@ package org.webrtc;
 
 // Explicit imports necessary for JNI generation.
 import androidx.annotation.Nullable;
-import org.webrtc.VideoEncoder;
+import org.jni_zero.NativeMethods;
 
 /**
  * This class contains the Java glue code for JNI generation of VideoEncoder.
@@ -35,12 +35,39 @@ class VideoEncoderWrapper {
     return scalingSettings.high;
   }
 
-  @CalledByNative
-  static VideoEncoder.Callback createEncoderCallback(final long nativeEncoder) {
-    return (EncodedImage frame,
-               VideoEncoder.CodecSpecificInfo info) -> nativeOnEncodedFrame(nativeEncoder, frame);
+  /**
+   * Forwards encoded frames to the native VideoEncoderWrapper until the callback is invalidated.
+   * Frames delivered after that are dropped.
+   */
+  static class NativeEncoderCallback implements VideoEncoder.Callback {
+    private final NativeLifecycleLock lifecycleLock;
+
+    NativeEncoderCallback(long nativeEncoder) {
+      lifecycleLock = new NativeLifecycleLock("VideoEncoderWrapper", nativeEncoder);
+    }
+
+    @Override
+    public void onEncodedFrame(EncodedImage frame, VideoEncoder.CodecSpecificInfo info) {
+      lifecycleLock.runIfAlive(
+          (long nativeEncoder) ->
+              VideoEncoderWrapperJni.get().onEncodedFrame(nativeEncoder, frame));
+    }
+
+    // Called by the native VideoEncoderWrapper. Blocks until an ongoing onEncodedFrame() call, if
+    // any, has returned. Frames delivered after this call are dropped.
+    @CalledByNative
+    void invalidate() {
+      lifecycleLock.dispose((long nativeEncoder) -> {});
+    }
   }
 
-  private static native void nativeOnEncodedFrame(
-      long nativeVideoEncoderWrapper, EncodedImage frame);
+  @CalledByNative
+  static NativeEncoderCallback createEncoderCallback(final long nativeEncoder) {
+    return new NativeEncoderCallback(nativeEncoder);
+  }
+
+  @NativeMethods
+  interface Natives {
+    void onEncodedFrame(long nativeVideoEncoderWrapper, EncodedImage frame);
+  }
 }

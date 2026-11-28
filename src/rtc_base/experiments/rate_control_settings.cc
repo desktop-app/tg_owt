@@ -10,15 +10,16 @@
 
 #include "rtc_base/experiments/rate_control_settings.h"
 
-#include <inttypes.h>
-#include <stdio.h>
-
+#include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
 
-#include "absl/strings/match.h"
-#include "api/transport/field_trial_based_config.h"
+#include "absl/strings/string_view.h"
+#include "api/field_trials_view.h"
+#include "api/units/data_size.h"
+#include "rtc_base/experiments/struct_parameters_parser.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/numerics/safe_conversions.h"
 
 namespace webrtc {
 
@@ -34,14 +35,7 @@ const char kCongestionWindowDefaultFieldTrialString[] =
 const char kUseBaseHeavyVp8Tl3RateAllocationFieldTrialName[] =
     "WebRTC-UseBaseHeavyVP8TL3RateAllocation";
 
-bool IsEnabled(const FieldTrialsView* const key_value_config,
-               absl::string_view key) {
-  return absl::StartsWith(key_value_config->Lookup(key), "Enabled");
-}
-
 }  // namespace
-
-constexpr char CongestionWindowConfig::kKey[];
 
 std::unique_ptr<StructParametersParser> CongestionWindowConfig::Parser() {
   return StructParametersParser::Create("QueueSize", &queue_size_ms,  //
@@ -56,8 +50,6 @@ CongestionWindowConfig CongestionWindowConfig::Parse(absl::string_view config) {
   res.Parser()->Parse(config);
   return res;
 }
-
-constexpr char VideoRateControlConfig::kKey[];
 
 std::unique_ptr<StructParametersParser> VideoRateControlConfig::Parser() {
   // The empty comments ensures that each pair is on a separate line.
@@ -75,33 +67,22 @@ std::unique_ptr<StructParametersParser> VideoRateControlConfig::Parser() {
 }
 
 RateControlSettings::RateControlSettings(
-    const FieldTrialsView* const key_value_config) {
+    const FieldTrialsView& key_value_config) {
   std::string congestion_window_config =
-      key_value_config->Lookup(CongestionWindowConfig::kKey).empty()
-          ? kCongestionWindowDefaultFieldTrialString
-          : key_value_config->Lookup(CongestionWindowConfig::kKey);
+      key_value_config.Lookup(CongestionWindowConfig::kKey);
+  if (congestion_window_config.empty()) {
+    congestion_window_config = kCongestionWindowDefaultFieldTrialString;
+  }
   congestion_window_config_ =
       CongestionWindowConfig::Parse(congestion_window_config);
-  video_config_.vp8_base_heavy_tl3_alloc = IsEnabled(
-      key_value_config, kUseBaseHeavyVp8Tl3RateAllocationFieldTrialName);
+  video_config_.vp8_base_heavy_tl3_alloc = key_value_config.IsEnabled(
+      kUseBaseHeavyVp8Tl3RateAllocationFieldTrialName);
   video_config_.Parser()->Parse(
-      key_value_config->Lookup(VideoRateControlConfig::kKey));
+      key_value_config.Lookup(VideoRateControlConfig::kKey));
 }
 
 RateControlSettings::~RateControlSettings() = default;
 RateControlSettings::RateControlSettings(RateControlSettings&&) = default;
-
-RateControlSettings RateControlSettings::ParseFromFieldTrials() {
-  FieldTrialBasedConfig field_trial_config;
-  return RateControlSettings(&field_trial_config);
-}
-
-RateControlSettings RateControlSettings::ParseFromKeyValueConfig(
-    const FieldTrialsView* const key_value_config) {
-  FieldTrialBasedConfig field_trial_config;
-  return RateControlSettings(key_value_config ? key_value_config
-                                              : &field_trial_config);
-}
 
 bool RateControlSettings::UseCongestionWindow() const {
   return static_cast<bool>(congestion_window_config_.queue_size_ms);
@@ -127,12 +108,12 @@ uint32_t RateControlSettings::CongestionWindowMinPushbackTargetBitrateBps()
       kDefaultMinPushbackTargetBitrateBps);
 }
 
-absl::optional<DataSize>
-RateControlSettings::CongestionWindowInitialDataWindow() const {
+std::optional<DataSize> RateControlSettings::CongestionWindowInitialDataWindow()
+    const {
   return congestion_window_config_.initial_data_window;
 }
 
-absl::optional<double> RateControlSettings::GetPacingFactor() const {
+std::optional<double> RateControlSettings::GetPacingFactor() const {
   return video_config_.pacing_factor;
 }
 
@@ -140,18 +121,18 @@ bool RateControlSettings::UseAlrProbing() const {
   return video_config_.alr_probing;
 }
 
-absl::optional<int> RateControlSettings::LibvpxVp8QpMax() const {
+std::optional<int> RateControlSettings::LibvpxVp8QpMax() const {
   if (video_config_.vp8_qp_max &&
       (*video_config_.vp8_qp_max < 0 || *video_config_.vp8_qp_max > 63)) {
     RTC_LOG(LS_WARNING) << "Unsupported vp8_qp_max_ value, ignored.";
-    return absl::nullopt;
+    return std::nullopt;
   }
   return video_config_.vp8_qp_max;
 }
 
-absl::optional<int> RateControlSettings::LibvpxVp8MinPixels() const {
+std::optional<int> RateControlSettings::LibvpxVp8MinPixels() const {
   if (video_config_.vp8_min_pixels && *video_config_.vp8_min_pixels < 1) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return video_config_.vp8_min_pixels;
 }

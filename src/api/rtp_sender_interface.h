@@ -14,14 +14,18 @@
 #ifndef API_RTP_SENDER_INTERFACE_H_
 #define API_RTP_SENDER_INTERFACE_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
 #include "api/crypto/frame_encryptor_interface.h"
 #include "api/dtls_transport_interface.h"
 #include "api/dtmf_sender_interface.h"
+#include "api/encoded_audio_frame_injector_interface.h"
+#include "api/encoded_video_frame_injector_interface.h"
 #include "api/frame_transformer_interface.h"
 #include "api/media_stream_interface.h"
 #include "api/media_types.h"
@@ -29,33 +33,46 @@
 #include "api/rtc_error.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
+#include "api/sframe/sframe_encryptor_interface.h"
 #include "api/video_codecs/video_encoder_factory.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
+class RtpSenderObserverInterface {
+ public:
+  // The observer is called when the first media packet is sent for the observed
+  // sender. It is called immediately if the first packet was already sent.
+  virtual void OnFirstPacketSent(MediaType media_type) = 0;
+
+ protected:
+  virtual ~RtpSenderObserverInterface() {}
+};
+
 using SetParametersCallback = absl::AnyInvocable<void(RTCError) &&>;
 
-class RTC_EXPORT RtpSenderInterface : public webrtc::RefCountInterface {
+class RTC_EXPORT RtpSenderInterface : public RefCountInterface,
+                                      public FrameTransformerHost {
  public:
   // Returns true if successful in setting the track.
   // Fails if an audio track is set on a video RtpSender, or vice-versa.
   virtual bool SetTrack(MediaStreamTrackInterface* track) = 0;
-  virtual rtc::scoped_refptr<MediaStreamTrackInterface> track() const = 0;
+  virtual scoped_refptr<MediaStreamTrackInterface> track() const = 0;
 
   // The dtlsTransport attribute exposes the DTLS transport on which the
   // media is sent. It may be null.
   // https://w3c.github.io/webrtc-pc/#dom-rtcrtpsender-transport
-  virtual rtc::scoped_refptr<DtlsTransportInterface> dtls_transport() const = 0;
+  virtual scoped_refptr<DtlsTransportInterface> dtls_transport() const = 0;
 
   // Returns primary SSRC used by this sender for sending media.
   // Returns 0 if not yet determined.
-  // TODO(deadbeef): Change to absl::optional.
+  // TODO(deadbeef): Change to std::optional.
   // TODO(deadbeef): Remove? With GetParameters this should be redundant.
   virtual uint32_t ssrc() const = 0;
 
   // Audio or video sender?
-  virtual cricket::MediaType media_type() const = 0;
+  virtual MediaType media_type() const = 0;
 
   // Not to be confused with "mid", this is a field we can temporarily use
   // to uniquely identify a receiver until we implement Unified Plan SDP.
@@ -85,29 +102,98 @@ class RTC_EXPORT RtpSenderInterface : public webrtc::RefCountInterface {
   virtual void SetParametersAsync(const RtpParameters& parameters,
                                   SetParametersCallback callback);
 
+  // Sets an observer which gets a callback when the first media packet is sent
+  // for this sender.
+  // Does not take ownership of observer.
+  // Must call SetObserver(nullptr) before the observer is destroyed.
+  virtual void SetObserver(RtpSenderObserverInterface* /* observer */) {}
+
   // Returns null for a video sender.
-  virtual rtc::scoped_refptr<DtmfSenderInterface> GetDtmfSender() const = 0;
+  virtual scoped_refptr<DtmfSenderInterface> GetDtmfSender() const = 0;
 
   // Sets a user defined frame encryptor that will encrypt the entire frame
   // before it is sent across the network. This will encrypt the entire frame
   // using the user provided encryption mechanism regardless of whether SRTP is
   // enabled or not.
   virtual void SetFrameEncryptor(
-      rtc::scoped_refptr<FrameEncryptorInterface> frame_encryptor) = 0;
+      scoped_refptr<FrameEncryptorInterface> frame_encryptor) = 0;
 
   // Returns a pointer to the frame encryptor set previously by the
   // user. This can be used to update the state of the object.
-  virtual rtc::scoped_refptr<FrameEncryptorInterface> GetFrameEncryptor()
-      const = 0;
+  virtual scoped_refptr<FrameEncryptorInterface> GetFrameEncryptor() const = 0;
 
-  virtual void SetEncoderToPacketizerFrameTransformer(
-      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer) = 0;
+  [[deprecated("Use SetFrameTransformer")]] virtual void
+  SetEncoderToPacketizerFrameTransformer(
+      scoped_refptr<FrameTransformerInterface> frame_transformer) {
+    SetFrameTransformer(std::move(frame_transformer));
+  }
 
   // Sets a user defined encoder selector.
   // Overrides selector that is (optionally) provided by VideoEncoderFactory.
+  [[deprecated(
+      "Use SetEncoderSelector with Ref Counted EncoderSelectorInterface")]]
   virtual void SetEncoderSelector(
       std::unique_ptr<VideoEncoderFactory::EncoderSelectorInterface>
-          encoder_selector) = 0;
+          encoder_selector) {
+    SetEncoderSelector(
+        scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>(
+            encoder_selector.release()));
+  }
+
+  virtual void SetEncoderSelector(
+      scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>
+          encoder_selector) {
+    RTC_DCHECK_NOTREACHED();
+  }
+
+  // Default implementation of SetFrameTransformer.
+  // TODO: bugs.webrtc.org/15929 - remove when all implementations are good
+  void SetFrameTransformer(scoped_refptr<FrameTransformerInterface>
+                           /* frame_transformer */) override {}
+
+  // Creates an internal Sframe encrypter and returns a handle for key
+  // management.
+  // Default implementation of CreateSframeEncryptorOrError.
+  // TODO: bugs.webrtc.org/479862368 - remove when all implementations are
+  // updated
+  virtual RTCErrorOr<scoped_refptr<SframeEncryptorInterface>>
+  CreateSframeEncryptorOrError(const SframeEncryptorInit& options) {
+    RTC_DCHECK_NOTREACHED();
+    return RTCError();
+  }
+
+  // TODO(crbug.com/1354101): make pure virtual again after Chrome roll.
+  virtual RTCError GenerateKeyFrame(const std::vector<std::string>& rids) {
+    return RTCError::OK();
+  }
+
+  // Creates and returns an injector that allows encoded video frames to
+  // be sent on this sender.
+  //
+  // `keyframe_callback`: Callback invoked when a keyframe is requested.
+  // `bitrate_callback`: Callback invoked when the bitrate allocated is updated.
+  //
+  // Returns nullptr if creation fails (e.g. if the sender is stopped, has a
+  // track attached, is not a video sender, or if an injector is already
+  // active).
+  virtual scoped_refptr<EncodedVideoFrameInjectorInterface>
+  CreateEncodedVideoFrameInjector(KeyFrameCallback keyframe_callback,
+                                  BitrateInfoCallback bitrate_callback) {
+    return nullptr;
+  }
+
+  // Creates and returns an injector that allows encoded audio frames to
+  // be sent on this sender.
+  //
+  // `bitrate_callback`: Callback invoked when the target bitrate is updated.
+  //
+  // Returns nullptr if creation fails (e.g. if the sender is stopped, has a
+  // track attached, is not an audio sender, or if an injector is already
+  // active).
+  virtual scoped_refptr<EncodedAudioFrameInjectorInterface>
+  CreateEncodedAudioFrameInjector(TargetBitrateCallback bitrate_callback) {
+    return nullptr;
+  }
 
  protected:
   ~RtpSenderInterface() override = default;

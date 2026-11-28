@@ -11,29 +11,35 @@
 #ifndef CALL_RAMPUP_TESTS_H_
 #define CALL_RAMPUP_TESTS_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
-#include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/rtc_event_log/rtc_event_log.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/test/metrics/metric.h"
 #include "api/test/simulated_network.h"
+#include "api/transport/bitrate_settings.h"
+#include "call/audio_receive_stream.h"
+#include "call/audio_send_stream.h"
 #include "call/call.h"
-#include "call/simulated_network.h"
-#include "rtc_base/event.h"
+#include "call/flexfec_receive_stream.h"
+#include "call/video_receive_stream.h"
+#include "call/video_send_stream.h"
 #include "rtc_base/task_utils/repeating_task.h"
 #include "test/call_test.h"
+#include "test/rtp_rtcp_observer.h"
+#include "video/config/video_encoder_config.h"
 
 namespace webrtc {
 
-static const int kTransmissionTimeOffsetExtensionId = 6;
-static const int kAbsSendTimeExtensionId = 7;
-static const int kTransportSequenceNumberExtensionId = 8;
-static const unsigned int kSingleStreamTargetBps = 1000000;
+constexpr RtpHeaderExtensionId kTransmissionTimeOffsetExtensionId(6);
+constexpr RtpHeaderExtensionId kAbsSendTimeExtensionId(7);
+constexpr RtpHeaderExtensionId kTransportSequenceNumberExtensionId(8);
+constexpr unsigned int kSingleStreamTargetBps = 1000000;
 
 class Clock;
 

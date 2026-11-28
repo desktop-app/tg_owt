@@ -10,24 +10,26 @@
 
 #include "pc/sctp_utils.h"
 
-#include <stdint.h>
-
+#include <cstdint>
 #include <limits>
+#include <optional>
+#include <string>
 
-#include "absl/types/optional.h"
+#include "absl/strings/string_view.h"
 #include "api/priority.h"
-#include "media/sctp/sctp_transport_internal.h"
+#include "api/sctp_transport_interface.h"
 #include "rtc_base/byte_buffer.h"
 #include "rtc_base/copy_on_write_buffer.h"
 #include "test/gtest.h"
 
-using webrtc::StreamId;
+namespace webrtc {
+namespace {
 
 class SctpUtilsTest : public ::testing::Test {
  public:
-  void VerifyOpenMessageFormat(const rtc::CopyOnWriteBuffer& packet,
+  void VerifyOpenMessageFormat(const CopyOnWriteBuffer& packet,
                                const std::string& label,
-                               const webrtc::DataChannelInit& config) {
+                               const DataChannelInit& config) {
     uint8_t message_type;
     uint8_t channel_type;
     uint32_t reliability;
@@ -35,7 +37,7 @@ class SctpUtilsTest : public ::testing::Test {
     uint16_t label_length;
     uint16_t protocol_length;
 
-    rtc::ByteBufferReader buffer(packet);
+    ByteBufferReader buffer(packet);
     ASSERT_TRUE(buffer.ReadUInt8(&message_type));
     EXPECT_EQ(0x03, message_type);
 
@@ -55,9 +57,9 @@ class SctpUtilsTest : public ::testing::Test {
     if (config.priority) {
       // Exact values are checked by round-trip conversion, but
       // all values defined are greater than zero.
-      EXPECT_GT(priority, 0);
+      EXPECT_EQ(priority, config.priority->value());
     } else {
-      EXPECT_EQ(priority, 0);
+      EXPECT_EQ(priority, PriorityValue(Priority::kLow).value());
     }
 
     ASSERT_TRUE(buffer.ReadUInt32(&reliability));
@@ -82,19 +84,19 @@ class SctpUtilsTest : public ::testing::Test {
 };
 
 TEST_F(SctpUtilsTest, WriteParseOpenMessageWithOrderedReliable) {
-  webrtc::DataChannelInit config;
+  DataChannelInit config;
   std::string label = "abc";
   config.protocol = "y";
 
-  rtc::CopyOnWriteBuffer packet;
-  ASSERT_TRUE(webrtc::WriteDataChannelOpenMessage(label, config, &packet));
+  CopyOnWriteBuffer packet;
+  ASSERT_TRUE(WriteDataChannelOpenMessage(label, config, &packet));
 
   VerifyOpenMessageFormat(packet, label, config);
 
   std::string output_label;
-  webrtc::DataChannelInit output_config;
-  ASSERT_TRUE(webrtc::ParseDataChannelOpenMessage(packet, &output_label,
-                                                  &output_config));
+  DataChannelInit output_config;
+  ASSERT_TRUE(
+      ParseDataChannelOpenMessage(packet, &output_label, &output_config));
 
   EXPECT_EQ(label, output_label);
   EXPECT_EQ(config.protocol, output_config.protocol);
@@ -104,21 +106,21 @@ TEST_F(SctpUtilsTest, WriteParseOpenMessageWithOrderedReliable) {
 }
 
 TEST_F(SctpUtilsTest, WriteParseOpenMessageWithMaxRetransmitTime) {
-  webrtc::DataChannelInit config;
+  DataChannelInit config;
   std::string label = "abc";
   config.ordered = false;
   config.maxRetransmitTime = 10;
   config.protocol = "y";
 
-  rtc::CopyOnWriteBuffer packet;
-  ASSERT_TRUE(webrtc::WriteDataChannelOpenMessage(label, config, &packet));
+  CopyOnWriteBuffer packet;
+  ASSERT_TRUE(WriteDataChannelOpenMessage(label, config, &packet));
 
   VerifyOpenMessageFormat(packet, label, config);
 
   std::string output_label;
-  webrtc::DataChannelInit output_config;
-  ASSERT_TRUE(webrtc::ParseDataChannelOpenMessage(packet, &output_label,
-                                                  &output_config));
+  DataChannelInit output_config;
+  ASSERT_TRUE(
+      ParseDataChannelOpenMessage(packet, &output_label, &output_config));
 
   EXPECT_EQ(label, output_label);
   EXPECT_EQ(config.protocol, output_config.protocol);
@@ -128,20 +130,20 @@ TEST_F(SctpUtilsTest, WriteParseOpenMessageWithMaxRetransmitTime) {
 }
 
 TEST_F(SctpUtilsTest, WriteParseOpenMessageWithMaxRetransmits) {
-  webrtc::DataChannelInit config;
+  DataChannelInit config;
   std::string label = "abc";
   config.maxRetransmits = 10;
   config.protocol = "y";
 
-  rtc::CopyOnWriteBuffer packet;
-  ASSERT_TRUE(webrtc::WriteDataChannelOpenMessage(label, config, &packet));
+  CopyOnWriteBuffer packet;
+  ASSERT_TRUE(WriteDataChannelOpenMessage(label, config, &packet));
 
   VerifyOpenMessageFormat(packet, label, config);
 
   std::string output_label;
-  webrtc::DataChannelInit output_config;
-  ASSERT_TRUE(webrtc::ParseDataChannelOpenMessage(packet, &output_label,
-                                                  &output_config));
+  DataChannelInit output_config;
+  ASSERT_TRUE(
+      ParseDataChannelOpenMessage(packet, &output_label, &output_config));
 
   EXPECT_EQ(label, output_label);
   EXPECT_EQ(config.protocol, output_config.protocol);
@@ -151,20 +153,20 @@ TEST_F(SctpUtilsTest, WriteParseOpenMessageWithMaxRetransmits) {
 }
 
 TEST_F(SctpUtilsTest, WriteParseOpenMessageWithPriority) {
-  webrtc::DataChannelInit config;
+  DataChannelInit config;
   std::string label = "abc";
   config.protocol = "y";
-  config.priority = webrtc::Priority::kVeryLow;
+  config.priority = PriorityValue(Priority::kVeryLow);
 
-  rtc::CopyOnWriteBuffer packet;
-  ASSERT_TRUE(webrtc::WriteDataChannelOpenMessage(label, config, &packet));
+  CopyOnWriteBuffer packet;
+  ASSERT_TRUE(WriteDataChannelOpenMessage(label, config, &packet));
 
   VerifyOpenMessageFormat(packet, label, config);
 
   std::string output_label;
-  webrtc::DataChannelInit output_config;
-  ASSERT_TRUE(webrtc::ParseDataChannelOpenMessage(packet, &output_label,
-                                                  &output_config));
+  DataChannelInit output_config;
+  ASSERT_TRUE(
+      ParseDataChannelOpenMessage(packet, &output_label, &output_config));
 
   EXPECT_EQ(label, output_label);
   ASSERT_TRUE(output_config.priority);
@@ -172,71 +174,42 @@ TEST_F(SctpUtilsTest, WriteParseOpenMessageWithPriority) {
 }
 
 TEST_F(SctpUtilsTest, WriteParseAckMessage) {
-  rtc::CopyOnWriteBuffer packet;
-  webrtc::WriteDataChannelOpenAckMessage(&packet);
+  CopyOnWriteBuffer packet;
+  WriteDataChannelOpenAckMessage(&packet);
 
   uint8_t message_type;
-  rtc::ByteBufferReader buffer(packet);
+  ByteBufferReader buffer(packet);
   ASSERT_TRUE(buffer.ReadUInt8(&message_type));
   EXPECT_EQ(0x02, message_type);
 
-  EXPECT_TRUE(webrtc::ParseDataChannelOpenAckMessage(packet));
+  EXPECT_TRUE(ParseDataChannelOpenAckMessage(packet));
 }
 
 TEST_F(SctpUtilsTest, TestIsOpenMessage) {
-  rtc::CopyOnWriteBuffer open(1);
+  CopyOnWriteBuffer open(1);
   open.MutableData()[0] = 0x03;
-  EXPECT_TRUE(webrtc::IsOpenMessage(open));
+  EXPECT_TRUE(IsOpenMessage(open));
 
-  rtc::CopyOnWriteBuffer openAck(1);
+  CopyOnWriteBuffer openAck(1);
   openAck.MutableData()[0] = 0x02;
-  EXPECT_FALSE(webrtc::IsOpenMessage(openAck));
+  EXPECT_FALSE(IsOpenMessage(openAck));
 
-  rtc::CopyOnWriteBuffer invalid(1);
+  CopyOnWriteBuffer invalid(1);
   invalid.MutableData()[0] = 0x01;
-  EXPECT_FALSE(webrtc::IsOpenMessage(invalid));
+  EXPECT_FALSE(IsOpenMessage(invalid));
 
-  rtc::CopyOnWriteBuffer empty;
-  EXPECT_FALSE(webrtc::IsOpenMessage(empty));
+  CopyOnWriteBuffer empty;
+  EXPECT_FALSE(IsOpenMessage(empty));
 }
 
 TEST(SctpSidTest, Basics) {
   // These static asserts are mostly here to aid with readability (i.e. knowing
   // what these constants represent).
-  static_assert(cricket::kMinSctpSid == 0, "Min stream id should be 0");
-  static_assert(cricket::kMaxSctpSid <= cricket::kSpecMaxSctpSid, "");
-  static_assert(
-      cricket::kSpecMaxSctpSid == std::numeric_limits<uint16_t>::max(),
-      "Max legal sctp stream value should be 0xffff");
-
-  // cricket::kMaxSctpSid is a chosen value in the webrtc implementation,
-  // the highest generated `sid` value chosen for resource reservation reasons.
-  // It's one less than kMaxSctpStreams (1024) or 1023 since sid values are
-  // zero based.
-
-  EXPECT_TRUE(!StreamId(-1).HasValue());
-  EXPECT_TRUE(!StreamId(-2).HasValue());
-  EXPECT_TRUE(StreamId(cricket::kMinSctpSid).HasValue());
-  EXPECT_TRUE(StreamId(cricket::kMinSctpSid + 1).HasValue());
-  EXPECT_TRUE(StreamId(cricket::kSpecMaxSctpSid).HasValue());
-  EXPECT_TRUE(StreamId(cricket::kMaxSctpSid).HasValue());
-
-  // Two illegal values are equal (both not valid).
-  EXPECT_EQ(StreamId(-1), StreamId(-2));
-  // Two different, but legal, values, are not equal.
-  EXPECT_NE(StreamId(1), StreamId(2));
-  // Test operator<() for container compatibility.
-  EXPECT_LT(StreamId(1), StreamId(2));
-
-  // Test assignment, value() and reset().
-  StreamId sid1;
-  StreamId sid2(cricket::kMaxSctpSid);
-  EXPECT_NE(sid1, sid2);
-  sid1 = sid2;
-  EXPECT_EQ(sid1, sid2);
-
-  EXPECT_EQ(sid1.stream_id_int(), cricket::kMaxSctpSid);
-  EXPECT_TRUE(sid1.HasValue());
-  sid1.reset();
-  EXPECT_FALSE(sid1.HasValue());
+  static_assert(kMinSctpSid == 0, "Min stream id should be 0");
+  static_assert(kMaxSctpSid <= kSpecMaxSctpSid, "");
+  static_assert(kSpecMaxSctpSid == std::numeric_limits<uint16_t>::max(),
+                "Max legal sctp stream value should be 0xffff");
 }
+
+}  // namespace
+}  // namespace webrtc

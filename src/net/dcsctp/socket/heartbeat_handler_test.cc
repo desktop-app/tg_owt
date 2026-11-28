@@ -9,19 +9,26 @@
  */
 #include "net/dcsctp/socket/heartbeat_handler.h"
 
-#include <memory>
+#include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "api/task_queue/task_queue_base.h"
+#include "api/units/time_delta.h"
 #include "net/dcsctp/packet/chunk/heartbeat_ack_chunk.h"
 #include "net/dcsctp/packet/chunk/heartbeat_request_chunk.h"
 #include "net/dcsctp/packet/parameter/heartbeat_info_parameter.h"
+#include "net/dcsctp/packet/parameter/parameter.h"
+#include "net/dcsctp/packet/sctp_packet.h"
+#include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/types.h"
 #include "net/dcsctp/socket/mock_context.h"
+#include "net/dcsctp/socket/mock_dcsctp_socket_callbacks.h"
 #include "net/dcsctp/testing/testing_macros.h"
-#include "rtc_base/gunit.h"
+#include "net/dcsctp/timer/timer.h"
 #include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace dcsctp {
 namespace {
@@ -56,7 +63,7 @@ class HeartbeatHandlerTestBase : public testing::Test {
   void AdvanceTime(webrtc::TimeDelta duration) {
     callbacks_.AdvanceTime(duration);
     for (;;) {
-      absl::optional<TimeoutID> timeout_id = callbacks_.GetNextExpiredTimeout();
+      std::optional<TimeoutID> timeout_id = callbacks_.GetNextExpiredTimeout();
       if (!timeout_id.has_value()) {
         break;
       }

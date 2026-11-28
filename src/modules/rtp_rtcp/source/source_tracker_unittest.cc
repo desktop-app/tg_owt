@@ -10,18 +10,23 @@
 
 #include "modules/rtp_rtcp/source/source_tracker.h"
 
-#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <list>
+#include <optional>
 #include <random>
 #include <set>
 #include <tuple>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/rtp_headers.h"
 #include "api/rtp_packet_info.h"
 #include "api/rtp_packet_infos.h"
+#include "api/transport/rtp/rtp_source.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/ntp_time.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -50,8 +55,10 @@ class ExpectedSourceTracker {
 
     for (const auto& packet_info : packet_infos) {
       RtpSource::Extensions extensions = {
-          packet_info.audio_level(), packet_info.absolute_capture_time(),
-          packet_info.local_capture_clock_offset()};
+          .audio_level = packet_info.audio_level(),
+          .absolute_capture_time = packet_info.absolute_capture_time(),
+          .local_capture_clock_offset =
+              packet_info.local_capture_clock_offset()};
 
       for (const auto& csrc : packet_info.csrcs()) {
         entries_.emplace_front(now, csrc, RtpSourceType::CSRC,
@@ -167,9 +174,9 @@ class SourceTrackerRandomTest
     return std::uniform_int_distribution<uint32_t>()(generator_);
   }
 
-  absl::optional<uint8_t> GenerateAudioLevel() {
+  std::optional<uint8_t> GenerateAudioLevel() {
     if (std::bernoulli_distribution(0.25)(generator_)) {
-      return absl::nullopt;
+      return std::nullopt;
     }
 
     // Workaround for std::uniform_int_distribution<uint8_t> not being allowed.
@@ -177,9 +184,9 @@ class SourceTrackerRandomTest
         std::uniform_int_distribution<uint16_t>()(generator_));
   }
 
-  absl::optional<AbsoluteCaptureTime> GenerateAbsoluteCaptureTime() {
+  std::optional<AbsoluteCaptureTime> GenerateAbsoluteCaptureTime() {
     if (std::bernoulli_distribution(0.25)(generator_)) {
-      return absl::nullopt;
+      return std::nullopt;
     }
 
     AbsoluteCaptureTime value;
@@ -188,7 +195,7 @@ class SourceTrackerRandomTest
         std::uniform_int_distribution<uint64_t>()(generator_);
 
     if (std::bernoulli_distribution(0.5)(generator_)) {
-      value.estimated_capture_clock_offset = absl::nullopt;
+      value.estimated_capture_clock_offset = std::nullopt;
     } else {
       value.estimated_capture_clock_offset =
           std::uniform_int_distribution<int64_t>()(generator_);
@@ -197,9 +204,9 @@ class SourceTrackerRandomTest
     return value;
   }
 
-  absl::optional<TimeDelta> GenerateLocalCaptureClockOffset() {
+  std::optional<TimeDelta> GenerateLocalCaptureClockOffset() {
     if (std::bernoulli_distribution(0.5)(generator_)) {
-      return absl::nullopt;
+      return std::nullopt;
     }
     return TimeDelta::Millis(
         UQ32x32ToInt64Ms(std::uniform_int_distribution<int64_t>()(generator_)));
@@ -263,12 +270,12 @@ TEST(SourceTrackerTest, OnFrameDeliveredRecordsSourcesDistinctSsrcs) {
   constexpr uint32_t kCsrcs2 = 22;
   constexpr uint32_t kRtpTimestamp0 = 40;
   constexpr uint32_t kRtpTimestamp1 = 50;
-  constexpr absl::optional<uint8_t> kAudioLevel0 = 50;
-  constexpr absl::optional<uint8_t> kAudioLevel1 = 20;
-  constexpr absl::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime =
-      AbsoluteCaptureTime{/*absolute_capture_timestamp=*/12,
-                          /*estimated_capture_clock_offset=*/absl::nullopt};
-  constexpr absl::optional<TimeDelta> kLocalCaptureClockOffset = absl::nullopt;
+  constexpr std::optional<uint8_t> kAudioLevel0 = 50;
+  constexpr std::optional<uint8_t> kAudioLevel1 = 20;
+  constexpr std::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime =
+      AbsoluteCaptureTime{.absolute_capture_timestamp = 12,
+                          .estimated_capture_clock_offset = std::nullopt};
+  constexpr std::optional<TimeDelta> kLocalCaptureClockOffset = std::nullopt;
   constexpr Timestamp kReceiveTime0 = Timestamp::Millis(60);
   constexpr Timestamp kReceiveTime1 = Timestamp::Millis(70);
 
@@ -318,13 +325,13 @@ TEST(SourceTrackerTest, OnFrameDeliveredRecordsSourcesSameSsrc) {
   constexpr uint32_t kRtpTimestamp0 = 40;
   constexpr uint32_t kRtpTimestamp1 = 45;
   constexpr uint32_t kRtpTimestamp2 = 50;
-  constexpr absl::optional<uint8_t> kAudioLevel0 = 50;
-  constexpr absl::optional<uint8_t> kAudioLevel1 = 20;
-  constexpr absl::optional<uint8_t> kAudioLevel2 = 10;
-  constexpr absl::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime =
-      AbsoluteCaptureTime{/*absolute_capture_timestamp=*/12,
-                          /*estimated_capture_clock_offset=*/absl::nullopt};
-  constexpr absl::optional<TimeDelta> kLocalCaptureClockOffset = absl::nullopt;
+  constexpr std::optional<uint8_t> kAudioLevel0 = 50;
+  constexpr std::optional<uint8_t> kAudioLevel1 = 20;
+  constexpr std::optional<uint8_t> kAudioLevel2 = 10;
+  constexpr std::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime =
+      AbsoluteCaptureTime{.absolute_capture_timestamp = 12,
+                          .estimated_capture_clock_offset = std::nullopt};
+  constexpr std::optional<TimeDelta> kLocalCaptureClockOffset = std::nullopt;
   constexpr Timestamp kReceiveTime0 = Timestamp::Millis(60);
   constexpr Timestamp kReceiveTime1 = Timestamp::Millis(70);
   constexpr Timestamp kReceiveTime2 = Timestamp::Millis(80);
@@ -382,20 +389,23 @@ TEST(SourceTrackerTest, OnFrameDeliveredUpdatesSources) {
   constexpr uint32_t kRtpTimestamp0 = 40;
   constexpr uint32_t kRtpTimestamp1 = 41;
   constexpr uint32_t kRtpTimestamp2 = 42;
-  constexpr absl::optional<uint8_t> kAudioLevel0 = 50;
-  constexpr absl::optional<uint8_t> kAudioLevel1 = absl::nullopt;
-  constexpr absl::optional<uint8_t> kAudioLevel2 = 10;
-  constexpr absl::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime0 =
-      AbsoluteCaptureTime{12, 34};
-  constexpr absl::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime1 =
-      AbsoluteCaptureTime{56, 78};
-  constexpr absl::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime2 =
-      AbsoluteCaptureTime{89, 90};
-  constexpr absl::optional<TimeDelta> kLocalCaptureClockOffset0 =
+  constexpr std::optional<uint8_t> kAudioLevel0 = 50;
+  constexpr std::optional<uint8_t> kAudioLevel1 = std::nullopt;
+  constexpr std::optional<uint8_t> kAudioLevel2 = 10;
+  constexpr std::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime0 =
+      AbsoluteCaptureTime{.absolute_capture_timestamp = 12,
+                          .estimated_capture_clock_offset = 34};
+  constexpr std::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime1 =
+      AbsoluteCaptureTime{.absolute_capture_timestamp = 56,
+                          .estimated_capture_clock_offset = 78};
+  constexpr std::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime2 =
+      AbsoluteCaptureTime{.absolute_capture_timestamp = 89,
+                          .estimated_capture_clock_offset = 90};
+  constexpr std::optional<TimeDelta> kLocalCaptureClockOffset0 =
       TimeDelta::Millis(123);
-  constexpr absl::optional<TimeDelta> kLocalCaptureClockOffset1 =
+  constexpr std::optional<TimeDelta> kLocalCaptureClockOffset1 =
       TimeDelta::Millis(456);
-  constexpr absl::optional<TimeDelta> kLocalCaptureClockOffset2 =
+  constexpr std::optional<TimeDelta> kLocalCaptureClockOffset2 =
       TimeDelta::Millis(789);
   constexpr Timestamp kReceiveTime0 = Timestamp::Millis(60);
   constexpr Timestamp kReceiveTime1 = Timestamp::Millis(61);
@@ -480,6 +490,66 @@ TEST(SourceTrackerTest, OnFrameDeliveredUpdatesSources) {
                                     kRtpTimestamp0, extensions0)));
 }
 
+TEST(SourceTrackerTest, SourceChangedDetected) {
+  constexpr uint32_t kSsrc1 = 10;
+  constexpr uint32_t kSsrc2 = 11;
+  constexpr uint32_t kCsrc1 = 21;
+  constexpr uint32_t kCsrc2 = 22;
+  // Timestamps are not important in this test (as long as delivery time is not
+  // older than 10 seconds). Whatever frame was last delivered has by definition
+  // the "latest" SSRC/CSRC information.
+  constexpr uint32_t kRtpTimestamp = 123;
+  constexpr Timestamp kReceiveTime = Timestamp::Millis(321);
+
+  SimulatedClock clock(Timestamp::Seconds(1000));
+  SourceTracker tracker(&clock);
+
+  EXPECT_FALSE(tracker.has_delivered_frame());
+  EXPECT_FALSE(tracker.last_frame_has_csrcs());
+
+  // First packet always reports SSRC change.
+  SourceTracker::SourceChanged changed = tracker.OnFrameDelivered(
+      RtpPacketInfos({RtpPacketInfo(kSsrc1, {}, kRtpTimestamp, kReceiveTime)}));
+  EXPECT_TRUE(changed.ssrc_changed);
+  EXPECT_FALSE(changed.csrc_changed);
+  EXPECT_TRUE(tracker.has_delivered_frame());
+  EXPECT_FALSE(tracker.last_frame_has_csrcs());
+
+  // Change SSRC and add CSRC in the same frame.
+  changed = tracker.OnFrameDelivered(RtpPacketInfos(
+      {RtpPacketInfo(kSsrc2, {kCsrc1}, kRtpTimestamp, kReceiveTime)}));
+  EXPECT_TRUE(changed.ssrc_changed);
+  EXPECT_TRUE(changed.csrc_changed);
+  EXPECT_TRUE(tracker.has_delivered_frame());
+  EXPECT_TRUE(tracker.last_frame_has_csrcs());
+
+  // Change CSRC list.
+  changed = tracker.OnFrameDelivered(RtpPacketInfos(
+      {RtpPacketInfo(kSsrc2, {kCsrc1, kCsrc2}, kRtpTimestamp, kReceiveTime)}));
+  EXPECT_FALSE(changed.ssrc_changed);
+  EXPECT_TRUE(changed.csrc_changed);
+
+  // Receive same SSRC/CSRC information as before and neither changes.
+  changed = tracker.OnFrameDelivered(RtpPacketInfos(
+      {RtpPacketInfo(kSsrc2, {kCsrc1, kCsrc2}, kRtpTimestamp, kReceiveTime)}));
+  EXPECT_FALSE(changed.ssrc_changed);
+  EXPECT_FALSE(changed.csrc_changed);
+
+  // Multi-packet frame carrying identical CSRCs across fragments does not
+  // trigger change.
+  changed = tracker.OnFrameDelivered(RtpPacketInfos(
+      {RtpPacketInfo(kSsrc2, {kCsrc1, kCsrc2}, kRtpTimestamp, kReceiveTime),
+       RtpPacketInfo(kSsrc2, {kCsrc1, kCsrc2}, kRtpTimestamp, kReceiveTime)}));
+  EXPECT_FALSE(changed.ssrc_changed);
+  EXPECT_FALSE(changed.csrc_changed);
+
+  // Same CSRCs in different packet order does not trigger change.
+  changed = tracker.OnFrameDelivered(RtpPacketInfos(
+      {RtpPacketInfo(kSsrc2, {kCsrc2, kCsrc1}, kRtpTimestamp, kReceiveTime)}));
+  EXPECT_FALSE(changed.ssrc_changed);
+  EXPECT_FALSE(changed.csrc_changed);
+}
+
 TEST(SourceTrackerTest, TimedOutSourcesAreRemoved) {
   constexpr uint32_t kSsrc = 10;
   constexpr uint32_t kCsrcs0 = 20;
@@ -487,15 +557,17 @@ TEST(SourceTrackerTest, TimedOutSourcesAreRemoved) {
   constexpr uint32_t kCsrcs2 = 22;
   constexpr uint32_t kRtpTimestamp0 = 40;
   constexpr uint32_t kRtpTimestamp1 = 41;
-  constexpr absl::optional<uint8_t> kAudioLevel0 = 50;
-  constexpr absl::optional<uint8_t> kAudioLevel1 = absl::nullopt;
-  constexpr absl::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime0 =
-      AbsoluteCaptureTime{12, 34};
-  constexpr absl::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime1 =
-      AbsoluteCaptureTime{56, 78};
-  constexpr absl::optional<TimeDelta> kLocalCaptureClockOffset0 =
+  constexpr std::optional<uint8_t> kAudioLevel0 = 50;
+  constexpr std::optional<uint8_t> kAudioLevel1 = std::nullopt;
+  constexpr std::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime0 =
+      AbsoluteCaptureTime{.absolute_capture_timestamp = 12,
+                          .estimated_capture_clock_offset = 34};
+  constexpr std::optional<AbsoluteCaptureTime> kAbsoluteCaptureTime1 =
+      AbsoluteCaptureTime{.absolute_capture_timestamp = 56,
+                          .estimated_capture_clock_offset = 78};
+  constexpr std::optional<TimeDelta> kLocalCaptureClockOffset0 =
       TimeDelta::Millis(123);
-  constexpr absl::optional<TimeDelta> kLocalCaptureClockOffset1 =
+  constexpr std::optional<TimeDelta> kLocalCaptureClockOffset1 =
       TimeDelta::Millis(456);
   constexpr Timestamp kReceiveTime0 = Timestamp::Millis(60);
   constexpr Timestamp kReceiveTime1 = Timestamp::Millis(61);
@@ -533,6 +605,14 @@ TEST(SourceTrackerTest, TimedOutSourcesAreRemoved) {
                                     kRtpTimestamp1, extensions1),
                           RtpSource(timestamp_1, kCsrcs0, RtpSourceType::CSRC,
                                     kRtpTimestamp1, extensions1)));
+}
+
+TEST(SourceTrackerTest, AvoidNegativeTimestamp) {
+  SimulatedClock clock(Timestamp::Zero());
+  SourceTracker tracker(&clock);
+  tracker.OnFrameDelivered(RtpPacketInfos(
+      {RtpPacketInfo(/*ssrc=*/111, /*csrcs=*/{}, /*rtp_timestamp=*/0,
+                     /*receive_time=*/Timestamp::Zero())}));
 }
 
 }  // namespace webrtc

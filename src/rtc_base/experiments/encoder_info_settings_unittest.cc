@@ -10,61 +10,69 @@
 
 #include "rtc_base/experiments/encoder_info_settings.h"
 
-#include "rtc_base/gunit.h"
-#include "test/field_trial.h"
+#include <optional>
+#include <vector>
+
+#include "api/field_trials.h"
+#include "api/video_codecs/video_encoder.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
+
 TEST(SimulcastEncoderAdapterSettingsTest, NoValuesWithoutFieldTrial) {
-  SimulcastEncoderAdapterEncoderInfoSettings settings;
-  EXPECT_EQ(absl::nullopt, settings.requested_resolution_alignment());
+  FieldTrials field_trials = CreateTestFieldTrials("");
+
+  SimulcastEncoderAdapterEncoderInfoSettings settings(field_trials);
+  EXPECT_EQ(std::nullopt, settings.requested_resolution_alignment());
   EXPECT_FALSE(settings.apply_alignment_to_all_simulcast_layers());
   EXPECT_TRUE(settings.resolution_bitrate_limits().empty());
 }
 
 TEST(SimulcastEncoderAdapterSettingsTest, NoValueForInvalidAlignment) {
-  webrtc::test::ScopedFieldTrials field_trials(
+  FieldTrials field_trials = CreateTestFieldTrials(
       "WebRTC-SimulcastEncoderAdapter-GetEncoderInfoOverride/"
       "requested_resolution_alignment:0/");
 
-  SimulcastEncoderAdapterEncoderInfoSettings settings;
-  EXPECT_EQ(absl::nullopt, settings.requested_resolution_alignment());
+  SimulcastEncoderAdapterEncoderInfoSettings settings(field_trials);
+  EXPECT_EQ(std::nullopt, settings.requested_resolution_alignment());
 }
 
 TEST(SimulcastEncoderAdapterSettingsTest, GetResolutionAlignment) {
-  webrtc::test::ScopedFieldTrials field_trials(
+  FieldTrials field_trials = CreateTestFieldTrials(
       "WebRTC-SimulcastEncoderAdapter-GetEncoderInfoOverride/"
       "requested_resolution_alignment:2/");
 
-  SimulcastEncoderAdapterEncoderInfoSettings settings;
+  SimulcastEncoderAdapterEncoderInfoSettings settings(field_trials);
   EXPECT_EQ(2u, settings.requested_resolution_alignment());
   EXPECT_FALSE(settings.apply_alignment_to_all_simulcast_layers());
   EXPECT_TRUE(settings.resolution_bitrate_limits().empty());
 }
 
 TEST(SimulcastEncoderAdapterSettingsTest, GetApplyAlignment) {
-  webrtc::test::ScopedFieldTrials field_trials(
+  FieldTrials field_trials = CreateTestFieldTrials(
       "WebRTC-SimulcastEncoderAdapter-GetEncoderInfoOverride/"
       "requested_resolution_alignment:3,"
       "apply_alignment_to_all_simulcast_layers/");
 
-  SimulcastEncoderAdapterEncoderInfoSettings settings;
+  SimulcastEncoderAdapterEncoderInfoSettings settings(field_trials);
   EXPECT_EQ(3u, settings.requested_resolution_alignment());
   EXPECT_TRUE(settings.apply_alignment_to_all_simulcast_layers());
   EXPECT_TRUE(settings.resolution_bitrate_limits().empty());
 }
 
 TEST(SimulcastEncoderAdapterSettingsTest, GetResolutionBitrateLimits) {
-  webrtc::test::ScopedFieldTrials field_trials(
+  FieldTrials field_trials = CreateTestFieldTrials(
       "WebRTC-SimulcastEncoderAdapter-GetEncoderInfoOverride/"
       "frame_size_pixels:123,"
       "min_start_bitrate_bps:11000,"
       "min_bitrate_bps:44000,"
       "max_bitrate_bps:77000/");
 
-  SimulcastEncoderAdapterEncoderInfoSettings settings;
-  EXPECT_EQ(absl::nullopt, settings.requested_resolution_alignment());
+  SimulcastEncoderAdapterEncoderInfoSettings settings(field_trials);
+  EXPECT_EQ(std::nullopt, settings.requested_resolution_alignment());
   EXPECT_FALSE(settings.apply_alignment_to_all_simulcast_layers());
   EXPECT_THAT(settings.resolution_bitrate_limits(),
               ::testing::ElementsAre(VideoEncoder::ResolutionBitrateLimits{
@@ -72,14 +80,14 @@ TEST(SimulcastEncoderAdapterSettingsTest, GetResolutionBitrateLimits) {
 }
 
 TEST(SimulcastEncoderAdapterSettingsTest, GetResolutionBitrateLimitsWithList) {
-  webrtc::test::ScopedFieldTrials field_trials(
+  FieldTrials field_trials = CreateTestFieldTrials(
       "WebRTC-SimulcastEncoderAdapter-GetEncoderInfoOverride/"
       "frame_size_pixels:123|456|789,"
       "min_start_bitrate_bps:11000|22000|33000,"
       "min_bitrate_bps:44000|55000|66000,"
       "max_bitrate_bps:77000|88000|99000/");
 
-  SimulcastEncoderAdapterEncoderInfoSettings settings;
+  SimulcastEncoderAdapterEncoderInfoSettings settings(field_trials);
   EXPECT_THAT(
       settings.resolution_bitrate_limits(),
       ::testing::ElementsAre(
@@ -89,14 +97,59 @@ TEST(SimulcastEncoderAdapterSettingsTest, GetResolutionBitrateLimitsWithList) {
 }
 
 TEST(EncoderSettingsTest, CommonSettingsUsedIfEncoderNameUnspecified) {
-  webrtc::test::ScopedFieldTrials field_trials(
+  FieldTrials field_trials = CreateTestFieldTrials(
       "WebRTC-VP8-GetEncoderInfoOverride/requested_resolution_alignment:2/"
       "WebRTC-GetEncoderInfoOverride/requested_resolution_alignment:3/");
 
-  LibvpxVp8EncoderInfoSettings vp8_settings;
+  LibvpxVp8EncoderInfoSettings vp8_settings(field_trials);
   EXPECT_EQ(2u, vp8_settings.requested_resolution_alignment());
-  LibvpxVp9EncoderInfoSettings vp9_settings;
+  LibvpxVp9EncoderInfoSettings vp9_settings(field_trials);
   EXPECT_EQ(3u, vp9_settings.requested_resolution_alignment());
+}
+
+TEST(GetSinglecastBitrateLimitForResolutionWhenQpIsUntrustedTests,
+     LinearInterpolationUnderflow) {
+  std::optional<int> frame_size_pixels = 480 * 360;
+  std::vector<VideoEncoder::ResolutionBitrateLimits> resolution_bitrate_limits(
+      {{1280 * 720, 1500000, 30000, 2500000},
+       {1920 * 1080, 2500000, 30000, 4000000}});
+
+  const auto resolutionBitrateLimit = EncoderInfoSettings::
+      GetSinglecastBitrateLimitForResolutionWhenQpIsUntrusted(
+          frame_size_pixels, resolution_bitrate_limits);
+  EXPECT_TRUE(resolutionBitrateLimit.has_value());
+  EXPECT_EQ(resolutionBitrateLimit.value(), resolution_bitrate_limits.front());
+}
+
+TEST(GetSinglecastBitrateLimitForResolutionWhenQpIsUntrustedTests,
+     LinearInterpolationOverflow) {
+  std::optional<int> frame_size_pixels = 4096 * 2160;
+  std::vector<VideoEncoder::ResolutionBitrateLimits> resolution_bitrate_limits(
+      {{1280 * 720, 1500000, 30000, 2500000},
+       {1920 * 1080, 2500000, 30000, 4000000}});
+
+  const auto resolutionBitrateLimit = EncoderInfoSettings::
+      GetSinglecastBitrateLimitForResolutionWhenQpIsUntrusted(
+          frame_size_pixels, resolution_bitrate_limits);
+  EXPECT_TRUE(resolutionBitrateLimit.has_value());
+  EXPECT_EQ(resolutionBitrateLimit.value(), resolution_bitrate_limits.back());
+}
+
+TEST(GetSinglecastBitrateLimitForResolutionWhenQpIsUntrustedTests,
+     LinearInterpolationExactMatch) {
+  std::optional<int> frame_size_pixels = 1920 * 1080;
+  VideoEncoder::ResolutionBitrateLimits expected_match{1920 * 1080, 2500000,
+                                                       30000, 4000000};
+  std::vector<VideoEncoder::ResolutionBitrateLimits> resolution_bitrate_limits(
+      {{1280 * 720, 1500000, 30000, 2500000},
+       expected_match,
+       {4096 * 2160, 4000000, 30000, 8000000}});
+
+  const auto resolutionBitrateLimit = EncoderInfoSettings::
+      GetSinglecastBitrateLimitForResolutionWhenQpIsUntrusted(
+          frame_size_pixels, resolution_bitrate_limits);
+  EXPECT_TRUE(resolutionBitrateLimit.has_value());
+  EXPECT_EQ(resolutionBitrateLimit.value(), expected_match);
 }
 
 }  // namespace webrtc

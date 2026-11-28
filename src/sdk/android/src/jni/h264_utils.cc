@@ -8,20 +8,27 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <jni.h>
+
 #include "api/video_codecs/h264_profile_level_id.h"
 #include "sdk/android/generated_video_jni/H264Utils_jni.h"
-#include "sdk/android/src/jni/video_codec_info.h"
+#include "sdk/android/native_api/jni/java_types.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 namespace webrtc {
 namespace jni {
 
 static jboolean JNI_H264Utils_IsSameH264Profile(
     JNIEnv* env,
-    const JavaParamRef<jobject>& params1,
-    const JavaParamRef<jobject>& params2) {
-  return H264IsSameProfile(JavaToNativeStringMap(env, params1),
-                           JavaToNativeStringMap(env, params2));
+    const jni_zero::JavaRef<jobject>& params1,
+    const jni_zero::JavaRef<jobject>& params2) {
+  auto p1 = JavaToNativeStringMap(env, params1);
+  auto p2 = JavaToNativeStringMap(env, params2);
+  return H264IsSameProfile(CodecParameterMap(p1.begin(), p1.end()),
+                           CodecParameterMap(p2.begin(), p2.end()));
 }
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(H264Utils)

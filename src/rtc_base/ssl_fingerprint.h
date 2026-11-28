@@ -14,50 +14,59 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+#include <optional>
+#include <span>
 #include <string>
 
+#include "absl/base/macros.h"
+#include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
 #include "rtc_base/copy_on_write_buffer.h"
+#include "rtc_base/rtc_certificate.h"
+#include "rtc_base/ssl_certificate.h"
+#include "rtc_base/ssl_identity.h"
 #include "rtc_base/system/rtc_export.h"
 
-namespace rtc {
-
-class RTCCertificate;
-class SSLCertificate;
-class SSLIdentity;
+namespace webrtc {
 
 struct RTC_EXPORT SSLFingerprint {
-  // TODO(steveanton): Remove once downstream projects have moved off of this.
-  static SSLFingerprint* Create(absl::string_view algorithm,
-                                const rtc::SSLIdentity* identity);
-  // TODO(steveanton): Rename to Create once projects have migrated.
-  static std::unique_ptr<SSLFingerprint> CreateUnique(
+  static absl_nullable std::unique_ptr<SSLFingerprint> Create(
       absl::string_view algorithm,
-      const rtc::SSLIdentity& identity);
+      const SSLIdentity& identity);
 
-  static std::unique_ptr<SSLFingerprint> Create(
+  static absl_nullable std::unique_ptr<SSLFingerprint> Create(
       absl::string_view algorithm,
-      const rtc::SSLCertificate& cert);
+      const SSLCertificate& cert);
 
-  // TODO(steveanton): Remove once downstream projects have moved off of this.
-  static SSLFingerprint* CreateFromRfc4572(absl::string_view algorithm,
-                                           absl::string_view fingerprint);
-  // TODO(steveanton): Rename to CreateFromRfc4572 once projects have migrated.
-  static std::unique_ptr<SSLFingerprint> CreateUniqueFromRfc4572(
+  static absl_nullable std::unique_ptr<SSLFingerprint> CreateFromRfc4572(
+      absl::string_view algorithm,
+      absl::string_view fingerprint);
+
+  static std::optional<SSLFingerprint> CreateOptionalFromRfc4572(
       absl::string_view algorithm,
       absl::string_view fingerprint);
 
   // Creates a fingerprint from a certificate, using the same digest algorithm
   // as the certificate's signature.
-  static std::unique_ptr<SSLFingerprint> CreateFromCertificate(
+  static absl_nullable std::unique_ptr<SSLFingerprint> CreateFromCertificate(
       const RTCCertificate& cert);
 
+  [[deprecated]] ABSL_REFACTOR_INLINE static absl_nullable
+      std::unique_ptr<SSLFingerprint>
+      CreateUnique(absl::string_view algorithm, const SSLIdentity& identity) {
+    return Create(algorithm, identity);
+  }
+
+  [[deprecated]] ABSL_REFACTOR_INLINE static absl_nullable
+      std::unique_ptr<SSLFingerprint>
+      CreateUniqueFromRfc4572(absl::string_view algorithm,
+                              absl::string_view fingerprint) {
+    return CreateFromRfc4572(algorithm, fingerprint);
+  }
+
   SSLFingerprint(absl::string_view algorithm,
-                 ArrayView<const uint8_t> digest_view);
-  // TODO(steveanton): Remove once downstream projects have moved off of this.
-  SSLFingerprint(absl::string_view algorithm,
-                 const uint8_t* digest_in,
-                 size_t digest_len);
+                 std::span<const uint8_t> digest_view);
 
   SSLFingerprint(const SSLFingerprint& from) = default;
   SSLFingerprint& operator=(const SSLFingerprint& from) = default;
@@ -69,9 +78,10 @@ struct RTC_EXPORT SSLFingerprint {
   std::string ToString() const;
 
   std::string algorithm;
-  rtc::CopyOnWriteBuffer digest;
+  CopyOnWriteBuffer digest;
 };
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // RTC_BASE_SSL_FINGERPRINT_H_

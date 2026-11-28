@@ -11,7 +11,13 @@
 #include "rtc_base/platform_thread.h"
 
 #include <algorithm>
-#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+
+#include "absl/functional/any_invocable.h"
+#include "absl/strings/string_view.h"
+#include "rtc_base/platform_thread_types.h"
 
 #if !defined(WEBRTC_WIN)
 #include <sched.h>
@@ -19,7 +25,7 @@
 
 #include "rtc_base/checks.h"
 
-namespace rtc {
+namespace webrtc {
 namespace {
 
 #if defined(WEBRTC_WIN)
@@ -30,7 +36,10 @@ int Win32PriorityFromThreadPriority(ThreadPriority priority) {
     case ThreadPriority::kNormal:
       return THREAD_PRIORITY_NORMAL;
     case ThreadPriority::kHigh:
+    case ThreadPriority::kVideo:
       return THREAD_PRIORITY_ABOVE_NORMAL;
+    case ThreadPriority::kAudio:
+      return THREAD_PRIORITY_HIGHEST;
     case ThreadPriority::kRealtime:
       return THREAD_PRIORITY_TIME_CRITICAL;
   }
@@ -41,8 +50,10 @@ bool SetPriority(ThreadPriority priority) {
 #if defined(WEBRTC_WIN)
   return SetThreadPriority(GetCurrentThread(),
                            Win32PriorityFromThreadPriority(priority)) != FALSE;
-#elif defined(__native_client__) || defined(WEBRTC_FUCHSIA)
-  // Setting thread priorities is not supported in NaCl or Fuchsia.
+#elif defined(WEBRTC_FUCHSIA) || \
+    (defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__))
+  // Setting thread priorities is not supported in NaCl, Fuchsia or Emscripten
+  // without pthreads.
   return true;
 #elif defined(WEBRTC_CHROMIUM_BUILD) && defined(WEBRTC_LINUX)
   // TODO(tommi): Switch to the same mechanism as Chromium uses for changing
@@ -73,7 +84,11 @@ bool SetPriority(ThreadPriority priority) {
       param.sched_priority = (low_prio + top_prio - 1) / 2;
       break;
     case ThreadPriority::kHigh:
+    case ThreadPriority::kVideo:
       param.sched_priority = std::max(top_prio - 2, low_prio);
+      break;
+    case ThreadPriority::kAudio:
+      param.sched_priority = std::max(top_prio - 1, low_prio);
       break;
     case ThreadPriority::kRealtime:
       param.sched_priority = top_prio;
@@ -90,17 +105,17 @@ DWORD WINAPI RunPlatformThread(void* param) {
   // contains the result from GetLastError() and to make sure it does not
   // falsely report a Windows error we call SetLastError here.
   ::SetLastError(ERROR_SUCCESS);
-  auto function = static_cast<std::function<void()>*>(param);
-  (*function)();
+  auto function = static_cast<absl::AnyInvocable<void() &&>*>(param);
+  std::move (*function)();
   delete function;
   return 0;
 }
 #else
 void* RunPlatformThread(void* param) {
-  auto function = static_cast<std::function<void()>*>(param);
-  (*function)();
+  auto function = static_cast<absl::AnyInvocable<void() &&>*>(param);
+  std::move (*function)();
   delete function;
-  return 0;
+  return nullptr;
 }
 #endif  // defined(WEBRTC_WIN)
 
@@ -111,14 +126,14 @@ PlatformThread::PlatformThread(Handle handle, bool joinable)
 
 PlatformThread::PlatformThread(PlatformThread&& rhs)
     : handle_(rhs.handle_), joinable_(rhs.joinable_) {
-  rhs.handle_ = absl::nullopt;
+  rhs.handle_ = std::nullopt;
 }
 
 PlatformThread& PlatformThread::operator=(PlatformThread&& rhs) {
   Finalize();
   handle_ = rhs.handle_;
   joinable_ = rhs.joinable_;
-  rhs.handle_ = absl::nullopt;
+  rhs.handle_ = std::nullopt;
   return *this;
 }
 
@@ -127,7 +142,7 @@ PlatformThread::~PlatformThread() {
 }
 
 PlatformThread PlatformThread::SpawnJoinable(
-    std::function<void()> thread_function,
+    absl::AnyInvocable<void() &&> thread_function,
     absl::string_view name,
     ThreadAttributes attributes) {
   return SpawnThread(std::move(thread_function), name, attributes,
@@ -135,14 +150,14 @@ PlatformThread PlatformThread::SpawnJoinable(
 }
 
 PlatformThread PlatformThread::SpawnDetached(
-    std::function<void()> thread_function,
+    absl::AnyInvocable<void() &&> thread_function,
     absl::string_view name,
     ThreadAttributes attributes) {
   return SpawnThread(std::move(thread_function), name, attributes,
                      /*joinable=*/false);
 }
 
-absl::optional<PlatformThread::Handle> PlatformThread::GetHandle() const {
+std::optional<PlatformThread::Handle> PlatformThread::GetHandle() const {
   return handle_;
 }
 
@@ -165,11 +180,11 @@ void PlatformThread::Finalize() {
   if (joinable_)
     RTC_CHECK_EQ(0, pthread_join(*handle_, nullptr));
 #endif
-  handle_ = absl::nullopt;
+  handle_ = std::nullopt;
 }
 
 PlatformThread PlatformThread::SpawnThread(
-    std::function<void()> thread_function,
+    absl::AnyInvocable<void() &&> thread_function,
     absl::string_view name,
     ThreadAttributes attributes,
     bool joinable) {
@@ -177,12 +192,12 @@ PlatformThread PlatformThread::SpawnThread(
   RTC_DCHECK(!name.empty());
   // TODO(tommi): Consider lowering the limit to 15 (limit on Linux).
   RTC_DCHECK(name.length() < 64);
-  auto start_thread_function_ptr =
-      new std::function<void()>([thread_function = std::move(thread_function),
-                                 name = std::string(name), attributes] {
-        rtc::SetCurrentThreadName(name.c_str());
+  auto start_thread_function_ptr = new absl::AnyInvocable<void() &&>(
+      [thread_function = std::move(thread_function), name = std::string(name),
+       attributes]() mutable {
+        SetCurrentThreadName(name.c_str());
         SetPriority(attributes.priority);
-        thread_function();
+        std::move(thread_function)();
       });
 #if defined(WEBRTC_WIN)
   // See bug 2902 for background on STACK_SIZE_PARAM_IS_A_RESERVATION.
@@ -208,4 +223,4 @@ PlatformThread PlatformThread::SpawnThread(
   return PlatformThread(handle, joinable);
 }
 
-}  // namespace rtc
+}  // namespace webrtc

@@ -10,15 +10,16 @@
 
 #include "rtc_base/log_sinks.h"
 
-#include <string.h>
-
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "absl/strings/string_view.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/file_rotating_stream.h"
+#include "rtc_base/logging.h"
 
-namespace rtc {
+namespace webrtc {
 
 FileRotatingLogSink::FileRotatingLogSink(absl::string_view log_dir_path,
                                          absl::string_view log_prefix,
@@ -36,33 +37,17 @@ FileRotatingLogSink::FileRotatingLogSink(FileRotatingStream* stream)
 
 FileRotatingLogSink::~FileRotatingLogSink() {}
 
-void FileRotatingLogSink::OnLogMessage(const std::string& message) {
-  OnLogMessage(absl::string_view(message));
-}
-
-void FileRotatingLogSink::OnLogMessage(absl::string_view message) {
+void FileRotatingLogSink::OnLogMessage(const LogLineRef& line) {
   if (!stream_->IsOpen()) {
     std::fprintf(stderr, "Init() must be called before adding this sink.\n");
     return;
   }
-  stream_->Write(message.data(), message.size());
-}
-
-void FileRotatingLogSink::OnLogMessage(const std::string& message,
-                                       LoggingSeverity sev,
-                                       const char* tag) {
-  OnLogMessage(absl::string_view(message), sev, tag);
-}
-
-void FileRotatingLogSink::OnLogMessage(absl::string_view message,
-                                       LoggingSeverity sev,
-                                       const char* tag) {
-  if (!stream_->IsOpen()) {
-    std::fprintf(stderr, "Init() must be called before adding this sink.\n");
-    return;
-  }
-  stream_->Write(tag, strlen(tag));
+#if defined(WEBRTC_ANDROID)
+  // On Android, lines are prefixed with the tag.
+  stream_->Write(line.tag().data(), line.tag().size());
   stream_->Write(": ", 2);
+#endif
+  const std::string& message = line.DefaultLogLine();
   stream_->Write(message.data(), message.size());
 }
 
@@ -83,4 +68,4 @@ CallSessionFileRotatingLogSink::CallSessionFileRotatingLogSink(
 
 CallSessionFileRotatingLogSink::~CallSessionFileRotatingLogSink() {}
 
-}  // namespace rtc
+}  // namespace webrtc

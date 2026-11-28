@@ -10,6 +10,8 @@
 
 #include "logging/rtc_event_log/events/rtc_event_dtls_writable_state.h"
 
+#include <memory>
+
 #include "absl/memory/memory.h"
 
 namespace webrtc {
@@ -17,16 +19,11 @@ namespace webrtc {
 RtcEventDtlsWritableState::RtcEventDtlsWritableState(bool writable)
     : writable_(writable) {}
 
-RtcEventDtlsWritableState::RtcEventDtlsWritableState(
-    const RtcEventDtlsWritableState& other)
-    : RtcEvent(other.timestamp_us_), writable_(other.writable_) {}
-
 RtcEventDtlsWritableState::~RtcEventDtlsWritableState() = default;
 
 std::unique_ptr<RtcEventDtlsWritableState> RtcEventDtlsWritableState::Copy()
     const {
-  return absl::WrapUnique<RtcEventDtlsWritableState>(
-      new RtcEventDtlsWritableState(*this));
+  return absl::WrapUnique(new RtcEventDtlsWritableState(*this));
 }
 
 }  // namespace webrtc

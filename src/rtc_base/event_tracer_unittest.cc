@@ -10,27 +10,38 @@
 
 #include "rtc_base/event_tracer.h"
 
+#include <fstream>
+#include <iterator>
+#include <string>
+
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/trace_event.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/testsupport/file_utils.h"
+
+namespace webrtc {
 
 namespace {
+
+using ::testing::EndsWith;
+using ::testing::HasSubstr;
 
 class TestStatistics {
  public:
   void Reset() {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     events_logged_ = 0;
   }
 
   void Increment() {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     ++events_logged_;
   }
 
   int Count() const {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     return events_logged_;
   }
 
@@ -41,25 +52,23 @@ class TestStatistics {
   }
 
  private:
-  mutable webrtc::Mutex mutex_;
+  mutable Mutex mutex_;
   int events_logged_ RTC_GUARDED_BY(mutex_) = 0;
 };
 
 }  // namespace
 
-namespace webrtc {
-
 TEST(EventTracerTest, EventTracerDisabled) {
-  { TRACE_EVENT0("test", "EventTracerDisabled"); }
+  { TRACE_EVENT0("webrtc-test", "EventTracerDisabled"); }
   EXPECT_FALSE(TestStatistics::Get()->Count());
   TestStatistics::Get()->Reset();
 }
 
-#if RTC_TRACE_EVENTS_ENABLED
+#if RTC_TRACE_EVENTS_ENABLED && !defined(RTC_USE_PERFETTO)
 TEST(EventTracerTest, ScopedTraceEvent) {
   SetupEventTracer(
       [](const char* /*name*/) {
-        return reinterpret_cast<const unsigned char*>("test");
+        return reinterpret_cast<const unsigned char*>("webrtc-test");
       },
       [](char /*phase*/, const unsigned char* /*category_enabled*/,
          const char* /*name*/, unsigned long long /*id*/, int /*num_args*/,
@@ -69,6 +78,29 @@ TEST(EventTracerTest, ScopedTraceEvent) {
   { TRACE_EVENT0("test", "ScopedTraceEvent"); }
   EXPECT_EQ(2, TestStatistics::Get()->Count());
   TestStatistics::Get()->Reset();
+}
+
+TEST(EventTracerTest, StopInternalCaptureCompletesTrace) {
+  const std::string filename =
+      test::TempFilename(test::OutputPath(), "event_tracer_unittest");
+  tracing::SetupInternalTracer();
+  ASSERT_TRUE(tracing::StartInternalCapture(filename));
+  {
+    TRACE_EVENT0("webrtc", "StopInternalCaptureCompletesTrace");
+  }
+  tracing::StopInternalCapture();
+
+  // The trace must be complete when StopInternalCapture() returns, so read it
+  // before ShutdownInternalTracer().
+  std::ifstream file(filename);
+  const std::string trace{std::istreambuf_iterator<char>(file),
+                          std::istreambuf_iterator<char>()};
+  file.close();
+  tracing::ShutdownInternalTracer();
+  test::RemoveFile(filename);
+
+  EXPECT_THAT(trace, HasSubstr("\"StopInternalCaptureCompletesTrace\""));
+  EXPECT_THAT(trace, EndsWith("]}\n"));
 }
 #endif
 

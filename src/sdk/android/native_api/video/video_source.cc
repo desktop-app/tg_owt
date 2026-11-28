@@ -10,6 +10,20 @@
 
 #include "sdk/android/native_api/video/video_source.h"
 
+#include <jni.h>
+
+#include <optional>
+
+#include "api/environment/environment.h"
+#include "api/make_ref_counted.h"
+#include "api/media_stream_interface.h"
+#include "api/scoped_refptr.h"
+#include "api/video/recordable_encoded_frame.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_sink_interface.h"
+#include "api/video/video_source_interface.h"
+#include "rtc_base/thread.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/android_video_track_source.h"
 #include "sdk/android/src/jni/native_capturer_observer.h"
 
@@ -23,18 +37,19 @@ namespace {
 // VideoTrackSourceInterface.
 class JavaVideoTrackSourceImpl : public JavaVideoTrackSourceInterface {
  public:
-  JavaVideoTrackSourceImpl(JNIEnv* env,
-                           rtc::Thread* signaling_thread,
+  JavaVideoTrackSourceImpl(JNIEnv* jni,
+                           Thread* signaling_thread,
                            bool is_screencast,
-                           bool align_timestamps)
+                           bool align_timestamps,
+                           std::optional<Environment> env)
       : android_video_track_source_(
-            rtc::make_ref_counted<jni::AndroidVideoTrackSource>(
-                signaling_thread,
-                env,
-                is_screencast,
-                align_timestamps)),
+            make_ref_counted<jni::AndroidVideoTrackSource>(signaling_thread,
+                                                           jni,
+                                                           is_screencast,
+                                                           align_timestamps,
+                                                           env)),
         native_capturer_observer_(jni::CreateJavaNativeCapturerObserver(
-            env,
+            jni,
             android_video_track_source_)) {}
 
   ScopedJavaLocalRef<jobject> GetJavaVideoCapturerObserver(
@@ -57,15 +72,15 @@ class JavaVideoTrackSourceImpl : public JavaVideoTrackSourceInterface {
 
   bool remote() const override { return android_video_track_source_->remote(); }
 
-  void AddOrUpdateSink(rtc::VideoSinkInterface<VideoFrame>* sink,
-                       const rtc::VideoSinkWants& wants) override {
+  void AddOrUpdateSink(VideoSinkInterface<VideoFrame>* sink,
+                       const VideoSinkWants& wants) override {
     // The method is defined private in the implementation so we have to access
     // it through the interface...
     static_cast<VideoTrackSourceInterface*>(android_video_track_source_.get())
         ->AddOrUpdateSink(sink, wants);
   }
 
-  void RemoveSink(rtc::VideoSinkInterface<VideoFrame>* sink) override {
+  void RemoveSink(VideoSinkInterface<VideoFrame>* sink) override {
     // The method is defined private in the implementation so we have to access
     // it through the interface...
     static_cast<VideoTrackSourceInterface*>(android_video_track_source_.get())
@@ -76,7 +91,7 @@ class JavaVideoTrackSourceImpl : public JavaVideoTrackSourceInterface {
     return android_video_track_source_->is_screencast();
   }
 
-  absl::optional<bool> needs_denoising() const override {
+  std::optional<bool> needs_denoising() const override {
     return android_video_track_source_->needs_denoising();
   }
 
@@ -93,23 +108,24 @@ class JavaVideoTrackSourceImpl : public JavaVideoTrackSourceInterface {
   bool SupportsEncodedOutput() const override { return false; }
   void GenerateKeyFrame() override {}
   void AddEncodedSink(
-      rtc::VideoSinkInterface<webrtc::RecordableEncodedFrame>* sink) override {}
+      VideoSinkInterface<RecordableEncodedFrame>* sink) override {}
   void RemoveEncodedSink(
-      rtc::VideoSinkInterface<webrtc::RecordableEncodedFrame>* sink) override {}
+      VideoSinkInterface<RecordableEncodedFrame>* sink) override {}
 
-  rtc::scoped_refptr<jni::AndroidVideoTrackSource> android_video_track_source_;
+  scoped_refptr<jni::AndroidVideoTrackSource> android_video_track_source_;
   ScopedJavaGlobalRef<jobject> native_capturer_observer_;
 };
 
 }  // namespace
 
-rtc::scoped_refptr<JavaVideoTrackSourceInterface> CreateJavaVideoSource(
+scoped_refptr<JavaVideoTrackSourceInterface> CreateJavaVideoSource(
     JNIEnv* jni,
-    rtc::Thread* signaling_thread,
+    Thread* signaling_thread,
     bool is_screencast,
-    bool align_timestamps) {
-  return rtc::make_ref_counted<JavaVideoTrackSourceImpl>(
-      jni, signaling_thread, is_screencast, align_timestamps);
+    bool align_timestamps,
+    std::optional<Environment> env) {
+  return make_ref_counted<JavaVideoTrackSourceImpl>(
+      jni, signaling_thread, is_screencast, align_timestamps, env);
 }
 
 }  // namespace webrtc

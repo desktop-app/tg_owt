@@ -11,10 +11,12 @@
 #ifndef RTC_BASE_EXPERIMENTS_BALANCED_DEGRADATION_SETTINGS_H_
 #define RTC_BASE_EXPERIMENTS_BALANCED_DEGRADATION_SETTINGS_H_
 
+#include <cstdint>
+#include <optional>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/field_trials_view.h"
+#include "api/video/video_codec_type.h"
 #include "api/video_codecs/video_encoder.h"
 
 namespace webrtc {
@@ -40,11 +42,11 @@ class BalancedDegradationSettings {
              kbps == o.kbps && kbps_res == o.kbps_res;
     }
 
-    absl::optional<int> GetQpLow() const;
-    absl::optional<int> GetQpHigh() const;
-    absl::optional<int> GetFps() const;
-    absl::optional<int> GetKbps() const;
-    absl::optional<int> GetKbpsRes() const;
+    std::optional<int> GetQpLow() const;
+    std::optional<int> GetQpHigh() const;
+    std::optional<int> GetFps() const;
+    std::optional<int> GetKbps() const;
+    std::optional<int> GetKbpsRes() const;
 
     // Optional settings.
     int qp_low = 0;
@@ -110,7 +112,7 @@ class BalancedDegradationSettings {
   };
 
   // Returns configurations from field trial on success (default on failure).
-  std::vector<Config> GetConfigs() const;
+  const std::vector<Config>& GetConfigs() const;
 
   // Gets the min/max framerate from `configs_` based on `pixels`.
   int MinFps(VideoCodecType type, int pixels) const;
@@ -123,16 +125,15 @@ class BalancedDegradationSettings {
                             uint32_t bitrate_bps) const;
 
   // Gets the min framerate diff from `configs_` based on `pixels`.
-  absl::optional<int> MinFpsDiff(int pixels) const;
+  std::optional<int> MinFpsDiff(int pixels) const;
 
   // Gets QpThresholds for the codec `type` based on `pixels`.
-  absl::optional<VideoEncoder::QpThresholds> GetQpThresholds(
-      VideoCodecType type,
-      int pixels) const;
+  std::optional<VideoEncoder::QpThresholds> GetQpThresholds(VideoCodecType type,
+                                                            int pixels) const;
 
  private:
-  absl::optional<Config> GetMinFpsConfig(int pixels) const;
-  absl::optional<Config> GetMaxFpsConfig(int pixels) const;
+  std::optional<Config> GetMinFpsConfig(int pixels) const;
+  std::optional<Config> GetMaxFpsConfig(int pixels) const;
   Config GetConfig(int pixels) const;
 
   std::vector<Config> configs_;

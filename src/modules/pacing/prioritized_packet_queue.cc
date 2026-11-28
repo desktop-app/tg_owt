@@ -12,10 +12,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <memory>
+#include <optional>
 #include <utility>
+#include <vector>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/types/optional.h"
+#include "api/units/data_size.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
@@ -30,7 +36,7 @@ constexpr int kAudioPrioLevel = 0;
 
 int GetPriorityForType(
     RtpPacketMediaType type,
-    absl::optional<RtpPacketToSend::OriginalType> original_type) {
+    std::optional<RtpPacketToSend::OriginalType> original_type) {
   // Lower number takes priority over higher.
   switch (type) {
     case RtpPacketMediaType::kAudio:
@@ -69,7 +75,7 @@ PrioritizedPacketQueue::ToTtlPerPrio(PacketQueueTTL packet_queue_ttl) {
   ttl_per_prio[GetPriorityForType(RtpPacketMediaType::kRetransmission,
                                   RtpPacketToSend::OriginalType::kVideo)] =
       packet_queue_ttl.video_retransmission;
-  ttl_per_prio[GetPriorityForType(RtpPacketMediaType::kVideo, absl::nullopt)] =
+  ttl_per_prio[GetPriorityForType(RtpPacketMediaType::kVideo, std::nullopt)] =
       packet_queue_ttl.video;
   return ttl_per_prio;
 }
@@ -170,7 +176,7 @@ void PrioritizedPacketQueue::Push(Timestamp enqueue_time,
   int prio_level =
       GetPriorityForType(packet_type, prioritize_audio_retransmission_
                                           ? packet->original_packet_type()
-                                          : absl::nullopt);
+                                          : std::nullopt);
   PurgeOldPacketsAtPriorityLevel(prio_level, enqueue_time);
   RTC_DCHECK_GE(prio_level, 0);
   RTC_DCHECK_LT(prio_level, kNumPriorityLevels);
@@ -199,12 +205,12 @@ void PrioritizedPacketQueue::Push(Timestamp enqueue_time,
 
   static constexpr TimeDelta kTimeout = TimeDelta::Millis(500);
   if (enqueue_time - last_culling_time_ > kTimeout) {
-    for (auto it = streams_.begin(); it != streams_.end();) {
-      if (it->second->IsEmpty() &&
-          it->second->LastEnqueueTime() + kTimeout < enqueue_time) {
-        streams_.erase(it++);
+    for (auto stream_it = streams_.begin(); stream_it != streams_.end();) {
+      if (stream_it->second->IsEmpty() &&
+          stream_it->second->LastEnqueueTime() + kTimeout < enqueue_time) {
+        streams_.erase(stream_it++);
       } else {
-        ++it;
+        ++stream_it;
       }
     }
     last_culling_time_ = enqueue_time;
@@ -253,7 +259,7 @@ PrioritizedPacketQueue::SizeInPacketsPerRtpPacketMediaType() const {
 Timestamp PrioritizedPacketQueue::LeadingPacketEnqueueTime(
     RtpPacketMediaType type) const {
   RTC_DCHECK(type != RtpPacketMediaType::kRetransmission);
-  const int priority_level = GetPriorityForType(type, absl::nullopt);
+  const int priority_level = GetPriorityForType(type, std::nullopt);
   if (streams_by_prio_[priority_level].empty()) {
     return Timestamp::MinusInfinity();
   }
@@ -265,7 +271,7 @@ Timestamp PrioritizedPacketQueue::LeadingPacketEnqueueTimeForRetransmission()
     const {
   if (!prioritize_audio_retransmission_) {
     const int priority_level =
-        GetPriorityForType(RtpPacketMediaType::kRetransmission, absl::nullopt);
+        GetPriorityForType(RtpPacketMediaType::kRetransmission, std::nullopt);
     if (streams_by_prio_[priority_level].empty()) {
       return Timestamp::PlusInfinity();
     }
@@ -328,7 +334,9 @@ void PrioritizedPacketQueue::SetPauseState(bool paused, Timestamp now) {
   paused_ = paused;
 }
 
-void PrioritizedPacketQueue::RemovePacketsForSsrc(uint32_t ssrc) {
+std::vector<std::unique_ptr<RtpPacketToSend>>
+PrioritizedPacketQueue::RemovePacketsForSsrc(uint32_t ssrc) {
+  std::vector<std::unique_ptr<RtpPacketToSend>> removed_packets;
   auto kv = streams_.find(ssrc);
   if (kv != streams_.end()) {
     // Dequeue all packets from the queue for this SSRC.
@@ -346,6 +354,7 @@ void PrioritizedPacketQueue::RemovePacketsForSsrc(uint32_t ssrc) {
         QueuedPacket packet = std::move(packet_queue.front());
         packet_queue.pop_front();
         DequeuePacketInternal(packet);
+        removed_packets.push_back(std::move(packet.packet));
       }
 
       // Next, deregister this `StreamQueue` from the round-robin tables.
@@ -368,6 +377,7 @@ void PrioritizedPacketQueue::RemovePacketsForSsrc(uint32_t ssrc) {
     }
   }
   MaybeUpdateTopPrioLevel();
+  return removed_packets;
 }
 
 bool PrioritizedPacketQueue::HasKeyframePackets(uint32_t ssrc) const {

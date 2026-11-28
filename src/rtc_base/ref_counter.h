@@ -12,29 +12,25 @@
 
 #include <atomic>
 
-#include "rtc_base/ref_count.h"
+#include "api/ref_count.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 namespace webrtc_impl {
 
-class RefCounter {
+class RTC_EXPORT RefCounter {
  public:
   explicit RefCounter(int ref_count) : ref_count_(ref_count) {}
   RefCounter() = delete;
 
-  void IncRef() {
-    // Relaxed memory order: The current thread is allowed to act on the
-    // resource protected by the reference counter both before and after the
-    // atomic op, so this function doesn't prevent memory access reordering.
-    ref_count_.fetch_add(1, std::memory_order_relaxed);
-  }
+  void IncRef();
 
   // Returns kDroppedLastRef if this call dropped the last reference; the caller
   // should therefore free the resource protected by the reference counter.
   // Otherwise, returns kOtherRefsRemained (note that in case of multithreading,
   // some other caller may have dropped the last reference by the time this call
   // returns; all we know is that we didn't do it).
-  rtc::RefCountReleaseStatus DecRef() {
+  RefCountReleaseStatus DecRef() {
     // Use release-acquire barrier to ensure all actions on the protected
     // resource are finished before the resource can be freed.
     // When ref_count_after_subtract > 0, this function require
@@ -47,8 +43,8 @@ class RefCounter {
     int ref_count_after_subtract =
         ref_count_.fetch_sub(1, std::memory_order_acq_rel) - 1;
     return ref_count_after_subtract == 0
-               ? rtc::RefCountReleaseStatus::kDroppedLastRef
-               : rtc::RefCountReleaseStatus::kOtherRefsRemained;
+               ? RefCountReleaseStatus::kDroppedLastRef
+               : RefCountReleaseStatus::kOtherRefsRemained;
   }
 
   // Return whether the reference count is one. If the reference count is used

@@ -11,14 +11,21 @@
 #include "sdk/android/src/jni/jvm.h"
 
 #include <asm/unistd.h>
+#include <jni.h>
+#include <linux/prctl.h>
 #include <pthread.h>
 #include <sys/prctl.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <string>
 
 #include "rtc_base/checks.h"
+#include "third_party/jni_zero/jni_zero.h"
+
+#ifdef WEBRTC_ARCH_ARM64
+#include <asm/unistd.h>
+#endif
 
 namespace webrtc {
 namespace jni {
@@ -70,10 +77,17 @@ static void CreateJNIPtrKey() {
       << "pthread_key_create";
 }
 
+void HandleException(JNIEnv* env) {
+  RTC_CHECK(false) << (env->ExceptionDescribe(), env->ExceptionClear(), "");
+}
+
 jint InitGlobalJniVariables(JavaVM* jvm) {
   RTC_CHECK(!g_jvm) << "InitGlobalJniVariables!";
   g_jvm = jvm;
   RTC_CHECK(g_jvm) << "InitGlobalJniVariables handed NULL?";
+
+  jni_zero::SetExceptionHandler(&HandleException);
+  jni_zero::InitVM(jvm);
 
   RTC_CHECK(!pthread_once(&g_jni_ptr_once, &CreateJNIPtrKey)) << "pthread_once";
 

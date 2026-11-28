@@ -10,21 +10,44 @@
 
 #include "sdk/android/src/jni/pc/owned_factory_and_threads.h"
 
-#include "sdk/android/src/jni/jni_helpers.h"
+#include <memory>
+#include <optional>
+#include <utility>
+
+#include "api/environment/environment.h"
+#include "api/peer_connection_interface.h"
+#include "api/scoped_refptr.h"
+#include "rtc_base/socket_factory.h"
+#include "rtc_base/thread.h"
 
 namespace webrtc {
 namespace jni {
 
 OwnedFactoryAndThreads::OwnedFactoryAndThreads(
-    std::unique_ptr<rtc::SocketFactory> socket_factory,
-    std::unique_ptr<rtc::Thread> network_thread,
-    std::unique_ptr<rtc::Thread> worker_thread,
-    std::unique_ptr<rtc::Thread> signaling_thread,
-    const rtc::scoped_refptr<PeerConnectionFactoryInterface>& factory)
-    : socket_factory_(std::move(socket_factory)),
-      network_thread_(std::move(network_thread)),
-      worker_thread_(std::move(worker_thread)),
+    std::unique_ptr<SocketFactory> socket_factory,
+    std::unique_ptr<Thread> network_thread,
+    std::unique_ptr<Thread> worker_thread,
+    std::unique_ptr<Thread> signaling_thread,
+    const Environment& env,
+    const scoped_refptr<PeerConnectionFactoryInterface>& factory)
+    : env_(env),
+      socket_factory_(std::move(socket_factory)),
       signaling_thread_(std::move(signaling_thread)),
+      worker_thread_(std::move(worker_thread)),
+      network_thread_(std::move(network_thread)),
+      factory_(factory) {}
+
+OwnedFactoryAndThreads::OwnedFactoryAndThreads(
+    std::unique_ptr<SocketFactory> socket_factory,
+    std::unique_ptr<Thread> network_thread,
+    std::unique_ptr<Thread> worker_thread,
+    std::unique_ptr<Thread> signaling_thread,
+    const scoped_refptr<PeerConnectionFactoryInterface>& factory)
+    : env_(std::nullopt),
+      socket_factory_(std::move(socket_factory)),
+      signaling_thread_(std::move(signaling_thread)),
+      worker_thread_(std::move(worker_thread)),
+      network_thread_(std::move(network_thread)),
       factory_(factory) {}
 
 }  // namespace jni

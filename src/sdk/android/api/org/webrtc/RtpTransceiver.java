@@ -13,8 +13,7 @@ package org.webrtc;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import org.webrtc.MediaStreamTrack;
-import org.webrtc.RtpParameters;
+import org.jni_zero.NativeMethods;
 
 /**
  * Java wrapper for a C++ RtpTransceiverInterface.
@@ -47,12 +46,12 @@ public class RtpTransceiver {
       this.nativeIndex = nativeIndex;
     }
 
-    @CalledByNative("RtpTransceiverDirection")
+    @CalledByNative
     int getNativeIndex() {
       return nativeIndex;
     }
 
-    @CalledByNative("RtpTransceiverDirection")
+    @CalledByNative
     static RtpTransceiverDirection fromNativeIndex(int nativeIndex) {
       for (RtpTransceiverDirection type : RtpTransceiverDirection.values()) {
         if (type.getNativeIndex() == nativeIndex) {
@@ -94,51 +93,46 @@ public class RtpTransceiver {
       this.sendEncodings = new ArrayList<RtpParameters.Encoding>(sendEncodings);
     }
 
-    @CalledByNative("RtpTransceiverInit")
+    @CalledByNative
     int getDirectionNativeIndex() {
       return direction.getNativeIndex();
     }
 
-    @CalledByNative("RtpTransceiverInit")
+    @CalledByNative
     List<String> getStreamIds() {
       return new ArrayList<String>(this.streamIds);
     }
 
-    @CalledByNative("RtpTransceiverInit")
+    @CalledByNative
     List<RtpParameters.Encoding> getSendEncodings() {
       return new ArrayList<RtpParameters.Encoding>(this.sendEncodings);
     }
   }
 
-  private long nativeRtpTransceiver;
-  private RtpSender cachedSender;
-  private RtpReceiver cachedReceiver;
+  private final NativeLifecycleLock lifecycleLock;
+  private final RtpSender cachedSender;
+  private final RtpReceiver cachedReceiver;
 
   @CalledByNative
   protected RtpTransceiver(long nativeRtpTransceiver) {
-    this.nativeRtpTransceiver = nativeRtpTransceiver;
-    cachedSender = nativeGetSender(nativeRtpTransceiver);
-    cachedReceiver = nativeGetReceiver(nativeRtpTransceiver);
+    this.lifecycleLock = new NativeLifecycleLock("RtpTransceiver", nativeRtpTransceiver);
+    cachedSender = RtpTransceiverJni.get().getSender(nativeRtpTransceiver);
+    cachedReceiver = RtpTransceiverJni.get().getReceiver(nativeRtpTransceiver);
   }
 
-  /**
-   * Media type of the transceiver. Any sender(s)/receiver(s) will have this
-   * type as well.
-   */
+  /** Media type of the transceiver. Any sender(s)/receiver(s) will have this type as well. */
   public MediaStreamTrack.MediaType getMediaType() {
-    checkRtpTransceiverExists();
-    return nativeGetMediaType(nativeRtpTransceiver);
+    return lifecycleLock.call(transceiver -> RtpTransceiverJni.get().getMediaType(transceiver));
   }
 
   /**
-   * The mid attribute is the mid negotiated and present in the local and
-   * remote descriptions. Before negotiation is complete, the mid value may be
-   * null. After rollbacks, the value may change from a non-null value to null.
+   * The mid attribute is the mid negotiated and present in the local and remote descriptions.
+   * Before negotiation is complete, the mid value may be null. After rollbacks, the value may
+   * change from a non-null value to null.
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-mid
    */
   public String getMid() {
-    checkRtpTransceiverExists();
-    return nativeGetMid(nativeRtpTransceiver);
+    return lifecycleLock.call(transceiver -> RtpTransceiverJni.get().getMid(transceiver));
   }
 
   /**
@@ -162,112 +156,109 @@ public class RtpTransceiver {
   }
 
   /**
-   * The stopped attribute indicates that the sender of this transceiver will no
-   * longer send, and that the receiver will no longer receive. It is true if
-   * either stop has been called or if setting the local or remote description
-   * has caused the RtpTransceiver to be stopped.
+   * The stopped attribute indicates that the sender of this transceiver will no longer send, and
+   * that the receiver will no longer receive. It is true if either stop has been called or if
+   * setting the local or remote description has caused the RtpTransceiver to be stopped.
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-stopped
    */
   public boolean isStopped() {
-    checkRtpTransceiverExists();
-    return nativeStopped(nativeRtpTransceiver);
+    return lifecycleLock.call(transceiver -> RtpTransceiverJni.get().stopped(transceiver));
   }
 
   /**
-   * The direction attribute indicates the preferred direction of this
-   * transceiver, which will be used in calls to CreateOffer and CreateAnswer.
+   * The direction attribute indicates the preferred direction of this transceiver, which will be
+   * used in calls to CreateOffer and CreateAnswer.
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-direction
    */
   public RtpTransceiverDirection getDirection() {
-    checkRtpTransceiverExists();
-    return nativeDirection(nativeRtpTransceiver);
+    return lifecycleLock.call(transceiver -> RtpTransceiverJni.get().direction(transceiver));
   }
 
   /**
-   * The current_direction attribute indicates the current direction negotiated
-   * for this transceiver. If this transceiver has never been represented in an
-   * offer/answer exchange, or if the transceiver is stopped, the value is null.
+   * The current_direction attribute indicates the current direction negotiated for this
+   * transceiver. If this transceiver has never been represented in an offer/answer exchange, or if
+   * the transceiver is stopped, the value is null.
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-currentdirection
    */
   public RtpTransceiverDirection getCurrentDirection() {
-    checkRtpTransceiverExists();
-    return nativeCurrentDirection(nativeRtpTransceiver);
+    return lifecycleLock.call(transceiver -> RtpTransceiverJni.get().currentDirection(transceiver));
   }
 
   /**
-   * Sets the preferred direction of this transceiver. An update of
-   * directionality does not take effect immediately. Instead, future calls to
-   * CreateOffer and CreateAnswer mark the corresponding media descriptions as
-   * sendrecv, sendonly, recvonly, or inactive.
+   * Sets the preferred direction of this transceiver. An update of directionality does not take
+   * effect immediately. Instead, future calls to CreateOffer and CreateAnswer mark the
+   * corresponding media descriptions as sendrecv, sendonly, recvonly, or inactive.
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-direction
    */
   public boolean setDirection(RtpTransceiverDirection rtpTransceiverDirection) {
-    checkRtpTransceiverExists();
-    return nativeSetDirection(nativeRtpTransceiver, rtpTransceiverDirection);
+    return lifecycleLock.call(
+        transceiver -> RtpTransceiverJni.get().setDirection(transceiver, rtpTransceiverDirection));
   }
 
   /**
-   * The Stop method will for the time being call the StopInternal method.
-   * After a migration procedure, stop() will be equivalent to StopStandard.
+   * The Stop method will for the time being call the StopInternal method. After a migration
+   * procedure, stop() will be equivalent to StopStandard.
    */
   public void stop() {
-    checkRtpTransceiverExists();
-    nativeStopInternal(nativeRtpTransceiver);
+    lifecycleLock.run(transceiver -> RtpTransceiverJni.get().stopInternal(transceiver));
   }
 
-  public void setCodecPreferences(List<RtpCapabilities.CodecCapability> codecs) {
-    checkRtpTransceiverExists();
-    nativeSetCodecPreferences(nativeRtpTransceiver, codecs);
+  public RtcError setCodecPreferences(List<RtpCapabilities.CodecCapability> codecs) {
+    return lifecycleLock.call(
+        transceiver -> RtpTransceiverJni.get().setCodecPreferences(transceiver, codecs));
   }
 
   /**
-   * The StopInternal method stops the RtpTransceiver, like Stop, but goes
-   * immediately to Stopped state.
+   * The StopInternal method stops the RtpTransceiver, like Stop, but goes immediately to Stopped
+   * state.
    */
   public void stopInternal() {
-    checkRtpTransceiverExists();
-    nativeStopInternal(nativeRtpTransceiver);
+    lifecycleLock.run(transceiver -> RtpTransceiverJni.get().stopInternal(transceiver));
   }
 
   /**
-   * The StopStandard method irreversibly stops the RtpTransceiver. The sender
-   * of this transceiver will no longer send, the receiver will no longer
-   * receive.
+   * The StopStandard method irreversibly stops the RtpTransceiver. The sender of this transceiver
+   * will no longer send, the receiver will no longer receive.
    *
    * <p>The transceiver will enter Stopping state and signal NegotiationNeeded.
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-stop
    */
   public void stopStandard() {
-    checkRtpTransceiverExists();
-    nativeStopStandard(nativeRtpTransceiver);
+    lifecycleLock.run(transceiver -> RtpTransceiverJni.get().stopStandard(transceiver));
   }
 
   @CalledByNative
   public void dispose() {
-    checkRtpTransceiverExists();
-    cachedSender.dispose();
-    cachedReceiver.dispose();
-    JniCommon.nativeReleaseRef(nativeRtpTransceiver);
-    nativeRtpTransceiver = 0;
+    lifecycleLock.dispose(
+        transceiver -> {
+          cachedSender.dispose();
+          cachedReceiver.dispose();
+          JniCommon.nativeReleaseRef(transceiver);
+        });
   }
 
-  private void checkRtpTransceiverExists() {
-    if (nativeRtpTransceiver == 0) {
-      throw new IllegalStateException("RtpTransceiver has been disposed.");
-    }
-  }
+  @NativeMethods
+  interface Natives {
+    MediaStreamTrack.MediaType getMediaType(long rtpTransceiver);
 
-  private static native MediaStreamTrack.MediaType nativeGetMediaType(long rtpTransceiver);
-  private static native String nativeGetMid(long rtpTransceiver);
-  private static native RtpSender nativeGetSender(long rtpTransceiver);
-  private static native RtpReceiver nativeGetReceiver(long rtpTransceiver);
-  private static native boolean nativeStopped(long rtpTransceiver);
-  private static native RtpTransceiverDirection nativeDirection(long rtpTransceiver);
-  private static native RtpTransceiverDirection nativeCurrentDirection(long rtpTransceiver);
-  private static native void nativeStopInternal(long rtpTransceiver);
-  private static native void nativeStopStandard(long rtpTransceiver);
-  private static native boolean nativeSetDirection(
-      long rtpTransceiver, RtpTransceiverDirection rtpTransceiverDirection);
-  private static native void nativeSetCodecPreferences(
-      long rtpTransceiver, List<RtpCapabilities.CodecCapability> codecs);
+    String getMid(long rtpTransceiver);
+
+    RtpSender getSender(long rtpTransceiver);
+
+    RtpReceiver getReceiver(long rtpTransceiver);
+
+    boolean stopped(long rtpTransceiver);
+
+    RtpTransceiverDirection direction(long rtpTransceiver);
+
+    RtpTransceiverDirection currentDirection(long rtpTransceiver);
+
+    void stopInternal(long rtpTransceiver);
+
+    void stopStandard(long rtpTransceiver);
+
+    boolean setDirection(long rtpTransceiver, RtpTransceiverDirection rtpTransceiverDirection);
+
+    RtcError setCodecPreferences(long rtpTransceiver, List<RtpCapabilities.CodecCapability> codecs);
+  }
 }

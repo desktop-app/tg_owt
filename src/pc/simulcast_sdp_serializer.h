@@ -11,6 +11,7 @@
 #ifndef PC_SIMULCAST_SDP_SERIALIZER_H_
 #define PC_SIMULCAST_SDP_SERIALIZER_H_
 
+#include <cstddef>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -21,6 +22,11 @@
 
 namespace webrtc {
 
+// Generous upper bound on the number of parsed RIDs to prevent CPU/memory
+// exhaustion attacks from maliciously large inputs. Practical simulcast limits
+// are much lower (e.g. kMaxSimulcastStreams = 3).
+inline constexpr size_t kMaxSimulcastRids = 16;
+
 // This class serializes simulcast components of the SDP.
 // Example:
 //     SimulcastDescription can be serialized and deserialized by this class.
@@ -28,8 +34,8 @@ namespace webrtc {
 //     format without knowing about the SDP attribute details (a=simulcast:)
 // Usage:
 //     Consider the SDP attribute for simulcast a=simulcast:<configuration>.
-//     The SDP serializtion code (webrtc_sdp.h) should use `SdpSerializer` to
-//     serialize and deserialize the <configuration> section.
+//     The SDP serialization code (webrtc_sdp.h) should use `SdpSerialize`
+//     to serialize and deserialize the <configuration> section.
 // This class will allow testing the serialization of components without
 // having to serialize the entire SDP while hiding implementation details
 // from callers of sdp serialization (webrtc_sdp.h).
@@ -38,21 +44,23 @@ class SimulcastSdpSerializer {
   // Serialization for the Simulcast description according to
   // https://tools.ietf.org/html/draft-ietf-mmusic-sdp-simulcast-13#section-5.1
   std::string SerializeSimulcastDescription(
-      const cricket::SimulcastDescription& simulcast) const;
+      const SimulcastDescription& simulcast) const;
 
   // Deserialization for the SimulcastDescription according to
   // https://tools.ietf.org/html/draft-ietf-mmusic-sdp-simulcast-13#section-5.1
-  RTCErrorOr<cricket::SimulcastDescription> DeserializeSimulcastDescription(
+  RTCErrorOr<SimulcastDescription> DeserializeSimulcastDescription(
       absl::string_view string) const;
 
   // Serialization for the RID description according to
   // https://tools.ietf.org/html/draft-ietf-mmusic-rid-15#section-10
   std::string SerializeRidDescription(
-      const cricket::RidDescription& rid_description) const;
+      const MediaContentDescription& media_desc,
+      const RidDescription& rid_description) const;
 
   // Deserialization for the RidDescription according to
   // https://tools.ietf.org/html/draft-ietf-mmusic-rid-15#section-10
-  RTCErrorOr<cricket::RidDescription> DeserializeRidDescription(
+  RTCErrorOr<RidDescription> DeserializeRidDescription(
+      const MediaContentDescription& media_desc,
       absl::string_view string) const;
 };
 

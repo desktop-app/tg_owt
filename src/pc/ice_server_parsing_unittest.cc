@@ -10,15 +10,25 @@
 
 #include "pc/ice_server_parsing.h"
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
-#include "p2p/base/port_interface.h"
+#include "api/peer_connection_interface.h"
+#include "api/rtc_error.h"
+#include "p2p/base/port.h"
+#include "p2p/base/port_allocator.h"
 #include "rtc_base/ip_address.h"
+#include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
 
 namespace webrtc {
+
+using ::testing::Contains;
+using ::testing::Not;
+using ::testing::SizeIs;
 
 class IceServerParsingTest : public ::testing::Test {
  public:
@@ -66,8 +76,8 @@ class IceServerParsingTest : public ::testing::Test {
   }
 
  protected:
-  cricket::ServerAddresses stun_servers_;
-  std::vector<cricket::RelayServerConfig> turn_servers_;
+  ServerAddresses stun_servers_;
+  std::vector<RelayServerConfig> turn_servers_;
 };
 
 // Make sure all STUN/TURN prefixes are parsed correctly.
@@ -83,14 +93,14 @@ TEST_F(IceServerParsingTest, ParseStunPrefixes) {
   EXPECT_TRUE(ParseTurnUrl("turn:hostname"));
   EXPECT_EQ(0U, stun_servers_.size());
   EXPECT_EQ(1U, turn_servers_.size());
-  EXPECT_EQ(cricket::PROTO_UDP, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_UDP, turn_servers_[0].ports[0].proto);
 
   EXPECT_TRUE(ParseTurnUrl("turns:hostname"));
   EXPECT_EQ(0U, stun_servers_.size());
   EXPECT_EQ(1U, turn_servers_.size());
-  EXPECT_EQ(cricket::PROTO_TLS, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_TLS, turn_servers_[0].ports[0].proto);
   EXPECT_TRUE(turn_servers_[0].tls_cert_policy ==
-              cricket::TlsCertPolicy::TLS_CERT_POLICY_SECURE);
+              TlsCertPolicy::TLS_CERT_POLICY_SECURE);
 
   EXPECT_TRUE(ParseUrl(
       "turns:hostname", "username", "password",
@@ -98,8 +108,8 @@ TEST_F(IceServerParsingTest, ParseStunPrefixes) {
   EXPECT_EQ(0U, stun_servers_.size());
   EXPECT_EQ(1U, turn_servers_.size());
   EXPECT_TRUE(turn_servers_[0].tls_cert_policy ==
-              cricket::TlsCertPolicy::TLS_CERT_POLICY_INSECURE_NO_CHECK);
-  EXPECT_EQ(cricket::PROTO_TLS, turn_servers_[0].ports[0].proto);
+              TlsCertPolicy::TLS_CERT_POLICY_INSECURE_NO_CHECK);
+  EXPECT_EQ(PROTO_TLS, turn_servers_[0].ports[0].proto);
 
   // invalid prefixes
   EXPECT_FALSE(ParseUrl("stunn:hostname"));
@@ -113,13 +123,13 @@ TEST_F(IceServerParsingTest, VerifyDefaults) {
   EXPECT_TRUE(ParseTurnUrl("turns:hostname"));
   EXPECT_EQ(1U, turn_servers_.size());
   EXPECT_EQ(5349, turn_servers_[0].ports[0].address.port());
-  EXPECT_EQ(cricket::PROTO_TLS, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_TLS, turn_servers_[0].ports[0].proto);
 
   // TURN defaults
   EXPECT_TRUE(ParseTurnUrl("turn:hostname"));
   EXPECT_EQ(1U, turn_servers_.size());
   EXPECT_EQ(3478, turn_servers_[0].ports[0].address.port());
-  EXPECT_EQ(cricket::PROTO_UDP, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_UDP, turn_servers_[0].ports[0].proto);
 
   // STUN defaults
   EXPECT_TRUE(ParseUrl("stun:hostname"));
@@ -166,7 +176,7 @@ TEST_F(IceServerParsingTest, ParseHostnameAndPort) {
                PeerConnectionInterface::TlsCertPolicy::kTlsCertPolicySecure,
                "hostname"));
   EXPECT_EQ(1U, turn_servers_.size());
-  rtc::SocketAddress address = turn_servers_[0].ports[0].address;
+  SocketAddress address = turn_servers_[0].ports[0].address;
   EXPECT_EQ("hostname", address.hostname());
   EXPECT_EQ(1234, address.port());
   EXPECT_FALSE(address.IsUnresolvedIP());
@@ -194,11 +204,11 @@ TEST_F(IceServerParsingTest, ParseHostnameAndPort) {
 TEST_F(IceServerParsingTest, ParseTransport) {
   EXPECT_TRUE(ParseTurnUrl("turn:hostname:1234?transport=tcp"));
   EXPECT_EQ(1U, turn_servers_.size());
-  EXPECT_EQ(cricket::PROTO_TCP, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_TCP, turn_servers_[0].ports[0].proto);
 
   EXPECT_TRUE(ParseTurnUrl("turn:hostname?transport=udp"));
   EXPECT_EQ(1U, turn_servers_.size());
-  EXPECT_EQ(cricket::PROTO_UDP, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_UDP, turn_servers_[0].ports[0].proto);
 
   EXPECT_FALSE(ParseTurnUrl("turn:hostname?transport=invalid"));
   EXPECT_FALSE(ParseTurnUrl("turn:hostname?transport="));
@@ -234,6 +244,80 @@ TEST_F(IceServerParsingTest, ParseMultipleUrls) {
       ParseIceServersOrError(servers, &stun_servers_, &turn_servers_).ok());
   EXPECT_EQ(1U, stun_servers_.size());
   EXPECT_EQ(1U, turn_servers_.size());
+}
+
+TEST_F(IceServerParsingTest, TooLongUsername) {
+  // 509 characters is the maximum length of the username field in RFC 8489.
+  std::string k509Characters =
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "aaaaa";
+  ASSERT_EQ(k509Characters.size(), 509u);
+  // 509 characters is supported.
+  EXPECT_TRUE(ParseUrl("turn:hostname", k509Characters, "password"));
+
+  // 510 is not supported.
+  PeerConnectionInterface::IceServers servers;
+  PeerConnectionInterface::IceServer server;
+  server.urls.push_back("turn:hostname");
+  server.username = k509Characters + "b";
+  server.password = "password";
+  servers.push_back(server);
+  stun_servers_.clear();
+  turn_servers_.clear();
+  auto error = ParseIceServersOrError(servers, &stun_servers_, &turn_servers_);
+  EXPECT_FALSE(error.ok());
+  EXPECT_EQ(error.type(), RTCErrorType::INVALID_PARAMETER);
+}
+
+TEST_F(IceServerParsingTest, CapsStunServersInConfiguration) {
+  PeerConnectionInterface::RTCConfiguration config;
+  PeerConnectionInterface::IceServer server;
+  // Duplicate of the first server should not consume an extra slot.
+  server.urls.push_back("stun:z-first.example:3478");
+  server.urls.push_back("stun:z-first.example:3478");
+  for (size_t i = 1; i < kMaxStunServers; ++i) {
+    server.urls.push_back("stun:host" + std::to_string(i) + ".example:3478");
+  }
+  // Extra servers beyond kMaxStunServers (including lexicographically smaller
+  // hostname) should be ignored while keeping the first kMaxStunServers.
+  server.urls.push_back("stun:a-ignored1.example:3478");
+  server.urls.push_back("stun:a-ignored2.example:3478");
+  config.servers.push_back(server);
+
+  stun_servers_.clear();
+  turn_servers_.clear();
+  RTCError error = ParseAndValidateIceServersFromConfiguration(
+      config, stun_servers_, turn_servers_);
+  EXPECT_TRUE(error.ok());
+  EXPECT_THAT(stun_servers_, SizeIs(kMaxStunServers));
+  EXPECT_THAT(stun_servers_, Contains(SocketAddress("z-first.example", 3478)));
+  EXPECT_THAT(stun_servers_,
+              Not(Contains(SocketAddress("a-ignored1.example", 3478))));
+  EXPECT_THAT(stun_servers_,
+              Not(Contains(SocketAddress("a-ignored2.example", 3478))));
+}
+
+TEST_F(IceServerParsingTest, ValidatesSyntaxOfStunServersBeyondCap) {
+  PeerConnectionInterface::RTCConfiguration config;
+  PeerConnectionInterface::IceServer server;
+  for (size_t i = 0; i < kMaxStunServers; ++i) {
+    server.urls.push_back("stun:host" + std::to_string(i) + ".example:3478");
+  }
+  server.urls.push_back("stun:/invalid-hostname");
+  config.servers.push_back(server);
+
+  stun_servers_.clear();
+  turn_servers_.clear();
+  RTCError error = ParseAndValidateIceServersFromConfiguration(
+      config, stun_servers_, turn_servers_);
+  EXPECT_FALSE(error.ok());
+  EXPECT_EQ(error.type(), RTCErrorType::SYNTAX_ERROR);
 }
 
 }  // namespace webrtc

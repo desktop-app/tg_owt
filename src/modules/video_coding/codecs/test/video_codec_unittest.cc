@@ -10,12 +10,28 @@
 
 #include "modules/video_coding/codecs/test/video_codec_unittest.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
 #include <utility>
+#include <vector>
 
+#include "api/environment/environment_factory.h"
 #include "api/test/create_frame_generator.h"
+#include "api/test/frame_generator_interface.h"
+#include "api/units/time_delta.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_frame.h"
+#include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_decoder.h"
 #include "api/video_codecs/video_encoder.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/video_coding/include/video_error_codes.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "test/gtest.h"
 #include "test/video_codec_settings.h"
 
 static constexpr webrtc::TimeDelta kEncodeTimeout =
@@ -30,9 +46,6 @@ static const int kHeight = 144;       // Height of the input image.
 static const int kMaxFramerate = 30;  // Arbitrary value.
 
 namespace webrtc {
-namespace {
-const VideoEncoder::Capabilities kCapabilities(false);
-}
 
 EncodedImageCallback::Result
 VideoCodecUnitTest::FakeEncodeCompleteCallback::OnEncodedImage(
@@ -57,8 +70,8 @@ VideoCodecUnitTest::FakeEncodeCompleteCallback::OnEncodedImage(
 
 void VideoCodecUnitTest::FakeDecodeCompleteCallback::Decoded(
     VideoFrame& frame,
-    absl::optional<int32_t> decode_time_ms,
-    absl::optional<uint8_t> qp) {
+    std::optional<int32_t> /* decode_time_ms */,
+    std::optional<uint8_t> qp) {
   MutexLock lock(&test_->decoded_frame_section_);
   test_->decoded_frame_.emplace(frame);
   test_->decoded_qp_ = qp;
@@ -66,7 +79,10 @@ void VideoCodecUnitTest::FakeDecodeCompleteCallback::Decoded(
 }
 
 void VideoCodecUnitTest::SetUp() {
-  webrtc::test::CodecSettings(kVideoCodecVP8, &codec_settings_);
+  EnvironmentFactory factory(env_);
+  factory.Set(field_trials_.CreateCopy());
+  env_ = factory.Create();
+  test::CodecSettings(kVideoCodecVP8, &codec_settings_);
   codec_settings_.startBitrate = kStartBitrate;
   codec_settings_.maxBitrate = kMaxBitrate;
   codec_settings_.maxFramerate = kMaxFramerate;
@@ -77,7 +93,7 @@ void VideoCodecUnitTest::SetUp() {
 
   input_frame_generator_ = test::CreateSquareFrameGenerator(
       codec_settings_.width, codec_settings_.height,
-      test::FrameGeneratorInterface::OutputType::kI420, absl::optional<int>());
+      test::FrameGeneratorInterface::OutputType::kI420, std::optional<int>());
 
   encoder_ = CreateEncoder();
   decoder_ = CreateDecoder();
@@ -87,7 +103,7 @@ void VideoCodecUnitTest::SetUp() {
   EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK,
             encoder_->InitEncode(
                 &codec_settings_,
-                VideoEncoder::Settings(kCapabilities, 1 /* number of cores */,
+                VideoEncoder::Settings(1 /* number of cores */,
                                        0 /* max payload size (unused) */)));
 
   VideoDecoder::Settings decoder_settings;
@@ -97,7 +113,8 @@ void VideoCodecUnitTest::SetUp() {
   EXPECT_TRUE(decoder_->Configure(decoder_settings));
 }
 
-void VideoCodecUnitTest::ModifyCodecSettings(VideoCodec* codec_settings) {}
+void VideoCodecUnitTest::ModifyCodecSettings(VideoCodec* /* codec_settings */) {
+}
 
 VideoFrame VideoCodecUnitTest::NextInputFrame() {
   test::FrameGeneratorInterface::VideoFrameData frame_data =
@@ -110,7 +127,7 @@ VideoFrame VideoCodecUnitTest::NextInputFrame() {
   const uint32_t timestamp =
       last_input_frame_timestamp_ +
       kVideoPayloadTypeFrequency / codec_settings_.maxFramerate;
-  input_frame.set_timestamp(timestamp);
+  input_frame.set_rtp_timestamp(timestamp);
   input_frame.set_timestamp_us(timestamp * (1000 / 90));
 
   last_input_frame_timestamp_ = timestamp;
@@ -159,7 +176,7 @@ bool VideoCodecUnitTest::WaitForEncodedFrames(
 }
 
 bool VideoCodecUnitTest::WaitForDecodedFrame(std::unique_ptr<VideoFrame>* frame,
-                                             absl::optional<uint8_t>* qp) {
+                                             std::optional<uint8_t>* qp) {
   bool ret = decoded_frame_event_.Wait(kDecodeTimeout);
   EXPECT_TRUE(ret) << "Timed out while waiting for a decoded frame.";
   // This becomes unsafe if there are multiple threads waiting for frames.

@@ -10,55 +10,57 @@
 
 #include "logging/rtc_event_log/rtc_event_log_impl.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <limits>
+#include <iterator>
 #include <memory>
+#include <string>
 #include <utility>
-#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "api/environment/environment.h"
-#include "api/field_trials_view.h"
+#include "api/rtc_event_log/rtc_event.h"
+#include "api/rtc_event_log/rtc_event_log.h"
+#include "api/rtc_event_log_output.h"
+#include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_base.h"
+#include "api/task_queue/task_queue_factory.h"
 #include "api/units/time_delta.h"
-#include "logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.h"
+#include "logging/rtc_event_log/encoder/rtc_event_log_encoder.h"
 #include "logging/rtc_event_log/encoder/rtc_event_log_encoder_new_format.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/numerics/safe_minmax.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/time_utils.h"
 
 namespace webrtc {
 namespace {
 
 std::unique_ptr<RtcEventLogEncoder> CreateEncoder(const Environment& env) {
-  if (env.field_trials().IsDisabled("WebRTC-RtcEventLogNewFormat")) {
-    RTC_DLOG(LS_INFO) << "Creating legacy encoder for RTC event log.";
-    return std::make_unique<RtcEventLogEncoderLegacy>();
-  } else {
-    RTC_DLOG(LS_INFO) << "Creating new format encoder for RTC event log.";
-    return std::make_unique<RtcEventLogEncoderNewFormat>(env.field_trials());
-  }
+  RTC_DLOG(LS_INFO) << "Creating new format encoder for RTC event log.";
+  return std::make_unique<RtcEventLogEncoderNewFormat>(env.field_trials());
 }
 
 }  // namespace
 
 RtcEventLogImpl::RtcEventLogImpl(const Environment& env)
-    : RtcEventLogImpl(CreateEncoder(env), &env.task_queue_factory()) {}
+    : RtcEventLogImpl(env, CreateEncoder(env)) {}
 
-RtcEventLogImpl::RtcEventLogImpl(std::unique_ptr<RtcEventLogEncoder> encoder,
-                                 TaskQueueFactory* task_queue_factory,
+RtcEventLogImpl::RtcEventLogImpl(const Environment& env,
+                                 std::unique_ptr<RtcEventLogEncoder> encoder,
                                  size_t max_events_in_history,
                                  size_t max_config_events_in_history)
-    : max_events_in_history_(max_events_in_history),
+    : env_(env),
+      max_events_in_history_(max_events_in_history),
       max_config_events_in_history_(max_config_events_in_history),
       event_encoder_(std::move(encoder)),
-      last_output_ms_(rtc::TimeMillis()),
-      task_queue_(task_queue_factory->CreateTaskQueue(
+      last_output_ms_(env_.clock().TimeInMilliseconds()),
+      task_queue_(env_.task_queue_factory().CreateTaskQueue(
           "rtc_event_log",
-          TaskQueueFactory::Priority::NORMAL)) {}
+          TaskQueueFactory::Priority::kNormal)) {}
 
 RtcEventLogImpl::~RtcEventLogImpl() {
   // If we're logging to the output, this will stop that. Blocking function.
@@ -91,8 +93,8 @@ bool RtcEventLogImpl::StartLogging(std::unique_ptr<RtcEventLogOutput> output,
     return false;
   }
 
-  const int64_t timestamp_us = rtc::TimeMillis() * 1000;
-  const int64_t utc_time_us = rtc::TimeUTCMillis() * 1000;
+  const int64_t timestamp_us = env_.clock().TimeInMicroseconds();
+  const int64_t utc_time_us = TimeUTCMillis() * 1000;
   RTC_LOG(LS_INFO) << "Starting WebRTC event log. (Timestamp, UTC) = ("
                    << timestamp_us << ", " << utc_time_us << ").";
 
@@ -140,9 +142,9 @@ void RtcEventLogImpl::StopLogging() {
   // TODO(bugs.webrtc.org/14449): Do not block current thread waiting on the
   // task queue. It might work for now, for current callers, but disallows
   // caller to share threads with the `task_queue_`.
-  rtc::Event output_stopped;
+  Event output_stopped;
   StopLogging([&output_stopped]() { output_stopped.Set(); });
-  output_stopped.Wait(rtc::Event::kForever);
+  output_stopped.Wait(Event::kForever);
 
   RTC_DLOG(LS_INFO) << "WebRTC event log successfully stopped.";
 }
@@ -172,6 +174,7 @@ RtcEventLogImpl::EventHistories RtcEventLogImpl::ExtractRecentHistories() {
 void RtcEventLogImpl::Log(std::unique_ptr<RtcEvent> event) {
   RTC_CHECK(event);
   MutexLock lock(&mutex_);
+  event->SetTimestamp(env_.clock().CurrentTime());
 
   LogToMemory(std::move(event));
   if (logging_state_started_) {
@@ -226,10 +229,10 @@ void RtcEventLogImpl::ScheduleOutput() {
       LogEventsToOutput(std::move(histories));
     }
   };
-  const int64_t now_ms = rtc::TimeMillis();
+  const int64_t now_ms = env_.clock().TimeInMilliseconds();
   const int64_t time_since_output_ms = now_ms - last_output_ms_;
-  const int32_t delay = rtc::SafeClamp(output_period_ms_ - time_since_output_ms,
-                                       0, output_period_ms_);
+  const int32_t delay =
+      SafeClamp(output_period_ms_ - time_since_output_ms, 0, output_period_ms_);
   task_queue_->PostDelayedTask(std::move(output_task),
                                TimeDelta::Millis(delay));
 }
@@ -249,7 +252,7 @@ void RtcEventLogImpl::LogToMemory(std::unique_ptr<RtcEvent> event) {
 }
 
 void RtcEventLogImpl::LogEventsToOutput(EventHistories histories) {
-  last_output_ms_ = rtc::TimeMillis();
+  last_output_ms_ = env_.clock().TimeInMilliseconds();
 
   // Serialize the stream configurations.
   std::string encoded_configs = event_encoder_->EncodeBatch(
@@ -310,7 +313,7 @@ void RtcEventLogImpl::StopOutput() {
 void RtcEventLogImpl::StopLoggingInternal() {
   if (event_output_) {
     RTC_DCHECK(event_output_->IsActive());
-    const int64_t timestamp_us = rtc::TimeMillis() * 1000;
+    const int64_t timestamp_us = env_.clock().TimeInMicroseconds();
     event_output_->Write(event_encoder_->EncodeLogEnd(timestamp_us));
   }
   StopOutput();

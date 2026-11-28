@@ -28,6 +28,8 @@ rtc_library("primitives") {
     "desktop_geometry.h",
     "desktop_region.cc",
     "desktop_region.h",
+    "frame_texture.cc",
+    "frame_texture.h",
     "shared_desktop_frame.cc",
     "shared_desktop_frame.h",
     "shared_memory.cc",
@@ -36,63 +38,123 @@ rtc_library("primitives") {
 
   deps = [
     "../../api:scoped_refptr",
+    "../../api/video:video_common",
     "../../rtc_base:checks",
     "../../rtc_base:refcount",
+    "../../rtc_base:stringutils",
     "../../rtc_base/system:rtc_export",
+    "//third_party/abseil-cpp/absl/base:nullability",
     "//third_party/libyuv",
   ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("desktop_capture_modules_tests") {
-    testonly = true
-
-    defines = []
-    sources = []
+  rtc_cc_test("screen_capturer_integration_test") {
+    sources = [ "screen_capturer_integration_test.cc" ]
     deps = [
       ":desktop_capture",
+      ":desktop_capture_mock",
+      ":primitives",
+      ":screen_drawer",
       "../../api:function_view",
       "../../api:scoped_refptr",
+      "../../rtc_base:base64",
       "../../rtc_base:checks",
       "../../rtc_base:logging",
       "../../rtc_base:platform_thread",
       "../../rtc_base:random",
+      "../../rtc_base:threading",
       "../../rtc_base:timeutils",
+      "../../test:test_support",
     ]
-    if (rtc_desktop_capture_supported) {
-      deps += [
-        ":desktop_capture_mock",
-        ":primitives",
-        ":screen_drawer",
-        "../../rtc_base/third_party/base64",
-        "../../system_wrappers",
-        "../../test:test_support",
-        "../../test:video_test_support",
-      ]
-      sources += [
-        "screen_capturer_integration_test.cc",
-        "screen_drawer_unittest.cc",
-        "window_finder_unittest.cc",
-      ]
-
-      if ((is_linux || is_chromeos) && rtc_use_pipewire) {
-        configs += [ "../portal:gio" ]
-      }
-
-      public_configs = [ ":x11_config" ]
-
-      if (is_win) {
-        deps += [ "../../rtc_base/win:windows_version" ]
-      }
+    if (is_win) {
+      deps += [ "../../rtc_base/win:windows_version" ]
     }
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+    public_configs = [ ":x11_config" ]
+  }
+
+  rtc_cc_test("screen_drawer_unittest") {
+    sources = [ "screen_drawer_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":desktop_capture_mock",
+      ":primitives",
+      ":screen_drawer",
+      "../../api:function_view",
+      "../../api:scoped_refptr",
+      "../../rtc_base:base64",
+      "../../rtc_base:checks",
+      "../../rtc_base:logging",
+      "../../rtc_base:platform_thread",
+      "../../rtc_base:random",
+      "../../rtc_base:threading",
+      "../../rtc_base:timeutils",
+      "../../test:test_support",
+    ]
+    if (is_win) {
+      deps += [ "../../rtc_base/win:windows_version" ]
+    }
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+    public_configs = [ ":x11_config" ]
+  }
+
+  rtc_cc_test("window_finder_unittest") {
+    sources = [ "window_finder_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":desktop_capture_mock",
+      ":primitives",
+      ":screen_drawer",
+      "../../api:function_view",
+      "../../api:scoped_refptr",
+      "../../rtc_base:base64",
+      "../../rtc_base:checks",
+      "../../rtc_base:logging",
+      "../../rtc_base:platform_thread",
+      "../../rtc_base:random",
+      "../../rtc_base:threading",
+      "../../rtc_base:timeutils",
+      "../../test:test_support",
+    ]
+    if (is_win) {
+      deps += [ "../../rtc_base/win:windows_version" ]
+    }
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+    public_configs = [ ":x11_config" ]
+  }
+
+  rtc_test_suite("desktop_capture_modules_tests") {
+    tests = [
+      ":screen_capturer_integration_test",
+      ":screen_drawer_unittest",
+      ":window_finder_unittest",
+    ]
   }
 
   if ((is_linux || is_chromeos) && rtc_use_pipewire) {
-    rtc_test("shared_screencast_stream_test") {
-      testonly = true
+    rtc_cc_test("restore_token_manager_unittest") {
+      sources = [ "linux/wayland/restore_token_manager_unittest.cc" ]
+      configs += [ "../portal:gio" ]
+      deps = [
+        ":desktop_capture",
+        ":primitives",
+        "../../test:test_support",
+        "../portal",
+      ]
+    }
 
+    rtc_cc_test("shared_screencast_stream_unittest") {
       sources = [
         "linux/wayland/shared_screencast_stream_unittest.cc",
+        "linux/wayland/test/test_egl_dmabuf.cc",
+        "linux/wayland/test/test_egl_dmabuf.h",
         "linux/wayland/test/test_screencast_stream_provider.cc",
         "linux/wayland/test/test_screencast_stream_provider.h",
       ]
@@ -103,9 +165,11 @@ if (rtc_include_tests) {
         ":desktop_capture",
         ":desktop_capture_mock",
         ":primitives",
+        "../../api:scoped_refptr",
         "../../rtc_base:checks",
         "../../rtc_base:logging",
         "../../rtc_base:random",
+        "../../rtc_base:stringutils",
         "../../rtc_base:timeutils",
         "../portal",
 
@@ -114,97 +178,361 @@ if (rtc_include_tests) {
         "../../rtc_base:task_queue_for_test",
         "../../rtc_base:threading",
         "../../system_wrappers",
-        "../../test:test_main",
         "../../test:test_support",
         "//api/units:time_delta",
         "//rtc_base:rtc_event",
       ]
 
-      data = [ "../../third_party/pipewire" ]
+      data = [ "../../third_party/wireplumber" ]
+      data_deps = [ "//third_party/pipewire:all" ]
       public_configs = [ "../portal:pipewire_config" ]
+    }
+
+    rtc_test_suite("shared_screencast_stream_test") {
+      tests = [ ":shared_screencast_stream_unittest" ]
     }
   }
 
-  rtc_library("desktop_capture_unittests") {
+  rtc_library("test_utils") {
     testonly = true
-
-    defines = []
     sources = [
-      "blank_detector_desktop_capturer_wrapper_unittest.cc",
-      "cropped_desktop_frame_unittest.cc",
-      "desktop_and_cursor_composer_unittest.cc",
-      "desktop_capturer_differ_wrapper_unittest.cc",
-      "desktop_frame_rotation_unittest.cc",
-      "desktop_frame_unittest.cc",
-      "desktop_geometry_unittest.cc",
-      "desktop_region_unittest.cc",
-      "differ_block_unittest.cc",
-      "fallback_desktop_capturer_wrapper_unittest.cc",
-      "rgba_color_unittest.cc",
       "test_utils.cc",
       "test_utils.h",
-      "test_utils_unittest.cc",
     ]
+    deps = [
+      ":primitives",
+      "../../rtc_base:checks",
+    ]
+  }
 
-    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
-      configs += [ "../portal:gio" ]
-    }
+  rtc_cc_test("desktop_frame_texture_unittest") {
+    sources = [ "desktop_frame_texture_unittest.cc" ]
+    deps = [
+      ":primitives",
+      "../../test:test_support",
+    ]
+  }
 
+  rtc_cc_test("desktop_frame_unittest") {
+    sources = [ "desktop_frame_unittest.cc" ]
+    deps = [
+      ":primitives",
+      "../../test:test_support",
+    ]
+  }
+
+  rtc_cc_test("desktop_geometry_unittest") {
+    sources = [ "desktop_geometry_unittest.cc" ]
+    deps = [
+      ":primitives",
+      "../../test:test_support",
+    ]
+  }
+
+  rtc_cc_test("desktop_region_unittest") {
+    sources = [ "desktop_region_unittest.cc" ]
+    deps = [
+      ":primitives",
+      "../../test:test_support",
+    ]
+  }
+
+  rtc_cc_test("desktop_capturer_differ_wrapper_unittest") {
+    sources = [ "desktop_capturer_differ_wrapper_unittest.cc" ]
     deps = [
       ":desktop_capture",
       ":desktop_capture_mock",
       ":primitives",
+      ":test_utils",
+      "../../api/units:time_delta",
+      "../../api/units:timestamp",
       "../../rtc_base:checks",
-      "../../rtc_base:logging",
-      "../../rtc_base:macromagic",
       "../../rtc_base:random",
-      "../../rtc_base:timeutils",
-
-      # TODO(bugs.webrtc.org/9987): Remove this dep on rtc_base:rtc_base once
-      # rtc_base:threading is fully defined.
-      "../../rtc_base:task_queue_for_test",
-      "../../rtc_base:threading",
       "../../system_wrappers",
       "../../test:test_support",
     ]
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+  }
 
-    if (is_win) {
-      sources += [
-        "win/cursor_unittest.cc",
-        "win/cursor_unittest_resources.h",
-        "win/cursor_unittest_resources.rc",
-        "win/screen_capture_utils_unittest.cc",
-        "win/screen_capturer_win_directx_unittest.cc",
+  rtc_cc_test("differ_block_unittest") {
+    sources = [ "differ_block_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      "../../test:test_support",
+    ]
+  }
+
+  rtc_cc_test("blank_detector_desktop_capturer_wrapper_unittest") {
+    sources = [ "blank_detector_desktop_capturer_wrapper_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":primitives",
+      "../../test:test_support",
+    ]
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+  }
+
+  rtc_cc_test("desktop_and_cursor_composer_unittest") {
+    sources = [ "desktop_and_cursor_composer_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":primitives",
+      "../../test:test_support",
+    ]
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+  }
+
+  rtc_cc_test("fallback_desktop_capturer_wrapper_unittest") {
+    sources = [ "fallback_desktop_capturer_wrapper_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":primitives",
+      "../../system_wrappers:metrics",
+      "../../test:test_support",
+    ]
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+  }
+
+  rtc_cc_test("cropped_desktop_frame_unittest") {
+    sources = [ "cropped_desktop_frame_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":primitives",
+      "../../test:test_support",
+    ]
+  }
+
+  rtc_cc_test("desktop_frame_rotation_unittest") {
+    sources = [ "desktop_frame_rotation_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":primitives",
+      ":test_utils",
+      "../../test:test_support",
+    ]
+  }
+
+  rtc_cc_test("rgba_color_unittest") {
+    sources = [ "rgba_color_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      "../../test:test_support",
+    ]
+  }
+
+  rtc_cc_test("test_utils_unittest") {
+    sources = [ "test_utils_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":primitives",
+      ":test_utils",
+      "../../test:test_support",
+    ]
+  }
+
+  if (is_win) {
+    rtc_library("test_window") {
+      testonly = true
+      sources = [
         "win/test_support/test_window.cc",
         "win/test_support/test_window.h",
-        "win/window_capture_utils_unittest.cc",
-      ]
-      deps += [
-        "../../rtc_base/win:scoped_com_initializer",
-        "../../rtc_base/win:windows_version",
       ]
     }
 
-    if (rtc_desktop_capture_supported) {
-      sources += [
-        "screen_capturer_helper_unittest.cc",
-        "screen_capturer_unittest.cc",
-        "window_capturer_unittest.cc",
+    rtc_cc_test("cursor_unittest") {
+      sources = [
+        "win/cursor_unittest.cc",
+        "win/cursor_unittest_resources.h",
+        "win/cursor_unittest_resources.rc",
       ]
-      if (is_mac) {
-        sources += [ "screen_capturer_mac_unittest.cc" ]
-      }
+      deps = [
+        ":desktop_capture",
+        ":primitives",
+        "../../test:test_support",
+      ]
+    }
+
+    rtc_cc_test("full_screen_win_application_handler_unittest") {
+      sources = [ "win/full_screen_win_application_handler_unittest.cc" ]
+      deps = [
+        ":desktop_capture",
+        ":primitives",
+        ":test_window",
+        "../../test:test_support",
+      ]
+    }
+
+    rtc_cc_test("screen_capture_utils_unittest") {
+      sources = [ "win/screen_capture_utils_unittest.cc" ]
+      deps = [
+        ":desktop_capture",
+        ":primitives",
+        "../../rtc_base:logging",
+        "../../test:test_support",
+      ]
+    }
+
+    rtc_cc_test("screen_capturer_win_directx_unittest") {
+      sources = [ "win/screen_capturer_win_directx_unittest.cc" ]
+      deps = [
+        ":desktop_capture",
+        ":primitives",
+        ":test_window",
+        "../../test:test_support",
+      ]
+    }
+
+    rtc_cc_test("window_capture_utils_unittest") {
+      sources = [ "win/window_capture_utils_unittest.cc" ]
+      deps = [
+        ":desktop_capture",
+        ":primitives",
+        ":test_window",
+        "../../rtc_base:task_queue_for_test",
+        "../../rtc_base:threading",
+        "../../test:test_support",
+      ]
+    }
+
+    rtc_test_suite("desktop_capture_win_unittests") {
+      tests = [
+        ":cursor_unittest",
+        ":full_screen_win_application_handler_unittest",
+        ":screen_capture_utils_unittest",
+        ":screen_capturer_win_directx_unittest",
+        ":window_capture_utils_unittest",
+      ]
       if (rtc_enable_win_wgc) {
-        sources += [
-          "win/wgc_capture_source_unittest.cc",
-          "win/wgc_capturer_win_unittest.cc",
+        tests += [
+          ":wgc_capture_source_unittest",
+          ":wgc_capturer_win_unittest",
         ]
       }
-      deps += [
+    }
+  }
+
+  rtc_cc_test("screen_capturer_helper_unittest") {
+    sources = [ "screen_capturer_helper_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":primitives",
+      "../../test:test_support",
+    ]
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+  }
+
+  rtc_cc_test("screen_capturer_unittest") {
+    sources = [ "screen_capturer_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":desktop_capture_mock",
+      ":primitives",
+      "../../rtc_base:logging",
+      "../../test:test_support",
+    ]
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+  }
+
+  rtc_cc_test("window_capturer_unittest") {
+    sources = [ "window_capturer_unittest.cc" ]
+    deps = [
+      ":desktop_capture",
+      ":desktop_capture_mock",
+      ":primitives",
+      "../../test:test_support",
+    ]
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      configs += [ "../portal:gio" ]
+    }
+  }
+
+  if (is_mac) {
+    rtc_cc_test("screen_capturer_mac_unittest") {
+      sources = [ "screen_capturer_mac_unittest.cc" ]
+      deps = [
+        ":desktop_capture",
         ":desktop_capture_mock",
-        "../../system_wrappers:metrics",
+        ":primitives",
+        "../../test:test_support",
       ]
-      public_configs = [ ":x11_config" ]
+    }
+
+    rtc_test_suite("desktop_capture_mac_unittests") {
+      tests = [ ":screen_capturer_mac_unittest" ]
+    }
+  }
+
+  if (rtc_enable_win_wgc) {
+    rtc_cc_test("wgc_capture_source_unittest") {
+      sources = [ "win/wgc_capture_source_unittest.cc" ]
+      deps = [
+        ":desktop_capture",
+        ":primitives",
+        ":test_window",
+        "../../rtc_base:checks",
+        "../../rtc_base:logging",
+        "../../rtc_base/win:scoped_com_initializer",
+        "../../test:test_support",
+      ]
+    }
+
+    rtc_cc_test("wgc_capturer_win_unittest") {
+      sources = [ "win/wgc_capturer_win_unittest.cc" ]
+      deps = [
+        ":desktop_capture",
+        ":primitives",
+        ":test_window",
+        "../../api:make_ref_counted",
+        "../../rtc_base:logging",
+        "../../rtc_base:task_queue_for_test",
+        "../../rtc_base:threading",
+        "../../rtc_base:timeutils",
+        "../../rtc_base/win:scoped_com_initializer",
+        "../../rtc_base/win:windows_version",
+        "../../system_wrappers:metrics",
+        "../../test:test_support",
+      ]
+    }
+  }
+
+  rtc_test_suite("xvfb_capture_tests") {
+    tests = [
+      ":screen_capturer_unittest",
+      ":window_capturer_unittest",
+    ]
+  }
+
+  rtc_test_suite("desktop_capture_unittests") {
+    tests = [
+      ":blank_detector_desktop_capturer_wrapper_unittest",
+      ":cropped_desktop_frame_unittest",
+      ":desktop_and_cursor_composer_unittest",
+      ":desktop_capturer_differ_wrapper_unittest",
+      ":desktop_frame_rotation_unittest",
+      ":desktop_frame_texture_unittest",
+      ":desktop_frame_unittest",
+      ":desktop_geometry_unittest",
+      ":desktop_region_unittest",
+      ":differ_block_unittest",
+      ":fallback_desktop_capturer_wrapper_unittest",
+      ":rgba_color_unittest",
+      ":screen_capturer_helper_unittest",
+      ":test_utils_unittest",
+    ]
+    if ((is_linux || is_chromeos) && rtc_use_pipewire) {
+      tests += [ ":restore_token_manager_unittest" ]
     }
   }
 
@@ -235,9 +563,9 @@ if (rtc_include_tests) {
       "../../api:scoped_refptr",
       "../../rtc_base:checks",
       "../../rtc_base:logging",
-      "../../system_wrappers",
+      "../../rtc_base:threading",
+      "//third_party/abseil-cpp/absl/strings:string_view",
     ]
-    absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 
     if (is_posix || is_fuchsia) {
       sources += [
@@ -277,7 +605,19 @@ if ((is_linux || is_chromeos) && rtc_use_pipewire) {
 rtc_library("desktop_capture") {
   visibility = [ "*" ]
   defines = []
-  deps = []
+  deps = [
+    "../../api/environment",
+    "../../api/units:time_delta",
+    "../../api/units:timestamp",
+    "../../api/video:video_common",
+    "../../rtc_base/containers:flat_map",
+    "../../rtc_base/containers:flat_set",
+    "../../system_wrappers",
+    "//third_party/abseil-cpp/absl/base:nullability",
+    "//third_party/abseil-cpp/absl/memory",
+    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/strings:string_view",
+  ]
   public_configs = [ ":x11_config" ]
   sources = [
     "blank_detector_desktop_capturer_wrapper.cc",
@@ -289,6 +629,7 @@ rtc_library("desktop_capture") {
     "delegated_source_list_controller.h",
     "desktop_and_cursor_composer.cc",
     "desktop_and_cursor_composer.h",
+    "desktop_capture_metadata.h",
     "desktop_capture_metrics_helper.cc",
     "desktop_capture_metrics_helper.h",
     "desktop_capture_options.cc",
@@ -326,9 +667,6 @@ rtc_library("desktop_capture") {
     "window_finder.cc",
     "window_finder.h",
   ]
-  if (is_linux && !is_castos && rtc_use_pipewire) {
-    sources += [ "desktop_capture_metadata.h" ]
-  }
   if (is_mac) {
     sources += [
       "mac/desktop_configuration.h",
@@ -405,8 +743,11 @@ rtc_library("desktop_capture") {
       "Xdamage",
       "Xext",
       "Xfixes",
-      "Xrender",
+
+      # Xrandr depends on Xrender and needs to be listed before its dependency.
       "Xrandr",
+
+      "Xrender",
       "Xtst",
     ]
   }
@@ -428,6 +769,7 @@ rtc_library("desktop_capture") {
     "../../api:scoped_refptr",
     "../../api:sequence_checker",
     "../../rtc_base:checks",
+    "../../rtc_base:cpu_info",
     "../../rtc_base:event_tracer",
     "../../rtc_base:logging",
     "../../rtc_base:macromagic",
@@ -438,7 +780,6 @@ rtc_library("desktop_capture") {
     "../../rtc_base/system:arch",
     "../../rtc_base/system:no_unique_address",
     "../../rtc_base/system:rtc_export",
-    "../../system_wrappers",
     "../../system_wrappers:metrics",
   ]
 
@@ -453,8 +794,7 @@ rtc_library("desktop_capture") {
       "../../rtc_base:divide_round",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.sysmem",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.composition",
-      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.scenic",
-      "//third_party/fuchsia-sdk/sdk/pkg/scenic_cpp",
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.display.singleton",
       "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
     ]
   }
@@ -521,6 +861,7 @@ rtc_library("desktop_capture") {
       "shcore.lib",
     ]
     deps += [
+      "../../rtc_base:threading",
       "../../rtc_base:win32",
       "../../rtc_base/containers:flat_map",
       "../../rtc_base/win:create_direct3d_device",
@@ -528,12 +869,6 @@ rtc_library("desktop_capture") {
       "../../rtc_base/win:windows_version",
     ]
   }
-
-  absl_deps = [
-    "//third_party/abseil-cpp/absl/memory",
-    "//third_party/abseil-cpp/absl/strings",
-    "//third_party/abseil-cpp/absl/types:optional",
-  ]
 
   if (rtc_use_x11_extensions) {
     deps += [ "../../rtc_base:sanitizer" ]
@@ -583,6 +918,8 @@ rtc_library("desktop_capture") {
 
   if (rtc_enable_win_wgc) {
     sources += [
+      "win/dxgi_desktop_frame.cc",
+      "win/dxgi_desktop_frame.h",
       "win/wgc_capture_session.cc",
       "win/wgc_capture_session.h",
       "win/wgc_capture_source.cc",
@@ -594,7 +931,9 @@ rtc_library("desktop_capture") {
     ]
     libs += [ "dwmapi.lib" ]
     deps += [
+      "../../api/units:time_delta",
       "../../rtc_base:rtc_event",
+      "../../rtc_base:threading",
       "../../rtc_base/win:hstring",
     ]
   }
@@ -615,6 +954,7 @@ if (is_mac) {
     visibility = [ ":desktop_capture" ]
     sources = [
       "delegated_source_list_controller.h",
+      "desktop_capture_metadata.h",
       "desktop_capture_options.h",
       "desktop_capturer.h",
       "full_screen_application_handler.h",
@@ -628,8 +968,12 @@ if (is_mac) {
       "mac/desktop_frame_iosurface.mm",
       "mac/desktop_frame_provider.h",
       "mac/desktop_frame_provider.mm",
+      "mac/sck_picker_handle.h",
+      "mac/sck_picker_handle.mm",
       "mac/screen_capturer_mac.h",
       "mac/screen_capturer_mac.mm",
+      "mac/screen_capturer_sck.h",
+      "mac/screen_capturer_sck.mm",
       "mac/window_list_utils.h",
       "mouse_cursor.h",
       "mouse_cursor_monitor.h",
@@ -648,20 +992,27 @@ if (is_mac) {
       "../../api:refcountedbase",
       "../../api:scoped_refptr",
       "../../api:sequence_checker",
+      "../../api/environment",
       "../../rtc_base:checks",
       "../../rtc_base:event_tracer",
       "../../rtc_base:logging",
       "../../rtc_base:macromagic",
+      "../../rtc_base:safe_conversions",
       "../../rtc_base:timeutils",
       "../../rtc_base/synchronization:mutex",
       "../../rtc_base/system:rtc_export",
       "../../sdk:helpers_objc",
+      "../../system_wrappers",
+      "//third_party/abseil-cpp/absl/base:nullability",
+      "//third_party/abseil-cpp/absl/strings:str_format",
     ]
     frameworks = [
       "AppKit.framework",
+      "CoreVideo.framework",
       "IOKit.framework",
       "IOSurface.framework",
     ]
+    weak_frameworks = [ "ScreenCaptureKit.framework" ]  # macOS 12.3
   }
 }
 

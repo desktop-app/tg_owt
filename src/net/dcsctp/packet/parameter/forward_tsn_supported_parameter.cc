@@ -9,12 +9,11 @@
  */
 #include "net/dcsctp/packet/parameter/forward_tsn_supported_parameter.h"
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
 #include <vector>
-
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 
 namespace dcsctp {
 
@@ -24,12 +23,11 @@ namespace dcsctp {
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //  |    Parameter Type = 49152     |  Parameter Length = 4         |
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int ForwardTsnSupportedParameter::kType;
 
-absl::optional<ForwardTsnSupportedParameter>
-ForwardTsnSupportedParameter::Parse(rtc::ArrayView<const uint8_t> data) {
+std::optional<ForwardTsnSupportedParameter> ForwardTsnSupportedParameter::Parse(
+    std::span<const uint8_t> data) {
   if (!ParseTLV(data).has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return ForwardTsnSupportedParameter();
 }

@@ -10,24 +10,26 @@
 #ifndef NET_DCSCTP_TX_RR_SEND_QUEUE_H_
 #define NET_DCSCTP_TX_RR_SEND_QUEUE_H_
 
-#include <cstdint>
+#include <cstddef>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
-#include <string>
+#include <optional>
 #include <utility>
 #include <vector>
 
-#include "absl/algorithm/container.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "api/units/timestamp.h"
 #include "net/dcsctp/common/internal_types.h"
+#include "net/dcsctp/public/dcsctp_handover_state.h"
 #include "net/dcsctp/public/dcsctp_message.h"
+#include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
 #include "net/dcsctp/public/types.h"
 #include "net/dcsctp/tx/send_queue.h"
 #include "net/dcsctp/tx/stream_scheduler.h"
+#include "rtc_base/checks.h"
 
 namespace dcsctp {
 
@@ -56,10 +58,10 @@ class RRSendQueue : public SendQueue {
  public:
   RRSendQueue(absl::string_view log_prefix,
               DcSctpSocketCallbacks* callbacks,
-              size_t buffer_size,
               size_t mtu,
               StreamPriority default_priority,
-              size_t total_buffered_amount_low_threshold);
+              size_t total_buffered_amount_low_threshold,
+              const DcSctpOptions& options = {});
 
   // Indicates if the buffer is full. Note that it's up to the caller to ensure
   // that the buffer is not full prior to adding new items to it.
@@ -76,8 +78,8 @@ class RRSendQueue : public SendQueue {
            const SendOptions& send_options = {});
 
   // Implementation of `SendQueue`.
-  absl::optional<DataToSend> Produce(webrtc::Timestamp now,
-                                     size_t max_size) override;
+  std::optional<DataToSend> Produce(webrtc::Timestamp now,
+                                    size_t max_size) override;
   bool Discard(StreamID stream_id, OutgoingMessageId message_id) override;
   void PrepareResetStream(StreamID streams) override;
   bool HasStreamsReadyToBeReset() const override;
@@ -98,8 +100,10 @@ class RRSendQueue : public SendQueue {
   void SetStreamPriority(StreamID stream_id, StreamPriority priority);
   StreamPriority GetStreamPriority(StreamID stream_id) const;
   HandoverReadinessStatus GetHandoverReadiness() const;
-  void AddHandoverState(DcSctpSocketHandoverState& state);
-  void RestoreFromState(const DcSctpSocketHandoverState& state);
+  void AddHandoverState(webrtc::Timestamp now,
+                        DcSctpSocketHandoverState& state) const override;
+  void RestoreFromState(webrtc::Timestamp now,
+                        const DcSctpSocketHandoverState& state) override;
 
  private:
   struct MessageAttributes {
@@ -154,9 +158,13 @@ class RRSendQueue : public SendQueue {
     // Enqueues a message to this stream.
     void Add(DcSctpMessage message, MessageAttributes attributes);
 
+    void RestoreItemFromState(
+        webrtc::Timestamp now,
+        const DcSctpSocketHandoverState::StreamMessage& msg);
+
     // Implementing `StreamScheduler::StreamProducer`.
-    absl::optional<SendQueue::DataToSend> Produce(webrtc::Timestamp now,
-                                                  size_t max_size) override;
+    std::optional<SendQueue::DataToSend> Produce(webrtc::Timestamp now,
+                                                 size_t max_size) override;
     size_t bytes_to_send_in_next_message() const override;
 
     const ThresholdWatcher& buffered_amount() const { return buffered_amount_; }
@@ -195,6 +203,9 @@ class RRSendQueue : public SendQueue {
 
     void AddHandoverState(
         DcSctpSocketHandoverState::OutgoingStream& state) const;
+    void AddQueuedMessagesToHandoverState(
+        webrtc::Timestamp now,
+        DcSctpSocketHandoverState& state) const;
 
    private:
     // Streams are paused before they can be reset. To reset a stream, the
@@ -236,8 +247,8 @@ class RRSendQueue : public SendQueue {
       size_t remaining_size;
       // If set, an allocated Message ID and SSN. Will be allocated when the
       // first fragment is sent.
-      absl::optional<MID> mid = absl::nullopt;
-      absl::optional<SSN> ssn = absl::nullopt;
+      std::optional<MID> mid = std::nullopt;
+      std::optional<SSN> ssn = std::nullopt;
       // The current Fragment Sequence Number, incremented for each fragment.
       FSN current_fsn = FSN(0);
     };
@@ -264,15 +275,15 @@ class RRSendQueue : public SendQueue {
 
   bool IsConsistent() const;
   OutgoingStream& GetOrCreateStreamInfo(StreamID stream_id);
-  absl::optional<DataToSend> Produce(
+  std::optional<DataToSend> Produce(
       std::map<StreamID, OutgoingStream>::iterator it,
       webrtc::Timestamp now,
       size_t max_size);
 
   const absl::string_view log_prefix_;
   DcSctpSocketCallbacks& callbacks_;
-  const size_t buffer_size_;
   const StreamPriority default_priority_;
+  const DcSctpOptions options_;
   OutgoingMessageId current_message_id = OutgoingMessageId(0);
   StreamScheduler scheduler_;
 

@@ -13,16 +13,20 @@
 
 #include <stddef.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
+#include "api/field_trials_view.h"
+#include "api/ref_count.h"
 #include "api/scoped_refptr.h"
 #include "api/video/resolution.h"
+#include "api/video/video_codec_constants.h"
+#include "api/video/video_codec_type.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/sdp_video_format.h"
+#include "api/video_codecs/spatial_layer.h"
 #include "api/video_codecs/video_codec.h"
-#include "rtc_base/ref_count.h"
 
 namespace webrtc {
 
@@ -35,7 +39,7 @@ struct VideoStream {
 
   // Width/Height in pixels.
   // This is the actual width and height used to configure encoder,
-  // which might be less than `requested_resolution` due to adaptation
+  // which might be less than `scale_resolution_down_to` due to adaptation
   // or due to the source providing smaller frames than requested.
   size_t width;
   size_t height;
@@ -61,27 +65,34 @@ struct VideoStream {
   // (meaning that this field _must_ be set), and for signaling the app-level
   // encoder settings (meaning that the field _may_ be set). We should separate
   // this and remove this optional instead.
-  absl::optional<size_t> num_temporal_layers;
+  std::optional<size_t> num_temporal_layers;
 
   // The priority of this stream, to be used when allocating resources
   // between multiple streams.
-  absl::optional<double> bitrate_priority;
+  std::optional<double> bitrate_priority;
 
-  absl::optional<ScalabilityMode> scalability_mode;
+  std::optional<ScalabilityMode> scalability_mode;
 
   // If this stream is enabled by the user, or not.
   bool active;
 
   // An optional user supplied max_frame_resolution
   // than can be set independently of (adapted) VideoSource.
-  // This value is set from RtpEncodingParameters::requested_resolution
+  // This value is set from RtpEncodingParameters::scale_resolution_down_to
   // (i.e. used for signaling app-level settings).
   //
   // The actual encode resolution is in `width` and `height`,
-  // which can be lower than requested_resolution,
+  // which can be lower than scale_resolution_down_to,
   // e.g. if source only provides lower resolution or
   // if resource adaptation is active.
-  absl::optional<Resolution> requested_resolution;
+  std::optional<Resolution> scale_resolution_down_to;
+
+  // The video format for the stream
+  // This should be set for mixed-codec simulcast, while for other cases,
+  // it is optional and can be unset.
+  std::optional<SdpVideoFormat> video_format;
+
+  std::optional<VideoCodecComplexity> encoding_complexity;
 };
 
 class VideoEncoderConfig {
@@ -89,8 +100,8 @@ class VideoEncoderConfig {
   // These are reference counted to permit copying VideoEncoderConfig and be
   // kept alive until all encoder_specific_settings go out of scope.
   // TODO(kthelgason): Consider removing the need for copying VideoEncoderConfig
-  // and use absl::optional for encoder_specific_settings instead.
-  class EncoderSpecificSettings : public rtc::RefCountInterface {
+  // and use std::optional for encoder_specific_settings instead.
+  class EncoderSpecificSettings : public RefCountInterface {
    public:
     // TODO(pbos): Remove FillEncoderSpecificSettings as soon as VideoCodec is
     // not in use and encoder implementations ask for codec-specific structs
@@ -138,13 +149,14 @@ class VideoEncoderConfig {
     kScreen,
   };
 
-  class VideoStreamFactoryInterface : public rtc::RefCountInterface {
+  class VideoStreamFactoryInterface : public RefCountInterface {
    public:
     // An implementation should return a std::vector<VideoStream> with the
     // wanted VideoStream settings for the given video resolution.
     // The size of the vector may not be larger than
     // `encoder_config.number_of_streams`.
     virtual std::vector<VideoStream> CreateEncoderStreams(
+        const FieldTrialsView& field_trials,
         int frame_width,
         int frame_height,
         const VideoEncoderConfig& encoder_config) = 0;
@@ -164,6 +176,12 @@ class VideoEncoderConfig {
   ~VideoEncoderConfig();
   std::string ToString() const;
 
+  bool HasScaleResolutionDownTo() const;
+
+  bool HasScaleResolutionDownBy() const;
+
+  SdpVideoFormat GetSimulcastVideoFormat(size_t stream_index) const;
+
   // TODO(bugs.webrtc.org/6883): Consolidate on one of these.
   VideoCodecType codec_type;
   SdpVideoFormat video_format;
@@ -171,11 +189,11 @@ class VideoEncoderConfig {
   // Note: This factory can be unset, and VideoStreamEncoder will
   // then use the EncoderStreamFactory. The factory is only set by
   // tests.
-  rtc::scoped_refptr<VideoStreamFactoryInterface> video_stream_factory;
+  scoped_refptr<VideoStreamFactoryInterface> video_stream_factory;
   std::vector<SpatialLayer> spatial_layers;
   ContentType content_type;
   bool frame_drop_enabled;
-  rtc::scoped_refptr<const EncoderSpecificSettings> encoder_specific_settings;
+  scoped_refptr<const EncoderSpecificSettings> encoder_specific_settings;
 
   // Padding will be used up to this bitrate regardless of the bitrate produced
   // by the encoder. Padding above what's actually produced by the encoder helps
@@ -207,6 +225,9 @@ class VideoEncoderConfig {
 
   // Indicates whether quality scaling can be used or not.
   bool is_quality_scaling_allowed;
+
+  // Allow zero-hertz mode for regular video.
+  bool allow_zero_hertz_video;
 
   // Maximum Quantization Parameter.
   // This value is fed into EncoderStreamFactory that

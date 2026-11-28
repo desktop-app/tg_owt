@@ -10,9 +10,11 @@
 
 #include "rtc_base/cpu_time.h"
 
+#include <cstdint>
+
 #include "rtc_base/platform_thread.h"
+#include "rtc_base/thread.h"
 #include "rtc_base/time_utils.h"
-#include "system_wrappers/include/sleep.h"
 #include "test/gtest.h"
 
 // Only run these tests on non-instrumented builds, because timing on
@@ -24,24 +26,23 @@
 #define MAYBE_TEST(test_name) test_name
 #endif
 
+namespace webrtc {
+
 namespace {
-const int kAllowedErrorMillisecs = 30;
-const int kProcessingTimeMillisecs = 500;
-const int kWorkingThreads = 2;
+constexpr int kAllowedErrorMillisecs = 30;
+constexpr int kProcessingTimeMillisecs = 500;
+constexpr int kWorkingThreads = 2;
 
 // Consumes approximately kProcessingTimeMillisecs of CPU time in single thread.
 void WorkingFunction(int64_t* counter) {
   *counter = 0;
-  int64_t stop_cpu_time =
-      rtc::GetThreadCpuTimeNanos() +
-      kProcessingTimeMillisecs * rtc::kNumNanosecsPerMillisec;
-  while (rtc::GetThreadCpuTimeNanos() < stop_cpu_time) {
+  int64_t stop_cpu_time = GetThreadCpuTimeNanos() +
+                          kProcessingTimeMillisecs * kNumNanosecsPerMillisec;
+  while (GetThreadCpuTimeNanos() < stop_cpu_time) {
     (*counter)++;
   }
 }
 }  // namespace
-
-namespace rtc {
 
 // A minimal test which can be run on instrumented builds, so that they're at
 // least exercising the code to check for memory leaks/etc.
@@ -89,7 +90,7 @@ TEST(CpuTimeTest, MAYBE_TEST(TwoThreads)) {
 
 TEST(CpuTimeTest, MAYBE_TEST(Sleeping)) {
   int64_t process_start_time_nanos = GetProcessCpuTimeNanos();
-  webrtc::SleepMs(kProcessingTimeMillisecs);
+  Thread::SleepMs(kProcessingTimeMillisecs);
   int64_t process_duration_nanos =
       GetProcessCpuTimeNanos() - process_start_time_nanos;
   // Sleeping should not introduce any additional CPU time.
@@ -99,4 +100,4 @@ TEST(CpuTimeTest, MAYBE_TEST(Sleeping)) {
                 kNumNanosecsPerMillisec);
 }
 
-}  // namespace rtc
+}  // namespace webrtc

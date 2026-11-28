@@ -21,7 +21,7 @@
 // RTC_LOG(sev) logs the given stream at severity "sev", which must be a
 //     compile-time constant of the LoggingSeverity type, without the namespace
 //     prefix.
-// RTC_LOG_IF(sev, condition) logs the given stream at severitye "sev" if
+// RTC_LOG_IF(sev, condition) logs the given stream at severity "sev" if
 //     "condition" is true.
 // RTC_LOG_V(sev) Like RTC_LOG(), but sev is a run-time variable of the
 //     LoggingSeverity type (basically, it just doesn't prepend the namespace).
@@ -50,16 +50,20 @@
 
 #include <errno.h>
 
-#include <atomic>
-#include <sstream>  // no-presubmit-check TODO(webrtc:8982)
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
-#include "absl/base/attributes.h"
-#include "absl/meta/type_traits.h"
+#include "absl/strings/has_absl_stringify.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/units/timestamp.h"
 #include "rtc_base/platform_thread_types.h"
 #include "rtc_base/strings/string_builder.h"
@@ -77,7 +81,7 @@
 #define RTC_LOG_ENABLED() 1
 #endif
 
-namespace rtc {
+namespace webrtc {
 
 //////////////////////////////////////////////////////////////////////
 // The meanings of the levels are:
@@ -115,41 +119,60 @@ class LogMessage;
 // the most flexible way.
 class LogLineRef {
  public:
+  ~LogLineRef();
+
   absl::string_view message() const { return message_; }
   absl::string_view filename() const { return filename_; }
   int line() const { return line_; }
-  absl::optional<PlatformThreadId> thread_id() const { return thread_id_; }
-  webrtc::Timestamp timestamp() const { return timestamp_; }
+  std::optional<PlatformThreadId> thread_id() const { return thread_id_; }
+  Timestamp timestamp() const { return timestamp_; }
   absl::string_view tag() const { return tag_; }
   LoggingSeverity severity() const { return severity_; }
+  absl::string_view queue_name() const { return queue_name_; }
 
-#if RTC_LOG_ENABLED()
-  std::string DefaultLogLine() const;
-#else
-  std::string DefaultLogLine() const { return ""; }
-#endif
+  // Returns the log line in the default format: the log prefix, timestamp,
+  // thread and file information, followed by the message. It is formatted on
+  // first use and then cached, so that all consumers of a log message share
+  // it. Since the cache isn't synchronized, a LogLineRef must not be used on
+  // several threads at the same time.
+  const std::string& DefaultLogLine() const;
 
  private:
   friend class LogMessage;
-  void set_message(std::string message) { message_ = std::move(message); }
+  LogLineRef();
+  void set_message(std::string message) {
+    message_ = std::move(message);
+    default_log_line_.reset();
+  }
   void set_filename(absl::string_view filename) { filename_ = filename; }
   void set_line(int line) { line_ = line; }
-  void set_thread_id(absl::optional<PlatformThreadId> thread_id) {
+  void set_thread_id(std::optional<PlatformThreadId> thread_id) {
     thread_id_ = thread_id;
   }
-  void set_timestamp(webrtc::Timestamp timestamp) { timestamp_ = timestamp; }
+  void set_timestamp(Timestamp timestamp) { timestamp_ = timestamp; }
   void set_tag(absl::string_view tag) { tag_ = tag; }
   void set_severity(LoggingSeverity severity) { severity_ = severity; }
+  void set_queue_name(absl::string_view queue_name) {
+    queue_name_ = queue_name;
+  }
 
   std::string message_;
   absl::string_view filename_;
+  // The name of the task queue or thread that generated the log.
+  // Ownership of the string backing the string_view is assumed to live
+  // reliably for the duration of the logging operation (owned by the active
+  // TaskQueue object).
+  absl::string_view queue_name_;
+
   int line_ = 0;
-  absl::optional<PlatformThreadId> thread_id_;
-  webrtc::Timestamp timestamp_ = webrtc::Timestamp::MinusInfinity();
+  std::optional<PlatformThreadId> thread_id_;
+  Timestamp timestamp_ = Timestamp::MinusInfinity();
   // The default Android debug output tag.
   absl::string_view tag_ = "libjingle";
   // The severity level of this message
   LoggingSeverity severity_;
+  // The result of DefaultLogLine(), formatted on first use.
+  mutable std::optional<std::string> default_log_line_;
 };
 
 // Virtual sink interface that can receive log messages.
@@ -157,29 +180,105 @@ class LogSink {
  public:
   LogSink() {}
   virtual ~LogSink() {}
+  [[deprecated("Override OnLogMessage(const LogLineRef&) instead.")]]
   virtual void OnLogMessage(const std::string& msg,
                             LoggingSeverity severity,
                             const char* tag);
+  [[deprecated("Override OnLogMessage(const LogLineRef&) instead.")]]
   virtual void OnLogMessage(const std::string& message,
                             LoggingSeverity severity);
-  virtual void OnLogMessage(const std::string& message) = 0;
+  [[deprecated("Override OnLogMessage(const LogLineRef&) instead.")]]
+  virtual void OnLogMessage(const std::string& message);
 
+  [[deprecated("Override OnLogMessage(const LogLineRef&) instead.")]]
   virtual void OnLogMessage(absl::string_view msg,
                             LoggingSeverity severity,
                             const char* tag);
+  [[deprecated("Override OnLogMessage(const LogLineRef&) instead.")]]
   virtual void OnLogMessage(absl::string_view message,
                             LoggingSeverity severity);
+  [[deprecated("Override OnLogMessage(const LogLineRef&) instead.")]]
   virtual void OnLogMessage(absl::string_view message);
+
+  // Called for each log message that is at least as severe as the minimum
+  // severity of the sink. The default implementation formats the message with
+  // LogLineRef::DefaultLogLine() and passes it on to the deprecated overloads
+  // above.
   virtual void OnLogMessage(const LogLineRef& line);
+};
+
+class LoggingConfig {
+ public:
+  LoggingConfig();
+  LoggingConfig(const LoggingConfig&) = delete;
+  LoggingConfig& operator=(const LoggingConfig&) = delete;
+  LoggingConfig(LoggingConfig&&);
+  LoggingConfig& operator=(LoggingConfig&&);
+  ~LoggingConfig();
+
+  LoggingSeverity min_severity() const { return min_severity_; }
+  void set_min_severity(LoggingSeverity severity) { min_severity_ = severity; }
+
+  LoggingSeverity debug_severity() const { return debug_severity_; }
+  void set_debug_severity(LoggingSeverity severity) {
+    debug_severity_ = severity;
+  }
+
+  bool log_thread() const { return log_thread_; }
+  void set_log_thread(bool log_thread) { log_thread_ = log_thread; }
+
+  bool log_timestamp() const { return log_timestamp_; }
+  void set_log_timestamp(bool log_timestamp) { log_timestamp_ = log_timestamp; }
+
+  bool log_queue_name() const { return log_queue_name_; }
+  void set_log_queue_name(bool log_queue_name) {
+    log_queue_name_ = log_queue_name;
+  }
+
+  bool log_to_stderr() const { return log_to_stderr_; }
+  void set_log_to_stderr(bool log_to_stderr) { log_to_stderr_ = log_to_stderr; }
+
+  absl::string_view log_prefix() const { return log_prefix_; }
+  void set_log_prefix(absl::string_view log_prefix) {
+    log_prefix_ = std::string(log_prefix);
+  }
+
+  void AddSink(std::unique_ptr<LogSink> sink) {
+    sinks_.push_back(std::move(sink));
+  }
+  std::span<const std::unique_ptr<LogSink>> sinks() const { return sinks_; }
 
  private:
-  friend class ::rtc::LogMessage;
-#if RTC_LOG_ENABLED()
-  // Members for LogMessage class to keep linked list of the registered sinks.
-  LogSink* next_ = nullptr;
-  LoggingSeverity min_severity_;
-#endif
+  LoggingSeverity min_severity_ = LS_INFO;
+  LoggingSeverity debug_severity_ = LS_INFO;
+  bool log_thread_ = false;
+  bool log_timestamp_ = false;
+  bool log_queue_name_ = false;
+  bool log_to_stderr_ = true;
+  std::string log_prefix_;
+  std::vector<std::unique_ptr<LogSink>> sinks_;
 };
+
+// Initializes logging with the given configuration.
+// Can be called only once. Returns true if successful.
+// If not called explicitly, logging will be implicitly initialized
+// on the first logging call with default values.
+bool InitializeLogging(LoggingConfig config);
+
+// Returns the current logging configuration.
+const LoggingConfig& GetLoggingConfig();
+
+// Resets logging state for testing and returns the previously active
+// LoggingConfig by move.
+// - When `restore_config` is std::nullopt (e.g. in SetUp), the active
+//   configuration is replaced with a default one and the next
+//   InitializeLogging() call will succeed.
+// - When `restore_config` is provided (e.g. in TearDown), moves it back in as
+//   the active initialized configuration.
+// Must not be called while other threads log, since it replaces the
+// configuration that log messages read.
+LoggingConfig ResetLoggingForTesting(
+    std::optional<LoggingConfig> restore_config = std::nullopt);
 
 namespace webrtc_logging_impl {
 
@@ -232,20 +331,28 @@ enum class LogArgType : int8_t {
   kLongDouble,
   kCharP,
   kStdString,
-  kStringView,
+  kStringView,  // absl::string_view
   kVoidP,
   kLogMetadata,
   kLogMetadataErr,
 #ifdef WEBRTC_ANDROID
   kLogMetadataTag,
+#else
+  kReserved,
 #endif
+  kStdStringView,  // std::string_view, for downstream compatibility.
 };
 
 // Wrapper for log arguments. Only ever make values of this type with the
 // MakeVal() functions.
-template <LogArgType N, typename T>
+// `kSize` is a compile-time estimate of the number of characters that the
+// argument adds to the log message, used to pre-allocate the message buffer.
+// It is 0 for metadata, which isn't part of the message, and for std::string
+// and string views, whose exact size Log() reads at runtime.
+template <LogArgType N, typename T, size_t kSize = 0>
 struct Val {
   static constexpr LogArgType Type() { return N; }
+  static constexpr size_t SizeHint() { return kSize; }
   T GetVal() const { return val; }
   T val;
 };
@@ -255,40 +362,78 @@ struct Val {
 // because we need somewhere to store the temp string.)
 struct ToStringVal {
   static constexpr LogArgType Type() { return LogArgType::kStdString; }
+  // The exact size of the string is read at runtime.
+  static constexpr size_t SizeHint() { return 0; }
   const std::string* GetVal() const { return &val; }
   std::string val;
 };
 
-inline Val<LogArgType::kInt, int> MakeVal(int x) {
+inline Val<LogArgType::kInt, int, 6> MakeVal(int x) {
   return {x};
 }
-inline Val<LogArgType::kLong, long> MakeVal(long x) {
+inline Val<LogArgType::kLong, long, 8> MakeVal(long x) {
   return {x};
 }
-inline Val<LogArgType::kLongLong, long long> MakeVal(long long x) {
+inline Val<LogArgType::kLongLong, long long, 10> MakeVal(long long x) {
   return {x};
 }
-inline Val<LogArgType::kUInt, unsigned int> MakeVal(unsigned int x) {
+inline Val<LogArgType::kUInt, unsigned int, 6> MakeVal(unsigned int x) {
   return {x};
 }
-inline Val<LogArgType::kULong, unsigned long> MakeVal(unsigned long x) {
+inline Val<LogArgType::kULong, unsigned long, 8> MakeVal(unsigned long x) {
   return {x};
 }
-inline Val<LogArgType::kULongLong, unsigned long long> MakeVal(
+inline Val<LogArgType::kULongLong, unsigned long long, 10> MakeVal(
     unsigned long long x) {
   return {x};
 }
 
-inline Val<LogArgType::kDouble, double> MakeVal(double x) {
-  return {x};
-}
-inline Val<LogArgType::kLongDouble, long double> MakeVal(long double x) {
+inline Val<LogArgType::kDouble, double, 8> MakeVal(double x) {
   return {x};
 }
 
-inline Val<LogArgType::kCharP, const char*> MakeVal(const char* x) {
+inline Val<LogArgType::kLongDouble, long double, 10> MakeVal(long double x) {
   return {x};
 }
+
+// Overloads of MakeStringVal() that take a higher rank are preferred over those
+// that take a lower one, see https://abseil.io/tips/229. Callers pass RankMax.
+struct Rank0 {};
+struct Rank1 : Rank0 {};
+struct Rank2 : Rank1 {};
+using RankMax = Rank2;
+
+// String literals and other character arrays. The size of the array is used as
+// the size hint, which is exact for string literals.
+template <size_t N>
+inline Val<LogArgType::kCharP, const char*, N - 1> MakeStringVal(
+    const char (&x)[N],
+    Rank2) {
+  return {x};
+}
+
+// Types that support AbslStringify, also if they convert to a character
+// pointer.
+template <typename T>
+  requires(absl::HasAbslStringify<T>::value)
+ToStringVal MakeStringVal(const T& x, Rank1) {
+  return {absl::StrCat(x)};
+}
+
+// Character pointers, and other types that implicitly convert to them, such as
+// arrays of unknown bound.
+inline Val<LogArgType::kCharP, const char*, 16> MakeStringVal(const char* x,
+                                                              Rank0) {
+  return {x};
+}
+
+// Arguments that one of the MakeStringVal() overloads above formats as a
+// string: the one with the highest rank that applies.
+template <typename T>
+inline auto MakeVal(const T& x) -> decltype(MakeStringVal(x, RankMax{})) {
+  return MakeStringVal(x, RankMax{});
+}
+
 inline Val<LogArgType::kStdString, const std::string*> MakeVal(
     const std::string& x) {
   return {&x};
@@ -298,7 +443,19 @@ inline Val<LogArgType::kStringView, const absl::string_view*> MakeVal(
   return {&x};
 }
 
-inline Val<LogArgType::kVoidP, const void*> MakeVal(const void* x) {
+// `std::string_view` must be supported separately from `absl::string_view`
+// because they are distinct types on certain toolchains (e.g., Android NDKs),
+// and this separate overload prevents dangling references across implicit
+// conversions.
+template <typename T>
+  requires(std::is_same_v<T, std::string_view> &&
+           !std::is_same_v<T, absl::string_view>)
+inline Val<LogArgType::kStdStringView, const std::string_view*> MakeVal(
+    const T& x) {
+  return {&x};
+}
+
+inline Val<LogArgType::kVoidP, const void*, 16> MakeVal(const void* x) {
   return {x};
 }
 
@@ -313,11 +470,12 @@ inline Val<LogArgType::kLogMetadataErr, LogMetadataErr> MakeVal(
 
 // The enum class types are not implicitly convertible to arithmetic types.
 template <typename T,
-          absl::enable_if_t<std::is_enum<T>::value &&
-                            !std::is_arithmetic<T>::value>* = nullptr>
-inline decltype(MakeVal(std::declval<absl::underlying_type_t<T>>())) MakeVal(
+          std::enable_if_t<std::is_enum<T>::value &&
+                           !absl::HasAbslStringify<T>::value &&
+                           !std::is_arithmetic<T>::value>* = nullptr>
+inline decltype(MakeVal(std::declval<std::underlying_type_t<T>>())) MakeVal(
     T x) {
-  return {static_cast<absl::underlying_type_t<T>>(x)};
+  return {static_cast<std::underlying_type_t<T>>(x)};
 }
 
 #ifdef WEBRTC_ANDROID
@@ -327,43 +485,13 @@ inline Val<LogArgType::kLogMetadataTag, LogMetadataTag> MakeVal(
 }
 #endif
 
-template <typename T, class = void>
-struct has_to_log_string : std::false_type {};
-template <typename T>
-struct has_to_log_string<T,
-                         absl::enable_if_t<std::is_convertible<
-                             decltype(ToLogString(std::declval<T>())),
-                             std::string>::value>> : std::true_type {};
-
-template <typename T, absl::enable_if_t<has_to_log_string<T>::value>* = nullptr>
-ToStringVal MakeVal(const T& x) {
-  return {ToLogString(x)};
-}
-
-// Handle arbitrary types other than the above by falling back to stringstream.
-// TODO(bugs.webrtc.org/9278): Get rid of this overload when callers don't need
-// it anymore. No in-tree caller does, but some external callers still do.
-template <
-    typename T,
-    typename T1 = absl::decay_t<T>,
-    absl::enable_if_t<std::is_class<T1>::value &&
-                      !std::is_same<T1, std::string>::value &&
-                      !std::is_same<T1, LogMetadata>::value &&
-                      !has_to_log_string<T1>::value &&
-#ifdef WEBRTC_ANDROID
-                      !std::is_same<T1, LogMetadataTag>::value &&
-#endif
-                      !std::is_same<T1, LogMetadataErr>::value>* = nullptr>
-ToStringVal MakeVal(const T& x) {
-  std::ostringstream os;  // no-presubmit-check TODO(webrtc:8982)
-  os << x;
-  return {os.str()};
-}
-
 #if RTC_LOG_ENABLED()
-void Log(const LogArgType* fmt, ...);
+// `size_hint` is a compile-time estimate of the size of the log message, see
+// LogStreamer<>::Call(). `fmt` lists the types of the variadic arguments,
+// followed by LogArgType::kEnd.
+void Log(size_t size_hint, const LogArgType* fmt, ...);
 #else
-inline void Log(const LogArgType* fmt, ...) {
+inline void Log(size_t size_hint, const LogArgType* fmt, ...) {
   // Do nothing, shouldn't be invoked
 }
 #endif
@@ -376,26 +504,19 @@ class LogStreamer;
 template <>
 class LogStreamer<> final {
  public:
-  template <typename U,
-            typename V = decltype(MakeVal(std::declval<U>())),
-            absl::enable_if_t<std::is_arithmetic<U>::value ||
-                              std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<V> operator<<(U arg) const {
-    return LogStreamer<V>(MakeVal(arg), this);
-  }
-
-  template <typename U,
-            typename V = decltype(MakeVal(std::declval<U>())),
-            absl::enable_if_t<!std::is_arithmetic<U>::value &&
-                              !std::is_enum<U>::value>* = nullptr>
+  template <typename U, typename V = decltype(MakeVal(std::declval<U>()))>
   RTC_FORCE_INLINE LogStreamer<V> operator<<(const U& arg) const {
     return LogStreamer<V>(MakeVal(arg), this);
   }
 
   template <typename... Us>
   RTC_FORCE_INLINE static void Call(const Us&... args) {
+    // Compile-time estimate of the message size, which Log() complements with
+    // the sizes of string arguments to pre-allocate the message buffer.
+    // + 1 accounts for the trailing '\n' appended in FinishPrintStream().
+    static constexpr size_t kSizeHint = (Us::SizeHint() + ... + 1);
     static constexpr LogArgType t[] = {Us::Type()..., LogArgType::kEnd};
-    Log(t, args.GetVal()...);
+    Log(kSizeHint, t, args.GetVal()...);
   }
 };
 
@@ -407,18 +528,7 @@ class LogStreamer<T, Ts...> final {
   RTC_FORCE_INLINE LogStreamer(T arg, const LogStreamer<Ts...>* prior)
       : arg_(arg), prior_(prior) {}
 
-  template <typename U,
-            typename V = decltype(MakeVal(std::declval<U>())),
-            absl::enable_if_t<std::is_arithmetic<U>::value ||
-                              std::is_enum<U>::value>* = nullptr>
-  RTC_FORCE_INLINE LogStreamer<V, T, Ts...> operator<<(U arg) const {
-    return LogStreamer<V, T, Ts...>(MakeVal(arg), this);
-  }
-
-  template <typename U,
-            typename V = decltype(MakeVal(std::declval<U>())),
-            absl::enable_if_t<!std::is_arithmetic<U>::value &&
-                              !std::is_enum<U>::value>* = nullptr>
+  template <typename U, typename V = decltype(MakeVal(std::declval<U>()))>
   RTC_FORCE_INLINE LogStreamer<V, T, Ts...> operator<<(const U& arg) const {
     return LogStreamer<V, T, Ts...>(MakeVal(arg), this);
   }
@@ -457,7 +567,7 @@ class LogMessageVoidify {
   // This has to be an operator with a precedence lower than << but
   // higher than ?:
   template <typename... Ts>
-  void operator&(LogStreamer<Ts...>&& streamer) {}
+  void operator&(LogStreamer<Ts...>&& /* streamer */) {}
 };
 
 }  // namespace webrtc_logging_impl
@@ -493,7 +603,10 @@ class LogMessage {
   LogMessage& operator=(const LogMessage&) = delete;
 
   void AddTag(const char* tag);
-  rtc::StringBuilder& stream();
+  StringBuilder& stream();
+  // Reserves capacity in the stream for `size` more characters, in addition to
+  // the extra error information that is appended by FinishPrintStream().
+  void ReserveStream(size_t size);
   // Returns the time at which this function was called for the first time.
   // The time will be used as the logging start time.
   // If this is not called externally, the LogMessage ctor also calls it, in
@@ -503,40 +616,47 @@ class LogMessage {
   // Returns the wall clock equivalent of `LogStartTime`, in seconds from the
   // epoch.
   static uint32_t WallClockStartTime();
-  //  LogThreads: Display the thread identifier of the current thread
-  static void LogThreads(bool on = true);
+  // LogThreads: Display the thread identifier of the current thread
+  // Returns the previously set value.
+  // NOTE: Must be called prior to starting threads and/or starting logging.
+  [[deprecated("Use InitializeLogging instead.")]]
+  static bool LogThreads(bool enabled = true);
+
+  // TODO: bugs.webrtc.org/42234107 - Remove the deprecated methods below once
+  // downstream projects have migrated.
+
   //  LogTimestamps: Display the elapsed time of the program
+  [[deprecated("Use LoggingConfig::set_log_timestamp() instead.")]]
   static void LogTimestamps(bool on = true);
   // These are the available logging channels
   //  Debug: Debug console on Windows, otherwise stderr
   static void LogToDebug(LoggingSeverity min_sev);
-  static LoggingSeverity GetLogToDebug();
   // Sets whether logs will be directed to stderr in debug mode.
+  [[deprecated("Use LoggingConfig::set_log_to_stderr() instead.")]]
   static void SetLogToStderr(bool log_to_stderr);
   // Stream: Any non-blocking stream interface.
   // Installs the `stream` to collect logs with severtiy `min_sev` or higher.
+  // If `stream` has already been added, its severity is updated.
   // `stream` must live until deinstalled by RemoveLogToStream.
   // If `stream` is the first stream added to the system, we might miss some
   // early concurrent log statement happening from another thread happening near
   // this instant.
+  [[deprecated(
+      "Use LoggingConfig::AddSink() and InitializeLogging() instead.")]]
   static void AddLogToStream(LogSink* stream, LoggingSeverity min_sev);
   // Removes the specified stream, without destroying it. When the method
   // has completed, it's guaranteed that `stream` will receive no more logging
   // calls.
+  [[deprecated(
+      "Removing sinks is not supported. Tests can use "
+      "ResetLoggingForTesting().")]]
   static void RemoveLogToStream(LogSink* stream);
-  // Returns the severity for the specified stream, of if none is specified,
-  // the minimum stream severity.
-  static int GetLogToStream(LogSink* stream = nullptr);
   // Testing against MinLogSeverity allows code to avoid potentially expensive
   // logging operations by pre-checking the logging level.
   static int GetMinLogSeverity();
-  // Parses the provided parameter stream to configure the options above.
-  // Useful for configuring logging from the command line.
-  static void ConfigureLogging(absl::string_view params);
-  // Checks the current global debug severity and if the `streams_` collection
-  // is empty. If `severity` is smaller than the global severity and if the
-  // `streams_` collection is empty, the LogMessage will be considered a noop
-  // LogMessage.
+  // Returns true if `severity` is lower than the minimum severity of the debug
+  // output and of all sinks, i.e. if a message with `severity` wouldn't be
+  // written anywhere.
   static bool IsNoop(LoggingSeverity severity);
   // Version of IsNoop that uses fewer instructions at the call site, since the
   // caller doesn't have to pass an argument.
@@ -559,21 +679,28 @@ class LogMessage {
   ~LogMessage() = default;
 
   inline void AddTag(const char* tag) {}
-  inline rtc::StringBuilder& stream() { return print_stream_; }
+  inline StringBuilder& stream() { return print_stream_; }
+  inline void ReserveStream(size_t size) {}
   inline static int64_t LogStartTime() { return 0; }
   inline static uint32_t WallClockStartTime() { return 0; }
-  inline static void LogThreads(bool on = true) {}
+  [[deprecated("Use InitializeLogging instead.")]]
+  inline static bool LogThreads(bool enabled = true) {
+    return false;
+  }
+
+  [[deprecated("Use LoggingConfig::set_log_timestamp() instead.")]]
   inline static void LogTimestamps(bool on = true) {}
   inline static void LogToDebug(LoggingSeverity min_sev) {}
-  inline static LoggingSeverity GetLogToDebug() {
-    return LoggingSeverity::LS_INFO;
-  }
+  [[deprecated("Use LoggingConfig::set_log_to_stderr() instead.")]]
   inline static void SetLogToStderr(bool log_to_stderr) {}
+  [[deprecated(
+      "Use LoggingConfig::AddSink() and InitializeLogging() instead.")]]
   inline static void AddLogToStream(LogSink* stream, LoggingSeverity min_sev) {}
+  [[deprecated(
+      "Removing sinks is not supported. Tests can use "
+      "ResetLoggingForTesting().")]]
   inline static void RemoveLogToStream(LogSink* stream) {}
-  inline static int GetLogToStream(LogSink* stream = nullptr) { return 0; }
   inline static int GetMinLogSeverity() { return 0; }
-  inline static void ConfigureLogging(absl::string_view params) {}
   static constexpr bool IsNoop(LoggingSeverity severity) { return true; }
   template <LoggingSeverity S>
   static constexpr bool IsNoop() {
@@ -585,9 +712,6 @@ class LogMessage {
   friend class LogMessageForTesting;
 
 #if RTC_LOG_ENABLED()
-  // Updates min_sev_ appropriately when debug sinks change.
-  static void UpdateMinLogSeverity();
-
   // This writes out the actual log messages.
   static void OutputToDebug(const LogLineRef& log_line_ref);
 
@@ -601,24 +725,13 @@ class LogMessage {
   // the message before output.
   std::string extra_;
 
-  // The output streams and their associated severities
-  static LogSink* streams_;
-
-  // Holds true with high probability if `streams_` is empty, false with high
-  // probability otherwise. Operated on with std::memory_order_relaxed because
-  // it's ok to lose or log some additional statements near the instant streams
-  // are added/removed.
-  static std::atomic<bool> streams_empty_;
-
   // Flags for formatting options and their potential values.
-  static bool log_thread_;
   static bool log_timestamp_;
 
   // Determines if logs will be directed to stderr in debug mode.
   static bool log_to_stderr_;
 #else  // RTC_LOG_ENABLED()
   // Next methods do nothing; no one will call these functions.
-  inline static void UpdateMinLogSeverity() {}
 #if defined(WEBRTC_ANDROID)
   inline static void OutputToDebug(absl::string_view filename,
                                    int line,
@@ -635,29 +748,30 @@ class LogMessage {
 #endif  // RTC_LOG_ENABLED()
 
   // The stringbuilder that buffers the formatted message before output
-  rtc::StringBuilder print_stream_;
+  StringBuilder print_stream_;
 };
 
 //////////////////////////////////////////////////////////////////////
 // Logging Helpers
 //////////////////////////////////////////////////////////////////////
 
-#define RTC_LOG_FILE_LINE(sev, file, line)        \
-  ::rtc::webrtc_logging_impl::LogCall() &         \
-      ::rtc::webrtc_logging_impl::LogStreamer<>() \
-          << ::rtc::webrtc_logging_impl::LogMetadata(file, line, sev)
+#define RTC_LOG_FILE_LINE(sev, file, line)           \
+  ::webrtc::webrtc_logging_impl::LogCall() &         \
+      ::webrtc::webrtc_logging_impl::LogStreamer<>() \
+          << ::webrtc::webrtc_logging_impl::LogMetadata(file, line, sev)
 
-#define RTC_LOG(sev)                          \
-  !::rtc::LogMessage::IsNoop<::rtc::sev>() && \
-      RTC_LOG_FILE_LINE(::rtc::sev, __FILE__, __LINE__)
+#define RTC_LOG(sev)                                \
+  !::webrtc::LogMessage::IsNoop<::webrtc::sev>() && \
+      RTC_LOG_FILE_LINE(::webrtc::sev, __FILE__, __LINE__)
 
-#define RTC_LOG_IF(sev, condition)                           \
-  !::rtc::LogMessage::IsNoop<::rtc::sev>() && (condition) && \
-      RTC_LOG_FILE_LINE(::rtc::sev, __FILE__, __LINE__)
+#define RTC_LOG_IF(sev, condition)                                 \
+  !::webrtc::LogMessage::IsNoop<::webrtc::sev>() && (condition) && \
+      RTC_LOG_FILE_LINE(::webrtc::sev, __FILE__, __LINE__)
 
 // The _V version is for when a variable is passed in.
-#define RTC_LOG_V(sev) \
-  !::rtc::LogMessage::IsNoop(sev) && RTC_LOG_FILE_LINE(sev, __FILE__, __LINE__)
+#define RTC_LOG_V(sev)                  \
+  !::webrtc::LogMessage::IsNoop(sev) && \
+      RTC_LOG_FILE_LINE(sev, __FILE__, __LINE__)
 
 // The _F version prefixes the message with the current function name.
 #if (defined(__GNUC__) && !defined(NDEBUG)) || defined(WANT_PRETTY_LOG_F)
@@ -673,19 +787,19 @@ class LogMessage {
 #define RTC_LOG_T_F(sev) RTC_LOG(sev) << this << ": " << __FUNCTION__ << ": "
 #endif
 
-#define RTC_LOG_CHECK_LEVEL(sev) ::rtc::LogCheckLevel(::rtc::sev)
-#define RTC_LOG_CHECK_LEVEL_V(sev) ::rtc::LogCheckLevel(sev)
+#define RTC_LOG_CHECK_LEVEL(sev) ::webrtc::LogCheckLevel(::webrtc::sev)
+#define RTC_LOG_CHECK_LEVEL_V(sev) ::webrtc::LogCheckLevel(sev)
 
 inline bool LogCheckLevel(LoggingSeverity sev) {
   return (LogMessage::GetMinLogSeverity() <= sev);
 }
 
-#define RTC_LOG_E(sev, ctx, err)                                 \
-  !::rtc::LogMessage::IsNoop<::rtc::sev>() &&                    \
-      ::rtc::webrtc_logging_impl::LogCall() &                    \
-          ::rtc::webrtc_logging_impl::LogStreamer<>()            \
-              << ::rtc::webrtc_logging_impl::LogMetadataErr {    \
-    {__FILE__, __LINE__, ::rtc::sev}, ::rtc::ERRCTX_##ctx, (err) \
+#define RTC_LOG_E(sev, ctx, err)                                       \
+  !::webrtc::LogMessage::IsNoop<::webrtc::sev>() &&                    \
+      ::webrtc::webrtc_logging_impl::LogCall() &                       \
+          ::webrtc::webrtc_logging_impl::LogStreamer<>()               \
+              << ::webrtc::webrtc_logging_impl::LogMetadataErr {       \
+    {__FILE__, __LINE__, ::webrtc::sev}, ::webrtc::ERRCTX_##ctx, (err) \
   }
 
 #define RTC_LOG_T(sev) RTC_LOG(sev) << this << ": "
@@ -698,9 +812,6 @@ inline bool LogCheckLevel(LoggingSeverity sev) {
 #define RTC_LOG_GLE(sev) RTC_LOG_GLE_EX(sev, static_cast<int>(GetLastError()))
 #define RTC_LOG_ERR_EX(sev, err) RTC_LOG_GLE_EX(sev, err)
 #define RTC_LOG_ERR(sev) RTC_LOG_GLE(sev)
-#elif defined(__native_client__) && __native_client__
-#define RTC_LOG_ERR_EX(sev, err) RTC_LOG(sev)
-#define RTC_LOG_ERR(sev) RTC_LOG(sev)
 #elif defined(WEBRTC_POSIX)
 #define RTC_LOG_ERR_EX(sev, err) RTC_LOG_ERRNO_EX(sev, err)
 #define RTC_LOG_ERR(sev) RTC_LOG_ERRNO(sev)
@@ -718,12 +829,12 @@ inline const char* AdaptString(const std::string& str) {
 }
 }  // namespace webrtc_logging_impl
 
-#define RTC_LOG_TAG(sev, tag)                                 \
-  !::rtc::LogMessage::IsNoop(sev) &&                          \
-      ::rtc::webrtc_logging_impl::LogCall() &                 \
-          ::rtc::webrtc_logging_impl::LogStreamer<>()         \
-              << ::rtc::webrtc_logging_impl::LogMetadataTag { \
-    sev, ::rtc::webrtc_logging_impl::AdaptString(tag)         \
+#define RTC_LOG_TAG(sev, tag)                                    \
+  !::webrtc::LogMessage::IsNoop(sev) &&                          \
+      ::webrtc::webrtc_logging_impl::LogCall() &                 \
+          ::webrtc::webrtc_logging_impl::LogStreamer<>()         \
+              << ::webrtc::webrtc_logging_impl::LogMetadataTag { \
+    sev, ::webrtc::webrtc_logging_impl::AdaptString(tag)         \
   }
 
 #else
@@ -742,10 +853,10 @@ inline const char* AdaptString(const std::string& str) {
 #define RTC_DLOG_F(sev) RTC_LOG_F(sev)
 #define RTC_DLOG_IF_F(sev, condition) RTC_LOG_IF_F(sev, condition)
 #else
-#define RTC_DLOG_EAT_STREAM_PARAMS()                \
-  while (false)                                     \
-  ::rtc::webrtc_logging_impl::LogMessageVoidify() & \
-      (::rtc::webrtc_logging_impl::LogStreamer<>())
+#define RTC_DLOG_EAT_STREAM_PARAMS()                   \
+  while (false)                                        \
+  ::webrtc::webrtc_logging_impl::LogMessageVoidify() & \
+      (::webrtc::webrtc_logging_impl::LogStreamer<>())
 #define RTC_DLOG(sev) RTC_DLOG_EAT_STREAM_PARAMS()
 #define RTC_DLOG_IF(sev, condition) RTC_DLOG_EAT_STREAM_PARAMS()
 #define RTC_DLOG_V(sev) RTC_DLOG_EAT_STREAM_PARAMS()
@@ -753,6 +864,6 @@ inline const char* AdaptString(const std::string& str) {
 #define RTC_DLOG_IF_F(sev, condition) RTC_DLOG_EAT_STREAM_PARAMS()
 #endif
 
-}  // namespace rtc
+}  // namespace webrtc
 
 #endif  // RTC_BASE_LOGGING_H_

@@ -15,12 +15,5 @@
 
 #include "api/ref_count.h"
 
-namespace rtc {
-
-// TODO(bugs.webrtc.org/15622): Deprecate and remove these aliases.
-using webrtc::RefCountInterface;
-using webrtc::RefCountReleaseStatus;
-
-}  // namespace rtc
 
 #endif  // RTC_BASE_REF_COUNT_H_

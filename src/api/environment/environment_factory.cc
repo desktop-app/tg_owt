@@ -12,12 +12,18 @@
 
 #include <memory>
 #include <utility>
-#include <vector>
 
+#include "absl/base/nullability.h"
+#include "api/environment/deprecated_global_field_trials.h"
+#include "api/environment/environment.h"
+#include "api/environment/force_test_environment.h"
+#include "api/field_trials_view.h"
 #include "api/make_ref_counted.h"
+#include "api/ref_counted_base.h"
 #include "api/rtc_event_log/rtc_event_log.h"
+#include "api/scoped_refptr.h"
 #include "api/task_queue/default_task_queue_factory.h"
-#include "api/transport/field_trial_based_config.h"
+#include "api/task_queue/task_queue_factory.h"
 #include "rtc_base/checks.h"
 #include "system_wrappers/include/clock.h"
 
@@ -25,12 +31,12 @@ namespace webrtc {
 namespace {
 
 template <typename T>
-void Store(absl::Nonnull<std::unique_ptr<T>> value,
-           scoped_refptr<const rtc::RefCountedBase>& leaf) {
-  class StorageNode : public rtc::RefCountedBase {
+void Store(absl_nonnull std::unique_ptr<T> value,
+           scoped_refptr<const RefCountedBase>& leaf) {
+  class StorageNode : public RefCountedBase {
    public:
-    StorageNode(scoped_refptr<const rtc::RefCountedBase> parent,
-                absl::Nonnull<std::unique_ptr<T>> value)
+    StorageNode(scoped_refptr<const RefCountedBase> parent,
+                absl_nonnull std::unique_ptr<T> value)
         : parent_(std::move(parent)), value_(std::move(value)) {}
 
     StorageNode(const StorageNode&) = delete;
@@ -39,8 +45,8 @@ void Store(absl::Nonnull<std::unique_ptr<T>> value,
     ~StorageNode() override = default;
 
    private:
-    scoped_refptr<const rtc::RefCountedBase> parent_;
-    absl::Nonnull<std::unique_ptr<T>> value_;
+    scoped_refptr<const RefCountedBase> parent_;
+    absl_nonnull std::unique_ptr<T> value_;
   };
 
   // Utilities provided with ownership form a tree:
@@ -50,7 +56,7 @@ void Store(absl::Nonnull<std::unique_ptr<T>> value,
   // 'leaf_' - node with the last provided utility. This way `Environment` keeps
   // ownership of a single branch of the storage tree with each used utiltity
   // owned by one of the nodes on that branch.
-  leaf = rtc::make_ref_counted<StorageNode>(std::move(leaf), std::move(value));
+  leaf = make_ref_counted<StorageNode>(std::move(leaf), std::move(value));
 }
 
 }  // namespace
@@ -63,14 +69,14 @@ EnvironmentFactory::EnvironmentFactory(const Environment& env)
       event_log_(env.event_log_) {}
 
 void EnvironmentFactory::Set(
-    absl::Nullable<std::unique_ptr<const FieldTrialsView>> utility) {
+    absl_nullable std::unique_ptr<const FieldTrialsView> utility) {
   if (utility != nullptr) {
     field_trials_ = utility.get();
     Store(std::move(utility), leaf_);
   }
 }
 
-void EnvironmentFactory::Set(absl::Nullable<std::unique_ptr<Clock>> utility) {
+void EnvironmentFactory::Set(absl_nullable std::unique_ptr<Clock> utility) {
   if (utility != nullptr) {
     clock_ = utility.get();
     Store(std::move(utility), leaf_);
@@ -78,7 +84,7 @@ void EnvironmentFactory::Set(absl::Nullable<std::unique_ptr<Clock>> utility) {
 }
 
 void EnvironmentFactory::Set(
-    absl::Nullable<std::unique_ptr<TaskQueueFactory>> utility) {
+    absl_nullable std::unique_ptr<TaskQueueFactory> utility) {
   if (utility != nullptr) {
     task_queue_factory_ = utility.get();
     Store(std::move(utility), leaf_);
@@ -86,7 +92,7 @@ void EnvironmentFactory::Set(
 }
 
 void EnvironmentFactory::Set(
-    absl::Nullable<std::unique_ptr<RtcEventLog>> utility) {
+    absl_nullable std::unique_ptr<RtcEventLog> utility) {
   if (utility != nullptr) {
     event_log_ = utility.get();
     Store(std::move(utility), leaf_);
@@ -94,8 +100,13 @@ void EnvironmentFactory::Set(
 }
 
 Environment EnvironmentFactory::CreateWithDefaults() && {
+  RTC_CHECK((field_trials_ != nullptr && field_trials_->IsTest()) ||
+            !IsForceTestEnvironmentEnabled() ||
+            IsTestEnvironmentCheckBypassed())
+      << "Production Environment creation is not allowed in tests. Use "
+         "CreateTestEnvironment.";
   if (field_trials_ == nullptr) {
-    Set(std::make_unique<FieldTrialBasedConfig>());
+    Set(std::make_unique<DeprecatedGlobalFieldTrials>());
   }
   if (clock_ == nullptr) {
     Set(Clock::GetRealTimeClock());

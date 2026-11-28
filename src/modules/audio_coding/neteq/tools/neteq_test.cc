@@ -10,47 +10,69 @@
 
 #include "modules/audio_coding/neteq/tools/neteq_test.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <optional>
+#include <utility>
 
-#include "modules/audio_coding/neteq/default_neteq_factory.h"
+#include "api/audio/audio_frame.h"
+#include "api/audio_codecs/audio_decoder_factory.h"
+#include "api/audio_codecs/audio_format.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
+#include "api/field_trials_view.h"
+#include "api/neteq/default_neteq_factory.h"
+#include "api/neteq/neteq.h"
+#include "api/neteq/neteq_factory.h"
+#include "api/rtp_headers.h"
+#include "api/scoped_refptr.h"
+#include "api/test/neteq_simulator.h"
+#include "api/units/timestamp.h"
+#include "modules/audio_coding/neteq/tools/audio_sink.h"
+#include "modules/audio_coding/neteq/tools/neteq_input.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
+#include "rtc_base/checks.h"
 #include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 namespace test {
 namespace {
 
-absl::optional<NetEq::Operation> ActionToOperations(
-    absl::optional<NetEqSimulator::Action> a) {
+std::optional<NetEq::Operation> ActionToOperations(
+    std::optional<NetEqSimulator::Action> a) {
   if (!a) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   switch (*a) {
     case NetEqSimulator::Action::kAccelerate:
-      return absl::make_optional(NetEq::Operation::kAccelerate);
+      return std::make_optional(NetEq::Operation::kAccelerate);
     case NetEqSimulator::Action::kExpand:
-      return absl::make_optional(NetEq::Operation::kExpand);
+      return std::make_optional(NetEq::Operation::kExpand);
     case NetEqSimulator::Action::kNormal:
-      return absl::make_optional(NetEq::Operation::kNormal);
+      return std::make_optional(NetEq::Operation::kNormal);
     case NetEqSimulator::Action::kPreemptiveExpand:
-      return absl::make_optional(NetEq::Operation::kPreemptiveExpand);
+      return std::make_optional(NetEq::Operation::kPreemptiveExpand);
   }
 }
 
 std::unique_ptr<NetEq> CreateNetEq(
+    const Environment& env,
     const NetEq::Config& config,
-    Clock* clock,
-    const rtc::scoped_refptr<AudioDecoderFactory>& decoder_factory) {
-  return DefaultNetEqFactory().CreateNetEq(config, decoder_factory, clock);
+    scoped_refptr<AudioDecoderFactory> decoder_factory) {
+  return DefaultNetEqFactory().Create(env, config, std::move(decoder_factory));
 }
 
 }  // namespace
 
 void DefaultNetEqTestErrorCallback::OnInsertPacketError(
-    const NetEqInput::PacketData& packet) {
+    const RtpPacketReceived& packet) {
   std::cerr << "InsertPacket returned an error." << std::endl;
-  std::cerr << "Packet data: " << packet.ToString() << std::endl;
+  std::cerr << "Packet data: " << NetEqInput::ToString(packet) << std::endl;
   RTC_FATAL();
 }
 
@@ -60,24 +82,27 @@ void DefaultNetEqTestErrorCallback::OnGetAudioError() {
 }
 
 NetEqTest::NetEqTest(const NetEq::Config& config,
-                     rtc::scoped_refptr<AudioDecoderFactory> decoder_factory,
+                     scoped_refptr<AudioDecoderFactory> decoder_factory,
                      const DecoderMap& codecs,
                      std::unique_ptr<std::ofstream> text_log,
                      NetEqFactory* neteq_factory,
                      std::unique_ptr<NetEqInput> input,
                      std::unique_ptr<AudioSink> output,
-                     Callbacks callbacks)
+                     Callbacks callbacks,
+                     const FieldTrialsView* field_trials)
     : input_(std::move(input)),
       clock_(Timestamp::Millis(input_->NextEventTime().value_or(0))),
-      neteq_(neteq_factory
-                 ? neteq_factory->CreateNetEq(config, decoder_factory, &clock_)
-                 : CreateNetEq(config, &clock_, decoder_factory)),
+      env_(CreateEnvironment(
+          &clock_,
+          field_trials ? field_trials->CreateCopy() : nullptr)),
+      neteq_(
+          neteq_factory
+              ? neteq_factory->Create(env_, config, std::move(decoder_factory))
+              : CreateNetEq(env_, config, std::move(decoder_factory))),
       output_(std::move(output)),
       callbacks_(callbacks),
       sample_rate_hz_(config.sample_rate_hz),
       text_log_(std::move(text_log)) {
-  RTC_CHECK(!config.enable_muted_state)
-      << "The code does not handle enable_muted_state";
   RegisterDecoders(codecs);
 }
 
@@ -109,14 +134,14 @@ NetEqTest::SimulationStepResult NetEqTest::RunToNextGetAudio() {
     time_now_ms = *input_->NextEventTime();
     // Check if it is time to insert packet.
     if (input_->NextPacketTime() && time_now_ms >= *input_->NextPacketTime()) {
-      std::unique_ptr<NetEqInput::PacketData> packet_data = input_->PopPacket();
+      std::unique_ptr<RtpPacketReceived> packet_data = input_->PopPacket();
       RTC_CHECK(packet_data);
-      const size_t payload_data_length =
-          packet_data->payload.size() - packet_data->header.paddingLength;
+      const size_t payload_data_length = packet_data->payload_size();
+      RTPHeader rtp_header;
+      packet_data->GetHeader(&rtp_header);
       if (payload_data_length != 0) {
-        int error = neteq_->InsertPacket(
-            packet_data->header,
-            rtc::ArrayView<const uint8_t>(packet_data->payload));
+        int error = neteq_->InsertPacket(rtp_header, packet_data->payload(),
+                                         Timestamp::Millis(time_now_ms));
         if (error != NetEq::kOK && callbacks_.error_callback) {
           callbacks_.error_callback->OnInsertPacketError(*packet_data);
         }
@@ -124,8 +149,6 @@ NetEqTest::SimulationStepResult NetEqTest::RunToNextGetAudio() {
           callbacks_.post_insert_packet->AfterInsertPacket(*packet_data,
                                                            neteq_.get());
         }
-      } else {
-        neteq_->InsertEmptyPacket(packet_data->header);
       }
       if (last_packet_time_ms_) {
         current_state_.packet_iat_ms.push_back(time_now_ms -
@@ -137,30 +160,29 @@ NetEqTest::SimulationStepResult NetEqTest::RunToNextGetAudio() {
             last_packet_time_ms_ ? (time_now_ms - *last_packet_time_ms_) : -1;
         const auto delta_timestamp =
             last_packet_timestamp_
-                ? (static_cast<int64_t>(packet_data->header.timestamp) -
+                ? (static_cast<int64_t>(packet_data->Timestamp()) -
                    *last_packet_timestamp_) *
                       1000 / sample_rate_hz_
                 : -1;
         const auto packet_size_bytes =
-            packet_data->payload.size() == 12
+            packet_data->payload_size() == 12
                 ? ByteReader<uint32_t>::ReadLittleEndian(
-                      &packet_data->payload[8])
+                      &packet_data->payload()[8])
                 : -1;
         *text_log_ << "Packet   - wallclock: " << std::setw(5) << time_now_ms
                    << ", delta wc: " << std::setw(4) << delta_wallclock
-                   << ", seq_no: " << packet_data->header.sequenceNumber
+                   << ", seq_no: " << packet_data->SequenceNumber()
                    << ", timestamp: " << std::setw(10)
-                   << packet_data->header.timestamp
-                   << ", delta ts: " << std::setw(4) << delta_timestamp
-                   << ", size: " << std::setw(5) << packet_size_bytes
+                   << packet_data->Timestamp()                           //
+                   << ", delta ts: " << std::setw(4) << delta_timestamp  //
+                   << ", size: " << std::setw(5) << packet_size_bytes    //
                    << ", frame size: " << std::setw(3)
                    << ops_state.current_frame_size_ms
                    << ", buffer size: " << std::setw(4)
                    << ops_state.current_buffer_size_ms << std::endl;
       }
-      last_packet_time_ms_ = absl::make_optional<int>(time_now_ms);
-      last_packet_timestamp_ =
-          absl::make_optional<uint32_t>(packet_data->header.timestamp);
+      last_packet_time_ms_ = time_now_ms;
+      last_packet_timestamp_ = packet_data->Timestamp();
     }
 
     if (input_->NextSetMinimumDelayInfo().has_value() &&
@@ -177,11 +199,9 @@ NetEqTest::SimulationStepResult NetEqTest::RunToNextGetAudio() {
         callbacks_.get_audio_callback->BeforeGetAudio(neteq_.get());
       }
       AudioFrame out_frame;
-      bool muted;
-      int error = neteq_->GetAudio(&out_frame, &muted, nullptr,
+      int error = neteq_->GetAudio(&out_frame, nullptr, nullptr,
                                    ActionToOperations(next_action_));
-      next_action_ = absl::nullopt;
-      RTC_CHECK(!muted) << "The code does not handle enable_muted_state";
+      next_action_ = std::nullopt;
       if (error != NetEq::kOK) {
         if (callbacks_.error_callback) {
           callbacks_.error_callback->OnGetAudioError();
@@ -190,8 +210,8 @@ NetEqTest::SimulationStepResult NetEqTest::RunToNextGetAudio() {
         sample_rate_hz_ = out_frame.sample_rate_hz_;
       }
       if (callbacks_.get_audio_callback) {
-        callbacks_.get_audio_callback->AfterGetAudio(time_now_ms, out_frame,
-                                                     muted, neteq_.get());
+        callbacks_.get_audio_callback->AfterGetAudio(
+            time_now_ms, out_frame, out_frame.muted(), neteq_.get());
       }
 
       if (output_) {
@@ -286,7 +306,7 @@ NetEqTest::SimulationStepResult NetEqTest::RunToNextGetAudio() {
 }
 
 void NetEqTest::SetNextAction(NetEqTest::Action next_operation) {
-  next_action_ = absl::optional<Action>(next_operation);
+  next_action_ = std::optional<Action>(next_operation);
 }
 
 NetEqTest::NetEqState NetEqTest::GetNetEqState() {
@@ -306,11 +326,9 @@ NetEqLifetimeStatistics NetEqTest::LifetimeStats() const {
 NetEqTest::DecoderMap NetEqTest::StandardDecoderMap() {
   DecoderMap codecs = {{0, SdpAudioFormat("pcmu", 8000, 1)},
                        {8, SdpAudioFormat("pcma", 8000, 1)},
-#ifdef WEBRTC_CODEC_ILBC
-                       {102, SdpAudioFormat("ilbc", 8000, 1)},
-#endif
 #ifdef WEBRTC_CODEC_OPUS
                        {111, SdpAudioFormat("opus", 48000, 2)},
+                       {63, SdpAudioFormat("red", 48000, 2)},
 #endif
                        {93, SdpAudioFormat("l16", 8000, 1)},
                        {94, SdpAudioFormat("l16", 16000, 1)},

@@ -26,16 +26,16 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <queue>
+#include <string>
 #include <utility>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
@@ -51,26 +51,30 @@ namespace {
 void CALLBACK InitializeQueueThread(ULONG_PTR param) {
   MSG msg;
   ::PeekMessage(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
-  rtc::Event* data = reinterpret_cast<rtc::Event*>(param);
+  Event* data = reinterpret_cast<Event*>(param);
   data->Set();
 }
 
-rtc::ThreadPriority TaskQueuePriorityToThreadPriority(
+ThreadPriority TaskQueuePriorityToThreadPriority(
     TaskQueueFactory::Priority priority) {
   switch (priority) {
-    case TaskQueueFactory::Priority::HIGH:
-      return rtc::ThreadPriority::kRealtime;
-    case TaskQueueFactory::Priority::LOW:
-      return rtc::ThreadPriority::kLow;
-    case TaskQueueFactory::Priority::NORMAL:
-      return rtc::ThreadPriority::kNormal;
+    case TaskQueueFactory::Priority::kHigh:
+      return ThreadPriority::kRealtime;
+    case TaskQueueFactory::Priority::kLow:
+      return ThreadPriority::kLow;
+    case TaskQueueFactory::Priority::kNormal:
+      return ThreadPriority::kNormal;
+    case TaskQueueFactory::Priority::kVideo:
+      return ThreadPriority::kVideo;
+    case TaskQueueFactory::Priority::kAudio:
+      return ThreadPriority::kAudio;
   }
 }
 
 Timestamp CurrentTime() {
   static const UINT kPeriod = 1;
   bool high_res = (timeBeginPeriod(kPeriod) == TIMERR_NOERROR);
-  Timestamp ret = Timestamp::Micros(rtc::TimeMicros());
+  Timestamp ret = Timestamp::Micros(TimeMicros());
   if (high_res)
     timeEndPeriod(kPeriod);
   return ret;
@@ -156,9 +160,10 @@ class MultimediaTimer {
 
 class TaskQueueWin : public TaskQueueBase {
  public:
-  TaskQueueWin(absl::string_view queue_name, rtc::ThreadPriority priority);
+  TaskQueueWin(absl::string_view queue_name, ThreadPriority priority);
   ~TaskQueueWin() override = default;
 
+  absl::string_view queue_name() const override { return name_; }
   void Delete() override;
 
  protected:
@@ -187,30 +192,32 @@ class TaskQueueWin : public TaskQueueBase {
                       std::greater<DelayedTaskInfo>>
       timer_tasks_;
   UINT_PTR timer_id_ = 0;
-  rtc::PlatformThread thread_;
+  PlatformThread thread_;
   Mutex pending_lock_;
   std::queue<absl::AnyInvocable<void() &&>> pending_
       RTC_GUARDED_BY(pending_lock_);
   HANDLE in_queue_;
+  const std::string name_;
 };
 
 TaskQueueWin::TaskQueueWin(absl::string_view queue_name,
-                           rtc::ThreadPriority priority)
-    : in_queue_(::CreateEvent(nullptr, true, false, nullptr)) {
+                           ThreadPriority priority)
+    : in_queue_(::CreateEvent(nullptr, true, false, nullptr)),
+      name_(queue_name) {
   RTC_DCHECK(in_queue_);
-  thread_ = rtc::PlatformThread::SpawnJoinable(
-      [this] { RunThreadMain(); }, queue_name,
-      rtc::ThreadAttributes().SetPriority(priority));
+  thread_ =
+      PlatformThread::SpawnJoinable([this] { RunThreadMain(); }, queue_name,
+                                    ThreadAttributes().SetPriority(priority));
 
-  rtc::Event event(false, false);
+  Event event(false, false);
   RTC_CHECK(thread_.QueueAPC(&InitializeQueueThread,
                              reinterpret_cast<ULONG_PTR>(&event)));
-  event.Wait(rtc::Event::kForever);
+  event.Wait(Event::kForever);
 }
 
 void TaskQueueWin::Delete() {
   RTC_DCHECK(!IsCurrent());
-  RTC_CHECK(thread_.GetHandle() != absl::nullopt);
+  RTC_CHECK(thread_.GetHandle() != std::nullopt);
   while (
       !::PostThreadMessage(GetThreadId(*thread_.GetHandle()), WM_QUIT, 0, 0)) {
     RTC_CHECK_EQ(ERROR_NOT_ENOUGH_QUOTA, ::GetLastError());
@@ -239,7 +246,7 @@ void TaskQueueWin::PostDelayedTaskImpl(absl::AnyInvocable<void() &&> task,
   }
 
   auto* task_info = new DelayedTaskInfo(delay, std::move(task));
-  RTC_CHECK(thread_.GetHandle() != absl::nullopt);
+  RTC_CHECK(thread_.GetHandle() != std::nullopt);
   if (!::PostThreadMessage(GetThreadId(*thread_.GetHandle()),
                            WM_QUEUE_DELAYED_TASK, 0,
                            reinterpret_cast<LPARAM>(task_info))) {
@@ -270,7 +277,7 @@ void TaskQueueWin::RunThreadMain() {
     // (e.g. required for InitializeQueueThread and stopping the thread in
     // PlatformThread).
     DWORD result = ::MsgWaitForMultipleObjectsEx(
-        arraysize(handles), handles, INFINITE, QS_ALLEVENTS, MWMO_ALERTABLE);
+        std::size(handles), handles, INFINITE, QS_ALLEVENTS, MWMO_ALERTABLE);
     RTC_CHECK_NE(WAIT_FAILED, result);
     if (result == (WAIT_OBJECT_0 + 2)) {
       // There are messages in the message queue that need to be handled.

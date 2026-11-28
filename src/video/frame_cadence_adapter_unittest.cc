@@ -10,10 +10,17 @@
 
 #include "video/frame_cadence_adapter.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <memory>
+#include <optional>
 #include <utility>
-#include <vector>
 
 #include "absl/functional/any_invocable.h"
+#include "api/field_trials.h"
+#include "api/field_trials_view.h"
+#include "api/make_ref_counted.h"
 #include "api/metronome/test/fake_metronome.h"
 #include "api/task_queue/default_task_queue_factory.h"
 #include "api/task_queue/task_queue_base.h"
@@ -22,16 +29,19 @@
 #include "api/units/timestamp.h"
 #include "api/video/nv12_buffer.h"
 #include "api/video/video_frame.h"
+#include "api/video_track_source_constraints.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/rate_statistics.h"
+#include "rtc_base/task_queue_for_test.h"
+#include "rtc_base/thread.h"
 #include "rtc_base/time_utils.h"
+#include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/metrics.h"
 #include "system_wrappers/include/ntp_time.h"
-#include "system_wrappers/include/sleep.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
-#include "test/scoped_key_value_config.h"
 #include "test/time_controller/simulated_time_controller.h"
 
 namespace webrtc {
@@ -40,8 +50,6 @@ namespace {
 using ::testing::_;
 using ::testing::ElementsAre;
 using ::testing::InSequence;
-using ::testing::Invoke;
-using ::testing::InvokeWithoutArgs;
 using ::testing::Mock;
 using ::testing::NiceMock;
 using ::testing::Pair;
@@ -50,7 +58,7 @@ using ::testing::Values;
 VideoFrame CreateFrame() {
   return VideoFrame::Builder()
       .set_video_frame_buffer(
-          rtc::make_ref_counted<NV12Buffer>(/*width=*/16, /*height=*/16))
+          make_ref_counted<NV12Buffer>(/*width=*/16, /*height=*/16))
       .build();
 }
 
@@ -58,7 +66,7 @@ VideoFrame CreateFrameWithTimestamps(
     GlobalSimulatedTimeController* time_controller) {
   return VideoFrame::Builder()
       .set_video_frame_buffer(
-          rtc::make_ref_counted<NV12Buffer>(/*width=*/16, /*height=*/16))
+          make_ref_counted<NV12Buffer>(/*width=*/16, /*height=*/16))
       .set_ntp_time_ms(time_controller->GetClock()->CurrentNtpInMilliseconds())
       .set_timestamp_us(time_controller->GetClock()->CurrentTime().us())
       .build();
@@ -79,42 +87,8 @@ class MockCallback : public FrameCadenceAdapterInterface::Callback {
   MOCK_METHOD(void, RequestRefreshFrame, (), (override));
 };
 
-class ZeroHertzFieldTrialDisabler : public test::ScopedKeyValueConfig {
- public:
-  ZeroHertzFieldTrialDisabler()
-      : test::ScopedKeyValueConfig("WebRTC-ZeroHertzScreenshare/Disabled/") {}
-};
-
-class ZeroHertzFieldTrialEnabler : public test::ScopedKeyValueConfig {
- public:
-  ZeroHertzFieldTrialEnabler()
-      : test::ScopedKeyValueConfig("WebRTC-ZeroHertzScreenshare/Enabled/") {}
-};
-
-TEST(FrameCadenceAdapterTest,
-     ForwardsFramesOnConstructionAndUnderDisabledFieldTrial) {
-  GlobalSimulatedTimeController time_controller(Timestamp::Millis(1));
-  ZeroHertzFieldTrialDisabler disabled_field_trials;
-  test::ScopedKeyValueConfig no_field_trials;
-  for (int i = 0; i != 2; i++) {
-    MockCallback callback;
-    auto adapter =
-        CreateAdapter(i == 0 ? disabled_field_trials : no_field_trials,
-                      time_controller.GetClock());
-    adapter->Initialize(&callback);
-    VideoFrame frame = CreateFrame();
-    EXPECT_CALL(callback, OnFrame).Times(1);
-    adapter->OnFrame(frame);
-    time_controller.AdvanceTime(TimeDelta::Zero());
-    Mock::VerifyAndClearExpectations(&callback);
-    EXPECT_CALL(callback, OnDiscardedFrame).Times(1);
-    adapter->OnDiscardedFrame();
-    Mock::VerifyAndClearExpectations(&callback);
-  }
-}
-
 TEST(FrameCadenceAdapterTest, CountsOutstandingFramesToProcess) {
-  test::ScopedKeyValueConfig no_field_trials;
+  FieldTrials no_field_trials = CreateTestFieldTrials();
   GlobalSimulatedTimeController time_controller(Timestamp::Millis(1));
   MockCallback callback;
   auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
@@ -131,10 +105,11 @@ TEST(FrameCadenceAdapterTest, CountsOutstandingFramesToProcess) {
 }
 
 TEST(FrameCadenceAdapterTest, FrameRateFollowsRateStatisticsByDefault) {
-  test::ScopedKeyValueConfig no_field_trials;
+  FieldTrials no_field_trials = CreateTestFieldTrials();
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
   auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
-  adapter->Initialize(nullptr);
+  MockCallback callback;
+  adapter->Initialize(&callback);
 
   // Create an "oracle" rate statistics which should be followed on a sequence
   // of frames.
@@ -143,65 +118,52 @@ TEST(FrameCadenceAdapterTest, FrameRateFollowsRateStatisticsByDefault) {
 
   for (int frame = 0; frame != 10; ++frame) {
     time_controller.AdvanceTime(TimeDelta::Millis(10));
+    std::optional<int64_t> expected_fps =
+        rate.Rate(time_controller.GetClock()->TimeInMilliseconds());
     rate.Update(1, time_controller.GetClock()->TimeInMilliseconds());
-    adapter->UpdateFrameRate();
-    EXPECT_EQ(rate.Rate(time_controller.GetClock()->TimeInMilliseconds()),
-              adapter->GetInputFrameRateFps())
-        << " failed for frame " << frame;
-  }
-}
-
-TEST(FrameCadenceAdapterTest,
-     FrameRateFollowsRateStatisticsWhenFeatureDisabled) {
-  ZeroHertzFieldTrialDisabler feature_disabler;
-  GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(feature_disabler, time_controller.GetClock());
-  adapter->Initialize(nullptr);
-
-  // Create an "oracle" rate statistics which should be followed on a sequence
-  // of frames.
-  RateStatistics rate(
-      FrameCadenceAdapterInterface::kFrameRateAveragingWindowSizeMs, 1000);
-
-  for (int frame = 0; frame != 10; ++frame) {
-    time_controller.AdvanceTime(TimeDelta::Millis(10));
-    rate.Update(1, time_controller.GetClock()->TimeInMilliseconds());
-    adapter->UpdateFrameRate();
-    EXPECT_EQ(rate.Rate(time_controller.GetClock()->TimeInMilliseconds()),
-              adapter->GetInputFrameRateFps())
+    // FrameCadanceAdapter::OnFrame post the frame to another sequence.
+    adapter->OnFrame(CreateFrameWithTimestamps(&time_controller));
+    time_controller.AdvanceTime(TimeDelta::Millis(0));
+    EXPECT_EQ(expected_fps, adapter->GetInputFrameRateFps())
         << " failed for frame " << frame;
   }
 }
 
 TEST(FrameCadenceAdapterTest, FrameRateFollowsMaxFpsWhenZeroHertzActivated) {
-  ZeroHertzFieldTrialEnabler enabler;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
-  adapter->Initialize(nullptr);
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
+  MockCallback callback;
+  adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
   for (int frame = 0; frame != 10; ++frame) {
     time_controller.AdvanceTime(TimeDelta::Millis(10));
-    adapter->UpdateFrameRate();
+    // FrameCadanceAdapter::OnFrame post the frame to another sequence.
+    adapter->OnFrame(CreateFrameWithTimestamps(&time_controller));
+    time_controller.AdvanceTime(TimeDelta::Millis(0));
     EXPECT_EQ(adapter->GetInputFrameRateFps(), 1u);
   }
 }
 
 TEST(FrameCadenceAdapterTest, ZeroHertzAdapterSupportsMaxFpsChange) {
-  ZeroHertzFieldTrialEnabler enabler;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   MockCallback callback;
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
   time_controller.AdvanceTime(TimeDelta::Zero());
   EXPECT_EQ(adapter->GetInputFrameRateFps(), 1u);
   adapter->OnFrame(CreateFrame());
   time_controller.AdvanceTime(TimeDelta::Seconds(1));
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 2});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 2});
   time_controller.AdvanceTime(TimeDelta::Zero());
   EXPECT_EQ(adapter->GetInputFrameRateFps(), 2u);
   adapter->OnFrame(CreateFrame());
@@ -213,42 +175,46 @@ TEST(FrameCadenceAdapterTest, ZeroHertzAdapterSupportsMaxFpsChange) {
 
 TEST(FrameCadenceAdapterTest,
      FrameRateFollowsRateStatisticsAfterZeroHertzDeactivated) {
-  ZeroHertzFieldTrialEnabler enabler;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
-  adapter->Initialize(nullptr);
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
+  MockCallback callback;
+  adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
   RateStatistics rate(
       FrameCadenceAdapterInterface::kFrameRateAveragingWindowSizeMs, 1000);
   constexpr int MAX = 10;
   for (int frame = 0; frame != MAX; ++frame) {
     time_controller.AdvanceTime(TimeDelta::Millis(10));
     rate.Update(1, time_controller.GetClock()->TimeInMilliseconds());
-    adapter->UpdateFrameRate();
+    adapter->OnFrame(CreateFrameWithTimestamps(&time_controller));
+    time_controller.AdvanceTime(TimeDelta::Millis(0));
   }
   // Turn off zero hertz on the next-last frame; after the last frame we
   // should see a value that tracks the rate oracle.
-  adapter->SetZeroHertzModeEnabled(absl::nullopt);
+  adapter->SetZeroHertzModeEnabled(std::nullopt);
   // Last frame.
   time_controller.AdvanceTime(TimeDelta::Millis(10));
-  rate.Update(1, time_controller.GetClock()->TimeInMilliseconds());
-  adapter->UpdateFrameRate();
+  adapter->OnFrame(CreateFrameWithTimestamps(&time_controller));
+  time_controller.AdvanceTime(TimeDelta::Millis(0));
 
   EXPECT_EQ(rate.Rate(time_controller.GetClock()->TimeInMilliseconds()),
             adapter->GetInputFrameRateFps());
 }
 
 TEST(FrameCadenceAdapterTest, ForwardsFramesDelayed) {
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
   constexpr int kNumFrames = 3;
   NtpTime original_ntp_time = time_controller.GetClock()->CurrentNtpTime();
   auto frame = CreateFrameWithTimestamps(&time_controller);
@@ -257,59 +223,60 @@ TEST(FrameCadenceAdapterTest, ForwardsFramesDelayed) {
     EXPECT_CALL(callback, OnFrame).Times(0);
     adapter->OnFrame(frame);
     EXPECT_CALL(callback, OnFrame)
-        .WillOnce(Invoke([&](Timestamp post_time, bool,
-                             const VideoFrame& frame) {
+        .WillOnce([&](Timestamp post_time, bool, const VideoFrame& frame) {
           EXPECT_EQ(post_time, time_controller.GetClock()->CurrentTime());
           EXPECT_EQ(frame.timestamp_us(),
-                    original_timestamp_us + index * rtc::kNumMicrosecsPerSec);
-          EXPECT_EQ(frame.ntp_time_ms(), original_ntp_time.ToMs() +
-                                             index * rtc::kNumMillisecsPerSec);
-        }));
+                    original_timestamp_us + index * kNumMicrosecsPerSec);
+          EXPECT_EQ(frame.ntp_time_ms(),
+                    original_ntp_time.ToMs() + index * kNumMillisecsPerSec);
+        });
     time_controller.AdvanceTime(TimeDelta::Seconds(1));
     frame = CreateFrameWithTimestamps(&time_controller);
   }
 }
 
 TEST(FrameCadenceAdapterTest, DelayedProcessingUnderSlightContention) {
-  ZeroHertzFieldTrialEnabler enabler;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   MockCallback callback;
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
 
   // Expect frame delivery at 1 sec despite target sequence not running
   // callbacks for the time skipped.
   constexpr TimeDelta time_skipped = TimeDelta::Millis(999);
-  EXPECT_CALL(callback, OnFrame).WillOnce(InvokeWithoutArgs([&] {
+  EXPECT_CALL(callback, OnFrame).WillOnce([&] {
     EXPECT_EQ(time_controller.GetClock()->CurrentTime(),
               Timestamp::Zero() + TimeDelta::Seconds(1));
-  }));
+  });
   adapter->OnFrame(CreateFrame());
   time_controller.SkipForwardBy(time_skipped);
   time_controller.AdvanceTime(TimeDelta::Seconds(1) - time_skipped);
 }
 
 TEST(FrameCadenceAdapterTest, DelayedProcessingUnderHeavyContention) {
-  ZeroHertzFieldTrialEnabler enabler;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   MockCallback callback;
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
 
   // Expect frame delivery at origin + `time_skipped` when the target sequence
   // is not running callbacks for the initial 1+ sec.
   constexpr TimeDelta time_skipped =
       TimeDelta::Seconds(1) + TimeDelta::Micros(1);
-  EXPECT_CALL(callback, OnFrame).WillOnce(InvokeWithoutArgs([&] {
+  EXPECT_CALL(callback, OnFrame).WillOnce([&] {
     EXPECT_EQ(time_controller.GetClock()->CurrentTime(),
               Timestamp::Zero() + time_skipped);
-  }));
+  });
   adapter->OnFrame(CreateFrame());
   time_controller.SkipForwardBy(time_skipped);
   time_controller.AdvanceTime(TimeDelta::Zero());
@@ -321,14 +288,15 @@ TEST(FrameCadenceAdapterTest, RepeatsFramesDelayed) {
   // clock is initialized running from 0. For this reason we choose the
   // `time_controller` initialization constant to something arbitrary which is
   // not 0.
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Millis(47892223));
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
   NtpTime original_ntp_time = time_controller.GetClock()->CurrentNtpTime();
 
   // Send one frame, expect 2 subsequent repeats.
@@ -337,33 +305,91 @@ TEST(FrameCadenceAdapterTest, RepeatsFramesDelayed) {
   adapter->OnFrame(frame);
 
   EXPECT_CALL(callback, OnFrame)
-      .WillOnce(Invoke([&](Timestamp post_time, bool, const VideoFrame& frame) {
+      .WillOnce([&](Timestamp post_time, bool, const VideoFrame& frame) {
         EXPECT_EQ(post_time, time_controller.GetClock()->CurrentTime());
         EXPECT_EQ(frame.timestamp_us(), original_timestamp_us);
         EXPECT_EQ(frame.ntp_time_ms(), original_ntp_time.ToMs());
-      }));
+      });
   time_controller.AdvanceTime(TimeDelta::Seconds(1));
   Mock::VerifyAndClearExpectations(&callback);
 
   EXPECT_CALL(callback, OnFrame)
-      .WillOnce(Invoke([&](Timestamp post_time, bool, const VideoFrame& frame) {
+      .WillOnce([&](Timestamp post_time, bool, const VideoFrame& frame) {
         EXPECT_EQ(post_time, time_controller.GetClock()->CurrentTime());
         EXPECT_EQ(frame.timestamp_us(),
-                  original_timestamp_us + rtc::kNumMicrosecsPerSec);
+                  original_timestamp_us + kNumMicrosecsPerSec);
         EXPECT_EQ(frame.ntp_time_ms(),
-                  original_ntp_time.ToMs() + rtc::kNumMillisecsPerSec);
-      }));
+                  original_ntp_time.ToMs() + kNumMillisecsPerSec);
+      });
   time_controller.AdvanceTime(TimeDelta::Seconds(1));
   Mock::VerifyAndClearExpectations(&callback);
 
   EXPECT_CALL(callback, OnFrame)
-      .WillOnce(Invoke([&](Timestamp post_time, bool, const VideoFrame& frame) {
+      .WillOnce([&](Timestamp post_time, bool, const VideoFrame& frame) {
         EXPECT_EQ(post_time, time_controller.GetClock()->CurrentTime());
         EXPECT_EQ(frame.timestamp_us(),
-                  original_timestamp_us + 2 * rtc::kNumMicrosecsPerSec);
+                  original_timestamp_us + 2 * kNumMicrosecsPerSec);
         EXPECT_EQ(frame.ntp_time_ms(),
-                  original_ntp_time.ToMs() + 2 * rtc::kNumMillisecsPerSec);
-      }));
+                  original_ntp_time.ToMs() + 2 * kNumMillisecsPerSec);
+      });
+  time_controller.AdvanceTime(TimeDelta::Seconds(1));
+}
+
+TEST(FrameCadenceAdapterTest, SetsRepeatMode) {
+  MockCallback callback;
+  GlobalSimulatedTimeController time_controller(Timestamp::Millis(47892223));
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
+  adapter->Initialize(&callback);
+  adapter->SetZeroHertzModeEnabled(
+      FrameCadenceAdapterInterface::ZeroHertzModeParams{.num_simulcast_layers =
+                                                            1});
+  adapter->UpdateLayerStatus(0, /*enabled=*/true);
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
+
+  // Send one frame, expect repeat_mode to be kNone.
+  auto frame = CreateFrameWithTimestamps(&time_controller);
+  adapter->OnFrame(frame);
+  EXPECT_CALL(callback, OnFrame)
+      .WillOnce([&](Timestamp, bool, const VideoFrame& frame) {
+        EXPECT_EQ(frame.repeat_mode(), VideoFrame::RepeatMode::kNone);
+        EXPECT_FALSE(frame.is_repeat_frame());
+      });
+  time_controller.AdvanceTime(TimeDelta::Seconds(1));
+  Mock::VerifyAndClearExpectations(&callback);
+
+  // Expect the unconverged repeated frame to have kQualityConvergence.
+  EXPECT_CALL(callback, OnFrame)
+      .WillOnce([&](Timestamp, bool, const VideoFrame& frame) {
+        EXPECT_EQ(frame.repeat_mode(),
+                  VideoFrame::RepeatMode::kQualityConvergence);
+        EXPECT_TRUE(frame.is_repeat_frame());
+      });
+  // The already scheduled repeat fires as a quality-convergence repeat.
+  // Marking quality as converged before it fires makes it schedule the
+  // following repeat as an idle keep-alive.
+  adapter->UpdateLayerQualityConvergence(0, /*converged=*/true);
+  time_controller.AdvanceTime(TimeDelta::Seconds(1));
+  Mock::VerifyAndClearExpectations(&callback);
+
+  // Expect the converged idle repeated frame to have kKeepAlive.
+  EXPECT_CALL(callback, OnFrame)
+      .WillOnce([&](Timestamp, bool, const VideoFrame& frame) {
+        EXPECT_EQ(frame.repeat_mode(), VideoFrame::RepeatMode::kKeepAlive);
+        EXPECT_TRUE(frame.is_repeat_frame());
+      });
+  time_controller.AdvanceTime(TimeDelta::Seconds(1));
+  Mock::VerifyAndClearExpectations(&callback);
+
+  // Send a new frame, expect repeat_mode to be kNone again.
+  auto new_frame = CreateFrameWithTimestamps(&time_controller);
+  adapter->OnFrame(new_frame);
+  EXPECT_CALL(callback, OnFrame)
+      .WillOnce([&](Timestamp, bool, const VideoFrame& frame) {
+        EXPECT_EQ(frame.repeat_mode(), VideoFrame::RepeatMode::kNone);
+        EXPECT_FALSE(frame.is_repeat_frame());
+      });
   time_controller.AdvanceTime(TimeDelta::Seconds(1));
 }
 
@@ -375,31 +401,32 @@ TEST(FrameCadenceAdapterTest,
   // it to zero, but select unset timestamps in the frames (via CreateFrame())
   // and verify that the timestamp modifying logic doesn't depend on the current
   // time.
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Millis(4711));
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
 
   // Send one frame, expect a repeat.
   adapter->OnFrame(CreateFrame());
   EXPECT_CALL(callback, OnFrame)
-      .WillOnce(Invoke([&](Timestamp post_time, bool, const VideoFrame& frame) {
+      .WillOnce([&](Timestamp post_time, bool, const VideoFrame& frame) {
         EXPECT_EQ(post_time, time_controller.GetClock()->CurrentTime());
         EXPECT_EQ(frame.timestamp_us(), 0);
         EXPECT_EQ(frame.ntp_time_ms(), 0);
-      }));
+      });
   time_controller.AdvanceTime(TimeDelta::Seconds(1));
   Mock::VerifyAndClearExpectations(&callback);
   EXPECT_CALL(callback, OnFrame)
-      .WillOnce(Invoke([&](Timestamp post_time, bool, const VideoFrame& frame) {
+      .WillOnce([&](Timestamp post_time, bool, const VideoFrame& frame) {
         EXPECT_EQ(post_time, time_controller.GetClock()->CurrentTime());
         EXPECT_EQ(frame.timestamp_us(), 0);
         EXPECT_EQ(frame.ntp_time_ms(), 0);
-      }));
+      });
   time_controller.AdvanceTime(TimeDelta::Seconds(1));
 }
 
@@ -408,14 +435,15 @@ TEST(FrameCadenceAdapterTest, StopsRepeatingFramesDelayed) {
   // At 2s, the repeated initial frame appears.
   // At 2.5s, we schedule another new frame.
   // At 3.5s, we receive this frame.
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 1});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 1});
   NtpTime original_ntp_time = time_controller.GetClock()->CurrentNtpTime();
 
   // Send one frame, expect 1 subsequent repeat.
@@ -427,24 +455,25 @@ TEST(FrameCadenceAdapterTest, StopsRepeatingFramesDelayed) {
   // Send the new frame at 2.5s, which should appear after 3.5s.
   adapter->OnFrame(CreateFrameWithTimestamps(&time_controller));
   EXPECT_CALL(callback, OnFrame)
-      .WillOnce(Invoke([&](Timestamp, bool, const VideoFrame& frame) {
-        EXPECT_EQ(frame.timestamp_us(), 5 * rtc::kNumMicrosecsPerSec / 2);
+      .WillOnce([&](Timestamp, bool, const VideoFrame& frame) {
+        EXPECT_EQ(frame.timestamp_us(), 5 * kNumMicrosecsPerSec / 2);
         EXPECT_EQ(frame.ntp_time_ms(),
-                  original_ntp_time.ToMs() + 5u * rtc::kNumMillisecsPerSec / 2);
-      }));
+                  original_ntp_time.ToMs() + 5u * kNumMillisecsPerSec / 2);
+      });
   time_controller.AdvanceTime(TimeDelta::Seconds(1));
 }
 
 TEST(FrameCadenceAdapterTest, RequestsRefreshFrameOnKeyFrameRequestWhenNew) {
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
   constexpr int kMaxFps = 10;
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, kMaxFps});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = kMaxFps});
   EXPECT_CALL(callback, RequestRefreshFrame);
   time_controller.AdvanceTime(
       TimeDelta::Seconds(1) *
@@ -454,14 +483,15 @@ TEST(FrameCadenceAdapterTest, RequestsRefreshFrameOnKeyFrameRequestWhenNew) {
 }
 
 TEST(FrameCadenceAdapterTest, IgnoresKeyFrameRequestShortlyAfterFrame) {
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 10});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 10});
   adapter->OnFrame(CreateFrame());
   time_controller.AdvanceTime(TimeDelta::Zero());
   EXPECT_CALL(callback, RequestRefreshFrame).Times(0);
@@ -469,15 +499,16 @@ TEST(FrameCadenceAdapterTest, IgnoresKeyFrameRequestShortlyAfterFrame) {
 }
 
 TEST(FrameCadenceAdapterTest, RequestsRefreshFramesUntilArrival) {
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
   constexpr int kMaxFps = 10;
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, kMaxFps});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = kMaxFps});
 
   // We should see max_fps + 1 -
   // FrameCadenceAdapterInterface::kOnDiscardedFrameRefreshFramePeriod refresh
@@ -495,15 +526,16 @@ TEST(FrameCadenceAdapterTest, RequestsRefreshFramesUntilArrival) {
 }
 
 TEST(FrameCadenceAdapterTest, RequestsRefreshAfterFrameDrop) {
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
   constexpr int kMaxFps = 10;
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, kMaxFps});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = kMaxFps});
 
   EXPECT_CALL(callback, RequestRefreshFrame).Times(0);
 
@@ -536,15 +568,16 @@ TEST(FrameCadenceAdapterTest, RequestsRefreshAfterFrameDrop) {
 }
 
 TEST(FrameCadenceAdapterTest, OmitsRefreshAfterFrameDropWithTimelyFrameEntry) {
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{});
   constexpr int kMaxFps = 10;
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, kMaxFps});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = kMaxFps});
 
   // Send a frame through to cancel the initial delayed timer waiting for first
   // frame entry.
@@ -575,16 +608,17 @@ TEST(FrameCadenceAdapterTest, OmitsRefreshAfterFrameDropWithTimelyFrameEntry) {
 
 TEST(FrameCadenceAdapterTest, AcceptsUnconfiguredLayerFeedback) {
   // This is a regression test for bugs.webrtc.org/14417.
-  ZeroHertzFieldTrialEnabler enabler;
   MockCallback callback;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
-  auto adapter = CreateAdapter(enabler, time_controller.GetClock());
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = CreateAdapter(no_field_trials, time_controller.GetClock());
   adapter->Initialize(&callback);
   adapter->SetZeroHertzModeEnabled(
       FrameCadenceAdapterInterface::ZeroHertzModeParams{.num_simulcast_layers =
                                                             1});
   constexpr int kMaxFps = 10;
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, kMaxFps});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = kMaxFps});
   time_controller.AdvanceTime(TimeDelta::Zero());
 
   adapter->UpdateLayerQualityConvergence(2, false);
@@ -592,14 +626,14 @@ TEST(FrameCadenceAdapterTest, AcceptsUnconfiguredLayerFeedback) {
 }
 
 TEST(FrameCadenceAdapterTest, IgnoresDropInducedCallbacksPostDestruction) {
-  ZeroHertzFieldTrialEnabler enabler;
   auto callback = std::make_unique<MockCallback>();
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
   auto queue = time_controller.GetTaskQueueFactory()->CreateTaskQueue(
-      "queue", TaskQueueFactory::Priority::NORMAL);
+      "queue", TaskQueueFactory::Priority::kNormal);
+  FieldTrials no_field_trials = CreateTestFieldTrials();
   auto adapter = FrameCadenceAdapterInterface::Create(
       time_controller.GetClock(), queue.get(), /*metronome=*/nullptr,
-      /*worker_queue=*/nullptr, enabler);
+      /*worker_queue=*/nullptr, no_field_trials);
   queue->PostTask([&adapter, &callback] {
     adapter->Initialize(callback.get());
     adapter->SetZeroHertzModeEnabled(
@@ -607,7 +641,8 @@ TEST(FrameCadenceAdapterTest, IgnoresDropInducedCallbacksPostDestruction) {
   });
   time_controller.AdvanceTime(TimeDelta::Zero());
   constexpr int kMaxFps = 10;
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, kMaxFps});
+  adapter->OnConstraintsChanged(
+      VideoTrackSourceConstraints{.min_fps = 0, .max_fps = kMaxFps});
   adapter->OnDiscardedFrame();
   time_controller.AdvanceTime(TimeDelta::Zero());
   callback = nullptr;
@@ -616,19 +651,19 @@ TEST(FrameCadenceAdapterTest, IgnoresDropInducedCallbacksPostDestruction) {
 }
 
 TEST(FrameCadenceAdapterTest, EncodeFramesAreAlignedWithMetronomeTick) {
-  ZeroHertzFieldTrialEnabler enabler;
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
   // Here the metronome interval is 33ms, because the metronome is not
   // infrequent then the encode tasks are aligned with the tick period.
   static constexpr TimeDelta kTickPeriod = TimeDelta::Millis(33);
   auto queue = time_controller.GetTaskQueueFactory()->CreateTaskQueue(
-      "queue", TaskQueueFactory::Priority::NORMAL);
+      "queue", TaskQueueFactory::Priority::kNormal);
   auto worker_queue = time_controller.GetTaskQueueFactory()->CreateTaskQueue(
-      "work_queue", TaskQueueFactory::Priority::NORMAL);
-  static test::FakeMetronome metronome(kTickPeriod);
+      "work_queue", TaskQueueFactory::Priority::kNormal);
+  test::FakeMetronome metronome(kTickPeriod);
+  FieldTrials no_field_trials = CreateTestFieldTrials();
   auto adapter = FrameCadenceAdapterInterface::Create(
       time_controller.GetClock(), queue.get(), &metronome, worker_queue.get(),
-      enabler);
+      no_field_trials);
   MockCallback callback;
   adapter->Initialize(&callback);
   auto frame = CreateFrame();
@@ -683,12 +718,40 @@ TEST(FrameCadenceAdapterTest, EncodeFramesAreAlignedWithMetronomeTick) {
   time_controller.AdvanceTime(TimeDelta::Millis(1));
   Mock::VerifyAndClearExpectations(&callback);
 
-  rtc::Event finalized;
+  Event finalized;
   queue->PostTask([&] {
     adapter = nullptr;
     finalized.Set();
   });
-  finalized.Wait(rtc::Event::kForever);
+  finalized.Wait(Event::kForever);
+}
+
+TEST(FrameCadenceAdapterTest, ShutdownUnderMetronome) {
+  // Regression test for crbug.com/356423094.
+  // The current thread takes the role of worker queue.
+  GlobalSimulatedTimeController time_controller(Timestamp::Zero());
+  static constexpr TimeDelta kTickPeriod = TimeDelta::Millis(100);
+  auto queue = time_controller.GetTaskQueueFactory()->CreateTaskQueue(
+      "queue", TaskQueueFactory::Priority::kNormal);
+  test::FakeMetronome metronome(kTickPeriod);
+  FieldTrials no_field_trials = CreateTestFieldTrials();
+  auto adapter = FrameCadenceAdapterInterface::Create(
+      time_controller.GetClock(), queue.get(), &metronome,
+      TaskQueueBase::Current(), no_field_trials);
+  MockCallback callback;
+  EXPECT_CALL(callback, OnFrame).Times(0);
+  adapter->Initialize(&callback);
+
+  // Pass a frame, this is expected to trigger an encode call in the future.
+  adapter->OnFrame(CreateFrame());
+
+  // Then post destruction of the adapter and destroy the encode queue from the
+  // worker (i.e. current).
+  SendTask(queue.get(), [&] { adapter = nullptr; });
+  queue = nullptr;
+
+  // Now that we advance time, there should be no encoding happening.
+  time_controller.AdvanceTime(TimeDelta::Millis(100));
 }
 
 class FrameCadenceAdapterSimulcastLayersParamTest
@@ -702,7 +765,8 @@ class FrameCadenceAdapterSimulcastLayersParamTest
 
   FrameCadenceAdapterSimulcastLayersParamTest() {
     adapter_->Initialize(&callback_);
-    adapter_->OnConstraintsChanged(VideoTrackSourceConstraints{0, kMaxFpsHz});
+    adapter_->OnConstraintsChanged(
+        VideoTrackSourceConstraints{.min_fps = 0, .max_fps = kMaxFpsHz});
     time_controller_.AdvanceTime(TimeDelta::Zero());
     adapter_->SetZeroHertzModeEnabled(
         FrameCadenceAdapterInterface::ZeroHertzModeParams{});
@@ -714,11 +778,11 @@ class FrameCadenceAdapterSimulcastLayersParamTest
   int NumSpatialLayers() const { return GetParam(); }
 
  protected:
-  ZeroHertzFieldTrialEnabler enabler_;
+  FieldTrials no_field_trials_ = CreateTestFieldTrials();
   MockCallback callback_;
   GlobalSimulatedTimeController time_controller_{Timestamp::Zero()};
   const std::unique_ptr<FrameCadenceAdapterInterface> adapter_{
-      CreateAdapter(enabler_, time_controller_.GetClock())};
+      CreateAdapter(no_field_trials_, time_controller_.GetClock())};
 };
 
 TEST_P(FrameCadenceAdapterSimulcastLayersParamTest,
@@ -822,7 +886,7 @@ class ZeroHertzLayerQualityConvergenceTest : public ::testing::Test {
         FrameCadenceAdapterInterface::ZeroHertzModeParams{
             /*num_simulcast_layers=*/2});
     adapter_->OnConstraintsChanged(VideoTrackSourceConstraints{
-        /*min_fps=*/0, /*max_fps=*/TimeDelta::Seconds(1) / kMinFrameDelay});
+        .min_fps = 0, .max_fps = TimeDelta::Seconds(1) / kMinFrameDelay});
     time_controller_.AdvanceTime(TimeDelta::Zero());
   }
 
@@ -843,11 +907,11 @@ class ZeroHertzLayerQualityConvergenceTest : public ::testing::Test {
   }
 
  protected:
-  ZeroHertzFieldTrialEnabler field_trial_enabler_;
+  FieldTrials no_field_trials_ = CreateTestFieldTrials();
   MockCallback callback_;
   GlobalSimulatedTimeController time_controller_{Timestamp::Zero()};
   std::unique_ptr<FrameCadenceAdapterInterface> adapter_{
-      CreateAdapter(field_trial_enabler_, time_controller_.GetClock())};
+      CreateAdapter(no_field_trials_, time_controller_.GetClock())};
 };
 
 TEST_F(ZeroHertzLayerQualityConvergenceTest, InitialStateUnconverged) {
@@ -942,7 +1006,7 @@ TEST_F(ZeroHertzLayerQualityConvergenceTest,
     adapter_->UpdateVideoSourceRestrictions(kRestrictedMaxFps);
   });
   ScheduleDelayed(5.5 * kMinFrameDelay, [&] {
-    adapter_->UpdateVideoSourceRestrictions(absl::nullopt);
+    adapter_->UpdateVideoSourceRestrictions(std::nullopt);
   });
   ExpectFrameEntriesAtDelaysFromNow({
       1 * kMinFrameDelay,  // Original frame emitted at non-restricted rate.
@@ -969,13 +1033,12 @@ TEST_F(ZeroHertzLayerQualityConvergenceTest,
   });
   ScheduleDelayed(2.5 * kMinFrameDelay, [&] {
     adapter_->OnConstraintsChanged(VideoTrackSourceConstraints{
-        /*min_fps=*/0, /*max_fps=*/2 * TimeDelta::Seconds(1) / kMinFrameDelay});
+        .min_fps = 0, .max_fps = 2 * TimeDelta::Seconds(1) / kMinFrameDelay});
   });
   ScheduleDelayed(3 * kMinFrameDelay, [&] { PassFrame(); });
   ScheduleDelayed(8 * kMinFrameDelay, [&] {
     adapter_->OnConstraintsChanged(VideoTrackSourceConstraints{
-        /*min_fps=*/0,
-        /*max_fps=*/0.2 * TimeDelta::Seconds(1) / kMinFrameDelay});
+        .min_fps = 0, .max_fps = 0.2 * TimeDelta::Seconds(1) / kMinFrameDelay});
   });
   ScheduleDelayed(9 * kMinFrameDelay, [&] { PassFrame(); });
   ExpectFrameEntriesAtDelaysFromNow({
@@ -1022,22 +1085,6 @@ class FrameCadenceAdapterMetricsTest : public ::testing::Test {
   GlobalSimulatedTimeController time_controller_;
 };
 
-TEST_F(FrameCadenceAdapterMetricsTest, RecordsTimeUntilFirstFrame) {
-  MockCallback callback;
-  test::ScopedKeyValueConfig no_field_trials;
-  auto adapter = CreateAdapter(no_field_trials, time_controller_.GetClock());
-  adapter->Initialize(&callback);
-  adapter->SetZeroHertzModeEnabled(
-      FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-  adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 5.0});
-  time_controller_.AdvanceTime(TimeDelta::Millis(666));
-  adapter->OnFrame(CreateFrame());
-  DepleteTaskQueues();
-  EXPECT_THAT(
-      metrics::Samples("WebRTC.Screenshare.ZeroHz.TimeUntilFirstFrameMs"),
-      ElementsAre(Pair(666, 1)));
-}
-
 TEST(FrameCadenceAdapterRealTimeTest, TimestampsDoNotDrift) {
   // This regression test must be performed in realtime because of limitations
   // in GlobalSimulatedTimeController.
@@ -1047,34 +1094,35 @@ TEST(FrameCadenceAdapterRealTimeTest, TimestampsDoNotDrift) {
   // the repeated frames.
   auto factory = CreateDefaultTaskQueueFactory();
   auto queue =
-      factory->CreateTaskQueue("test", TaskQueueFactory::Priority::NORMAL);
-  ZeroHertzFieldTrialEnabler enabler;
+      factory->CreateTaskQueue("test", TaskQueueFactory::Priority::kNormal);
   MockCallback callback;
   Clock* clock = Clock::GetRealTimeClock();
   std::unique_ptr<FrameCadenceAdapterInterface> adapter;
   int frame_counter = 0;
   int64_t original_ntp_time_ms;
   int64_t original_timestamp_us;
-  rtc::Event event;
+  Event event;
+  FieldTrials no_field_trials = CreateTestFieldTrials();
   queue->PostTask([&] {
-    adapter = CreateAdapter(enabler, clock);
+    adapter = CreateAdapter(no_field_trials, clock);
     adapter->Initialize(&callback);
     adapter->SetZeroHertzModeEnabled(
         FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-    adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 30});
+    adapter->OnConstraintsChanged(
+        VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 30});
     auto frame = CreateFrame();
     original_ntp_time_ms = clock->CurrentNtpInMilliseconds();
     frame.set_ntp_time_ms(original_ntp_time_ms);
     original_timestamp_us = clock->CurrentTime().us();
     frame.set_timestamp_us(original_timestamp_us);
-    constexpr int kSleepMs = rtc::kNumMillisecsPerSec / 2;
+    constexpr int kSleepMs = kNumMillisecsPerSec / 2;
     EXPECT_CALL(callback, OnFrame)
         .WillRepeatedly(
-            Invoke([&](Timestamp, bool, const VideoFrame& incoming_frame) {
+            [&](Timestamp, bool, const VideoFrame& incoming_frame) {
               ++frame_counter;
               // Avoid the first OnFrame and sleep on the second.
               if (frame_counter == 2) {
-                SleepMs(kSleepMs);
+                Thread::SleepMs(kSleepMs);
               } else if (frame_counter == 3) {
                 EXPECT_GE(incoming_frame.ntp_time_ms(),
                           original_ntp_time_ms + kSleepMs);
@@ -1082,30 +1130,19 @@ TEST(FrameCadenceAdapterRealTimeTest, TimestampsDoNotDrift) {
                           original_timestamp_us + kSleepMs);
                 event.Set();
               }
-            }));
+            });
     adapter->OnFrame(frame);
   });
-  event.Wait(rtc::Event::kForever);
-  rtc::Event finalized;
+  event.Wait(Event::kForever);
+  Event finalized;
   queue->PostTask([&] {
     adapter = nullptr;
     finalized.Set();
   });
-  finalized.Wait(rtc::Event::kForever);
+  finalized.Wait(Event::kForever);
 }
 
-// TODO(bugs.webrtc.org/15462) Disable ScheduledRepeatAllowsForSlowEncode for
-// TaskQueueLibevent.
-#if defined(WEBRTC_ENABLE_LIBEVENT)
-#define MAYBE_ScheduledRepeatAllowsForSlowEncode \
-  DISABLED_ScheduledRepeatAllowsForSlowEncode
-#else
-#define MAYBE_ScheduledRepeatAllowsForSlowEncode \
-  ScheduledRepeatAllowsForSlowEncode
-#endif
-
-TEST(FrameCadenceAdapterRealTimeTest,
-     MAYBE_ScheduledRepeatAllowsForSlowEncode) {
+TEST(FrameCadenceAdapterRealTimeTest, ScheduledRepeatAllowsForSlowEncode) {
   // This regression test must be performed in realtime because of limitations
   // in GlobalSimulatedTimeController.
   //
@@ -1114,210 +1151,48 @@ TEST(FrameCadenceAdapterRealTimeTest,
   // OnFrame (frame 3).
   auto factory = CreateDefaultTaskQueueFactory();
   auto queue =
-      factory->CreateTaskQueue("test", TaskQueueFactory::Priority::NORMAL);
-  ZeroHertzFieldTrialEnabler enabler;
+      factory->CreateTaskQueue("test", TaskQueueFactory::Priority::kNormal);
   MockCallback callback;
   Clock* clock = Clock::GetRealTimeClock();
   std::unique_ptr<FrameCadenceAdapterInterface> adapter;
   int frame_counter = 0;
-  rtc::Event event;
-  absl::optional<Timestamp> start_time;
+  Event event;
+  std::optional<Timestamp> start_time;
+  FieldTrials no_field_trials = CreateTestFieldTrials();
   queue->PostTask([&] {
-    adapter = CreateAdapter(enabler, clock);
+    adapter = CreateAdapter(no_field_trials, clock);
     adapter->Initialize(&callback);
     adapter->SetZeroHertzModeEnabled(
         FrameCadenceAdapterInterface::ZeroHertzModeParams{});
-    adapter->OnConstraintsChanged(VideoTrackSourceConstraints{0, 2});
+    adapter->OnConstraintsChanged(
+        VideoTrackSourceConstraints{.min_fps = 0, .max_fps = 2});
     auto frame = CreateFrame();
     constexpr int kSleepMs = 400;
-    constexpr TimeDelta kAllowedBelate = TimeDelta::Millis(150);
-    EXPECT_CALL(callback, OnFrame)
-        .WillRepeatedly(InvokeWithoutArgs([&, kAllowedBelate] {
-          ++frame_counter;
-          // Avoid the first OnFrame and sleep on the second.
-          if (frame_counter == 2) {
-            start_time = clock->CurrentTime();
-            SleepMs(kSleepMs);
-          } else if (frame_counter == 3) {
-            TimeDelta diff =
-                clock->CurrentTime() - (*start_time + TimeDelta::Millis(500));
-            RTC_LOG(LS_ERROR)
-                << "Difference in when frame should vs is appearing: " << diff;
-            EXPECT_LT(diff, kAllowedBelate);
-            event.Set();
-          }
-        }));
+    constexpr TimeDelta kAllowedBelate = TimeDelta::Millis(151);
+    EXPECT_CALL(callback, OnFrame).WillRepeatedly([&, kAllowedBelate] {
+      ++frame_counter;
+      // Avoid the first OnFrame and sleep on the second.
+      if (frame_counter == 2) {
+        start_time = clock->CurrentTime();
+        Thread::SleepMs(kSleepMs);
+      } else if (frame_counter == 3) {
+        TimeDelta diff =
+            clock->CurrentTime() - (*start_time + TimeDelta::Millis(500));
+        RTC_LOG(LS_ERROR) << "Difference in when frame should vs is appearing: "
+                          << diff;
+        EXPECT_LT(diff, kAllowedBelate);
+        event.Set();
+      }
+    });
     adapter->OnFrame(frame);
   });
-  event.Wait(rtc::Event::kForever);
-  rtc::Event finalized;
+  event.Wait(Event::kForever);
+  Event finalized;
   queue->PostTask([&] {
     adapter = nullptr;
     finalized.Set();
   });
-  finalized.Wait(rtc::Event::kForever);
+  finalized.Wait(Event::kForever);
 }
-
-class ZeroHertzQueueOverloadTest : public ::testing::Test {
- public:
-  static constexpr int kMaxFps = 10;
-
-  ZeroHertzQueueOverloadTest() {
-    Initialize();
-    metrics::Reset();
-  }
-
-  void Initialize() {
-    adapter_->Initialize(&callback_);
-    adapter_->SetZeroHertzModeEnabled(
-        FrameCadenceAdapterInterface::ZeroHertzModeParams{
-            /*num_simulcast_layers=*/1});
-    adapter_->OnConstraintsChanged(
-        VideoTrackSourceConstraints{/*min_fps=*/0, kMaxFps});
-    time_controller_.AdvanceTime(TimeDelta::Zero());
-  }
-
-  void ScheduleDelayed(TimeDelta delay, absl::AnyInvocable<void() &&> task) {
-    TaskQueueBase::Current()->PostDelayedTask(std::move(task), delay);
-  }
-
-  void PassFrame() { adapter_->OnFrame(CreateFrame()); }
-
-  void AdvanceTime(TimeDelta duration) {
-    time_controller_.AdvanceTime(duration);
-  }
-
-  void SkipForwardBy(TimeDelta duration) {
-    time_controller_.SkipForwardBy(duration);
-  }
-
-  Timestamp CurrentTime() { return time_controller_.GetClock()->CurrentTime(); }
-
- protected:
-  test::ScopedKeyValueConfig field_trials_;
-  NiceMock<MockCallback> callback_;
-  GlobalSimulatedTimeController time_controller_{Timestamp::Zero()};
-  std::unique_ptr<FrameCadenceAdapterInterface> adapter_{
-      CreateAdapter(field_trials_, time_controller_.GetClock())};
-};
-
-TEST_F(ZeroHertzQueueOverloadTest,
-       ForwardedFramesDuringTooLongEncodeTimeAreFlaggedWithQueueOverload) {
-  InSequence s;
-  PassFrame();
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).WillOnce(InvokeWithoutArgs([&] {
-    PassFrame();
-    PassFrame();
-    PassFrame();
-    SkipForwardBy(TimeDelta::Millis(301));
-  }));
-  EXPECT_CALL(callback_, OnFrame(_, true, _)).Times(3);
-  AdvanceTime(TimeDelta::Millis(100));
-  EXPECT_THAT(metrics::Samples("WebRTC.Screenshare.ZeroHz.QueueOverload"),
-              ElementsAre(Pair(false, 1), Pair(true, 3)));
-}
-
-TEST_F(ZeroHertzQueueOverloadTest,
-       ForwardedFramesAfterOverloadBurstAreNotFlaggedWithQueueOverload) {
-  InSequence s;
-  PassFrame();
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).WillOnce(InvokeWithoutArgs([&] {
-    PassFrame();
-    PassFrame();
-    PassFrame();
-    SkipForwardBy(TimeDelta::Millis(301));
-  }));
-  EXPECT_CALL(callback_, OnFrame(_, true, _)).Times(3);
-  AdvanceTime(TimeDelta::Millis(100));
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).Times(2);
-  PassFrame();
-  PassFrame();
-  AdvanceTime(TimeDelta::Millis(100));
-  EXPECT_THAT(metrics::Samples("WebRTC.Screenshare.ZeroHz.QueueOverload"),
-              ElementsAre(Pair(false, 3), Pair(true, 3)));
-}
-
-TEST_F(ZeroHertzQueueOverloadTest,
-       ForwardedFramesDuringNormalEncodeTimeAreNotFlaggedWithQueueOverload) {
-  InSequence s;
-  PassFrame();
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).WillOnce(InvokeWithoutArgs([&] {
-    PassFrame();
-    PassFrame();
-    PassFrame();
-    // Long but not too long encode time.
-    SkipForwardBy(TimeDelta::Millis(99));
-  }));
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).Times(3);
-  AdvanceTime(TimeDelta::Millis(199));
-  EXPECT_THAT(metrics::Samples("WebRTC.Screenshare.ZeroHz.QueueOverload"),
-              ElementsAre(Pair(false, 4)));
-}
-
-TEST_F(
-    ZeroHertzQueueOverloadTest,
-    AvoidSettingQueueOverloadAndSendRepeatWhenNoNewPacketsWhileTooLongEncode) {
-  // Receive one frame only and let OnFrame take such a long time that an
-  // overload normally is warranted. But the fact that no new frames arrive
-  // while being blocked should trigger a non-idle repeat to ensure that the
-  // video stream does not freeze and queue overload should be false.
-  PassFrame();
-  EXPECT_CALL(callback_, OnFrame(_, false, _))
-      .WillOnce(
-          InvokeWithoutArgs([&] { SkipForwardBy(TimeDelta::Millis(101)); }))
-      .WillOnce(InvokeWithoutArgs([&] {
-        // Non-idle repeat.
-        EXPECT_EQ(CurrentTime(), Timestamp::Zero() + TimeDelta::Millis(201));
-      }));
-  AdvanceTime(TimeDelta::Millis(100));
-  EXPECT_THAT(metrics::Samples("WebRTC.Screenshare.ZeroHz.QueueOverload"),
-              ElementsAre(Pair(false, 2)));
-}
-
-TEST_F(ZeroHertzQueueOverloadTest,
-       EnterFastRepeatAfterQueueOverloadWhenReceivedOnlyOneFrameDuringEncode) {
-  InSequence s;
-  // - Forward one frame frame during high load which triggers queue overload.
-  // - Receive only one new frame while being blocked and verify that the
-  //   cancelled repeat was for the first frame and not the second.
-  // - Fast repeat mode should happen after second frame.
-  PassFrame();
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).WillOnce(InvokeWithoutArgs([&] {
-    PassFrame();
-    SkipForwardBy(TimeDelta::Millis(101));
-  }));
-  EXPECT_CALL(callback_, OnFrame(_, true, _));
-  AdvanceTime(TimeDelta::Millis(100));
-
-  // Fast repeats should take place from here on.
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).Times(5);
-  AdvanceTime(TimeDelta::Millis(500));
-  EXPECT_THAT(metrics::Samples("WebRTC.Screenshare.ZeroHz.QueueOverload"),
-              ElementsAre(Pair(false, 6), Pair(true, 1)));
-}
-
-TEST_F(ZeroHertzQueueOverloadTest,
-       QueueOverloadIsDisabledForZeroHerzWhenKillSwitchIsEnabled) {
-  webrtc::test::ScopedKeyValueConfig field_trials(
-      field_trials_, "WebRTC-ZeroHertzQueueOverload/Disabled/");
-  adapter_.reset();
-  adapter_ = CreateAdapter(field_trials, time_controller_.GetClock());
-  Initialize();
-
-  // Same as ForwardedFramesDuringTooLongEncodeTimeAreFlaggedWithQueueOverload
-  // but this time the queue overload mechanism is disabled.
-  InSequence s;
-  PassFrame();
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).WillOnce(InvokeWithoutArgs([&] {
-    PassFrame();
-    PassFrame();
-    PassFrame();
-    SkipForwardBy(TimeDelta::Millis(301));
-  }));
-  EXPECT_CALL(callback_, OnFrame(_, false, _)).Times(3);
-  AdvanceTime(TimeDelta::Millis(100));
-  EXPECT_EQ(metrics::NumSamples("WebRTC.Screenshare.ZeroHz.QueueOverload"), 0);
-}
-
 }  // namespace
 }  // namespace webrtc

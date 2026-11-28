@@ -9,8 +9,13 @@
  */
 #include "sdk/android/src/jni/logging/log_sink.h"
 
-#include "absl/strings/string_view.h"
+#include <jni.h>
+
+#include "rtc_base/logging.h"
 #include "sdk/android/generated_logging_jni/JNILogging_jni.h"
+#include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
+#include "sdk/android/src/jni/jvm.h"
 
 namespace webrtc {
 namespace jni {
@@ -19,24 +24,15 @@ JNILogSink::JNILogSink(JNIEnv* env, const JavaRef<jobject>& j_logging)
     : j_logging_(env, j_logging) {}
 JNILogSink::~JNILogSink() = default;
 
-void JNILogSink::OnLogMessage(const std::string& msg) {
-  RTC_DCHECK_NOTREACHED();
-}
-
-void JNILogSink::OnLogMessage(const std::string& msg,
-                              rtc::LoggingSeverity severity,
-                              const char* tag) {
-  OnLogMessage(absl::string_view{msg}, severity, tag);
-}
-
-void JNILogSink::OnLogMessage(absl::string_view msg,
-                              rtc::LoggingSeverity severity,
-                              const char* tag) {
+void JNILogSink::OnLogMessage(const LogLineRef& line) {
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   Java_JNILogging_logToInjectable(
-      env, j_logging_, NativeToJavaString(env, std::string(msg)),
-      NativeToJavaInteger(env, severity), NativeToJavaString(env, tag));
+      env, j_logging_, NativeToJavaString(env, line.DefaultLogLine()),
+      NativeToJavaInteger(env, line.severity()),
+      NativeToJavaString(env, line.tag()));
 }
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(JNILogging)

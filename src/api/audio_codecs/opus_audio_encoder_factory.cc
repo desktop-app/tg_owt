@@ -11,11 +11,19 @@
 #include "api/audio_codecs/opus_audio_encoder_factory.h"
 
 #include <memory>
+#include <optional>
+#include <utility>
 #include <vector>
 
+#include "api/audio_codecs/audio_codec_pair_id.h"
+#include "api/audio_codecs/audio_encoder.h"
+#include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/audio_codecs/audio_encoder_factory_template.h"
+#include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/opus/audio_encoder_multi_channel_opus.h"
 #include "api/audio_codecs/opus/audio_encoder_opus.h"
+#include "api/field_trials_view.h"
+#include "api/scoped_refptr.h"
 
 namespace webrtc {
 namespace {
@@ -24,29 +32,29 @@ namespace {
 template <typename T>
 struct NotAdvertised {
   using Config = typename T::Config;
-  static absl::optional<Config> SdpToConfig(
-      const SdpAudioFormat& audio_format) {
+  static std::optional<Config> SdpToConfig(const SdpAudioFormat& audio_format) {
     return T::SdpToConfig(audio_format);
   }
-  static void AppendSupportedEncoders(std::vector<AudioCodecSpec>* specs) {
+  static void AppendSupportedEncoders(
+      std::vector<AudioCodecSpec>* /* specs */) {
     // Don't advertise support for anything.
   }
   static AudioCodecInfo QueryAudioEncoder(const Config& config) {
     return T::QueryAudioEncoder(config);
   }
   static std::unique_ptr<AudioEncoder> MakeAudioEncoder(
-      const Config& config,
+      Config config,
       int payload_type,
-      absl::optional<AudioCodecPairId> codec_pair_id = absl::nullopt,
+      std::optional<AudioCodecPairId> codec_pair_id = std::nullopt,
       const FieldTrialsView* field_trials = nullptr) {
-    return T::MakeAudioEncoder(config, payload_type, codec_pair_id,
+    return T::MakeAudioEncoder(std::move(config), payload_type, codec_pair_id,
                                field_trials);
   }
 };
 
 }  // namespace
 
-rtc::scoped_refptr<AudioEncoderFactory> CreateOpusAudioEncoderFactory() {
+scoped_refptr<AudioEncoderFactory> CreateOpusAudioEncoderFactory() {
   return CreateAudioEncoderFactory<
       AudioEncoderOpus, NotAdvertised<AudioEncoderMultiChannelOpus>>();
 }

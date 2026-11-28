@@ -10,50 +10,54 @@
 
 #include "modules/audio_processing/agc2/limiter.h"
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+
+#include "api/audio/audio_view.h"
 #include "common_audio/include/audio_util.h"
 #include "modules/audio_processing/agc2/agc2_common.h"
 #include "modules/audio_processing/agc2/agc2_testing_common.h"
-#include "modules/audio_processing/agc2/vector_float_frame.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
-#include "rtc_base/gunit.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
 TEST(Limiter, LimiterShouldConstructAndRun) {
-  const int sample_rate_hz = 48000;
+  constexpr size_t kSamplesPerChannel = 480;
   ApmDataDumper apm_data_dumper(0);
 
-  Limiter limiter(sample_rate_hz, &apm_data_dumper, "");
+  Limiter limiter(&apm_data_dumper, kSamplesPerChannel, "");
 
-  VectorFloatFrame vectors_with_float_frame(1, sample_rate_hz / 100,
-                                            kMaxAbsFloatS16Value);
-  limiter.Process(vectors_with_float_frame.float_frame_view());
+  std::array<float, kSamplesPerChannel> buffer;
+  buffer.fill(kMaxAbsFloatS16Value);
+  limiter.Process(
+      DeinterleavedView<float>(buffer.data(), kSamplesPerChannel, 1));
 }
 
 TEST(Limiter, OutputVolumeAboveThreshold) {
-  const int sample_rate_hz = 48000;
+  constexpr size_t kSamplesPerChannel = 480;
   const float input_level =
       (kMaxAbsFloatS16Value + DbfsToFloatS16(test::kLimiterMaxInputLevelDbFs)) /
       2.f;
   ApmDataDumper apm_data_dumper(0);
 
-  Limiter limiter(sample_rate_hz, &apm_data_dumper, "");
+  Limiter limiter(&apm_data_dumper, kSamplesPerChannel, "");
+
+  std::array<float, kSamplesPerChannel> buffer;
 
   // Give the level estimator time to adapt.
   for (int i = 0; i < 5; ++i) {
-    VectorFloatFrame vectors_with_float_frame(1, sample_rate_hz / 100,
-                                              input_level);
-    limiter.Process(vectors_with_float_frame.float_frame_view());
+    std::fill(buffer.begin(), buffer.end(), input_level);
+    limiter.Process(
+        DeinterleavedView<float>(buffer.data(), kSamplesPerChannel, 1));
   }
 
-  VectorFloatFrame vectors_with_float_frame(1, sample_rate_hz / 100,
-                                            input_level);
-  limiter.Process(vectors_with_float_frame.float_frame_view());
-  rtc::ArrayView<const float> channel =
-      vectors_with_float_frame.float_frame_view().channel(0);
-
-  for (const auto& sample : channel) {
-    EXPECT_LT(0.9f * kMaxAbsFloatS16Value, sample);
+  std::fill(buffer.begin(), buffer.end(), input_level);
+  limiter.Process(
+      DeinterleavedView<float>(buffer.data(), kSamplesPerChannel, 1));
+  for (const auto& sample : buffer) {
+    ASSERT_LT(0.9f * kMaxAbsFloatS16Value, sample);
   }
 }
 

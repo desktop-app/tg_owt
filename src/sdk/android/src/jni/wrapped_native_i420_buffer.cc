@@ -10,7 +10,14 @@
 
 #include "sdk/android/src/jni/wrapped_native_i420_buffer.h"
 
+#include <jni.h>
+
+#include <cstdint>
+
+#include "api/scoped_refptr.h"
+#include "api/video/video_frame_buffer.h"
 #include "sdk/android/generated_video_jni/WrappedNativeI420Buffer_jni.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 
 namespace webrtc {
@@ -19,7 +26,7 @@ namespace jni {
 // TODO(magjed): Write a test for this function.
 ScopedJavaLocalRef<jobject> WrapI420Buffer(
     JNIEnv* jni,
-    const rtc::scoped_refptr<I420BufferInterface>& i420_buffer) {
+    const scoped_refptr<I420BufferInterface>& i420_buffer) {
   ScopedJavaLocalRef<jobject> y_buffer =
       NewDirectByteBuffer(jni, const_cast<uint8_t*>(i420_buffer->DataY()),
                           i420_buffer->StrideY() * i420_buffer->height());
@@ -38,3 +45,5 @@ ScopedJavaLocalRef<jobject> WrapI420Buffer(
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(WrappedNativeI420Buffer)

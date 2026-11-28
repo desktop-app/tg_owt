@@ -8,17 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <jni.h>
+
 #include "api/media_stream_interface.h"
+#include "api/scoped_refptr.h"
 #include "sdk/android/generated_peerconnection_jni/AudioTrack_jni.h"
 
 namespace webrtc {
 namespace jni {
 
 static void JNI_AudioTrack_SetVolume(JNIEnv*, jlong j_p, jdouble volume) {
-  rtc::scoped_refptr<AudioSourceInterface> source(
+  scoped_refptr<AudioSourceInterface> source(
       reinterpret_cast<AudioTrackInterface*>(j_p)->GetSource());
   source->SetVolume(volume);
 }
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(AudioTrack)

@@ -10,18 +10,25 @@
 
 #include "sdk/android/src/jni/audio_device/audio_record_jni.h"
 
-#include <string>
-#include <utility>
+#include <jni.h>
 
-#include "rtc_base/arraysize.h"
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+#include "absl/strings/string_view.h"
+#include "api/audio/audio_device_defines.h"
+#include "api/environment/environment.h"
+#include "api/units/timestamp.h"
+#include "modules/audio_device/audio_device_buffer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/platform_thread.h"
-#include "rtc_base/time_utils.h"
 #include "sdk/android/generated_java_audio_device_module_native_jni/WebRtcAudioRecord_jni.h"
-#include "sdk/android/src/jni/audio_device/audio_common.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/src/jni/jvm.h"
 #include "system_wrappers/include/metrics.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 namespace webrtc {
 
@@ -32,33 +39,39 @@ namespace {
 // a histogram which measures the time it takes for a method/scope to execute.
 class ScopedHistogramTimer {
  public:
-  explicit ScopedHistogramTimer(const std::string& name)
-      : histogram_name_(name), start_time_ms_(rtc::TimeMillis()) {}
+  ScopedHistogramTimer(const Environment& env, absl::string_view name)
+      : env_(env),
+        histogram_name_(name),
+        start_time_(env_.clock().CurrentTime()) {}
   ~ScopedHistogramTimer() {
-    const int64_t life_time_ms = rtc::TimeSince(start_time_ms_);
+    const int64_t life_time_ms =
+        (env_.clock().CurrentTime() - start_time_).ms();
     RTC_HISTOGRAM_COUNTS_1000(histogram_name_, life_time_ms);
     RTC_LOG(LS_INFO) << histogram_name_ << ": " << life_time_ms;
   }
 
  private:
+  const Environment env_;
   const std::string histogram_name_;
-  int64_t start_time_ms_;
+  Timestamp start_time_;
 };
 
 }  // namespace
 
 ScopedJavaLocalRef<jobject> AudioRecordJni::CreateJavaWebRtcAudioRecord(
     JNIEnv* env,
-    const JavaRef<jobject>& j_context,
-    const JavaRef<jobject>& j_audio_manager) {
+    const jni_zero::JavaRef<jobject>& j_context,
+    const jni_zero::JavaRef<jobject>& j_audio_manager) {
   return Java_WebRtcAudioRecord_Constructor(env, j_context, j_audio_manager);
 }
 
 AudioRecordJni::AudioRecordJni(JNIEnv* env,
+                               const Environment& webrtc_env,
                                const AudioParameters& audio_parameters,
                                int total_delay_ms,
-                               const JavaRef<jobject>& j_audio_record)
-    : j_audio_record_(env, j_audio_record),
+                               const jni_zero::JavaRef<jobject>& j_audio_record)
+    : webrtc_env_(webrtc_env),
+      j_audio_record_(env, j_audio_record),
       audio_parameters_(audio_parameters),
       total_delay_ms_(total_delay_ms),
       direct_buffer_address_(nullptr),
@@ -106,7 +119,8 @@ int32_t AudioRecordJni::InitRecording() {
     return 0;
   }
   RTC_DCHECK(!recording_);
-  ScopedHistogramTimer timer("WebRTC.Audio.InitRecordingDurationMs");
+  ScopedHistogramTimer timer(webrtc_env_,
+                             "WebRTC.Audio.InitRecordingDurationMs");
 
   int frames_per_buffer = Java_WebRtcAudioRecord_initRecording(
       env_, j_audio_record_, audio_parameters_.sample_rate(),
@@ -142,7 +156,8 @@ int32_t AudioRecordJni::StartRecording() {
         << "Recording can not start since InitRecording must succeed first";
     return 0;
   }
-  ScopedHistogramTimer timer("WebRTC.Audio.StartRecordingDurationMs");
+  ScopedHistogramTimer timer(webrtc_env_,
+                             "WebRTC.Audio.StartRecordingDurationMs");
   if (!Java_WebRtcAudioRecord_startRecording(env_, j_audio_record_)) {
     RTC_LOG(LS_ERROR) << "StartRecording failed";
     return -1;
@@ -229,8 +244,8 @@ int32_t AudioRecordJni::EnableBuiltInNS(bool enable) {
 
 void AudioRecordJni::CacheDirectBufferAddress(
     JNIEnv* env,
-    const JavaParamRef<jobject>& j_caller,
-    const JavaParamRef<jobject>& byte_buffer) {
+    const jni_zero::JavaRef<jobject>& j_caller,
+    const jni_zero::JavaRef<jobject>& byte_buffer) {
   RTC_LOG(LS_INFO) << "OnCacheDirectBufferAddress";
   RTC_DCHECK(thread_checker_.IsCurrent());
   RTC_DCHECK(!direct_buffer_address_);
@@ -243,7 +258,7 @@ void AudioRecordJni::CacheDirectBufferAddress(
 // This method is called on a high-priority thread from Java. The name of
 // the thread is 'AudioRecordThread'.
 void AudioRecordJni::DataIsRecorded(JNIEnv* env,
-                                    const JavaParamRef<jobject>& j_caller,
+                                    const jni_zero::JavaRef<jobject>& j_caller,
                                     int length,
                                     int64_t capture_timestamp_ns) {
   RTC_DCHECK(thread_checker_java_.IsCurrent());
@@ -265,3 +280,5 @@ void AudioRecordJni::DataIsRecorded(JNIEnv* env,
 }  // namespace jni
 
 }  // namespace webrtc
+
+DEFINE_JNI(WebRtcAudioRecord)

@@ -8,6 +8,7 @@ include_rules = [
   "+modules/audio_mixer",
   "+modules/audio_processing",
   "+modules/rtp_rtcp",
+  "+modules/sframe",
   "+modules/video_capture",
   "+modules/video_coding",
   "+modules/video_coding/utility",
@@ -19,19 +20,28 @@ include_rules = [
 ]
 
 specific_include_rules = {
-  "win32devicemanager\.cc": [
+  "win32devicemanager\\.cc": [
     "+third_party/logitech/files/logitechquickcam.h",
   ],
-  ".*webrtc_video_engine\.h": [
+  ".*webrtc_video_engine\\.h": [
     "+video/config",
   ],
-  ".*media_channel\.h": [
+  ".*webrtc_video_engine\\.cc": [
     "+video/config",
   ],
-  ".*webrtc_video_engine_unittest\.cc": [
+  ".*media_channel\\.h": [
     "+video/config",
   ],
-  ".*fake_webrtc_call\.cc": [
+  ".*webrtc_video_engine_unittest\\.cc": [
     "+video/config",
+  ],
+  ".*fake_webrtc_call\\.cc": [
+    "+video/config",
+  ],
+  ".*fake_webrtc_call\\.h": [
+    "+video/config",
+  ],
+  ".*codec\\.h": [
+    "+absl/strings/str_format.h",
   ],
 }

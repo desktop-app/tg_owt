@@ -9,14 +9,13 @@
  */
 #include "modules/video_coding/chain_diff_calculator.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/types/optional.h"
 #include "rtc_base/logging.h"
 
 namespace webrtc {
@@ -25,7 +24,7 @@ void ChainDiffCalculator::Reset(const std::vector<bool>& chains) {
   last_frame_in_chain_.resize(chains.size());
   for (size_t i = 0; i < chains.size(); ++i) {
     if (chains[i]) {
-      last_frame_in_chain_[i] = absl::nullopt;
+      last_frame_in_chain_[i] = std::nullopt;
     }
   }
 }

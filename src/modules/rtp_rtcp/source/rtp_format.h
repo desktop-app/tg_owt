@@ -13,11 +13,13 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <span>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "absl/base/nullability.h"
 #include "modules/rtp_rtcp/source/rtp_video_header.h"
 
 namespace webrtc {
@@ -32,12 +34,33 @@ class RtpPacketizer {
     int last_packet_reduction_len = 0;
     // Reduction len for packet that is first & last at the same time.
     int single_packet_reduction_len = 0;
+
+    PayloadSizeLimits Sanitize() const {
+      PayloadSizeLimits result = *this;
+      result.max_payload_len = std::max(0, result.max_payload_len);
+      result.single_packet_reduction_len = std::clamp(
+          result.single_packet_reduction_len, 0, result.max_payload_len);
+      result.first_packet_reduction_len = std::clamp(
+          result.first_packet_reduction_len, 0, result.max_payload_len);
+      result.last_packet_reduction_len = std::clamp(
+          result.last_packet_reduction_len, 0, result.max_payload_len);
+      return result;
+    }
   };
 
-  // If type is not set, returns a raw packetizer.
-  static std::unique_ptr<RtpPacketizer> Create(
-      absl::optional<VideoCodecType> type,
-      rtc::ArrayView<const uint8_t> payload,
+  enum class PacketizationFormat {
+    kGeneric,
+    kRaw,
+    kH264,
+    kH265,
+    kVP8,
+    kVP9,
+    kAV1,
+    kSframe,
+  };
+  static absl_nonnull std::unique_ptr<RtpPacketizer> Create(
+      PacketizationFormat format,
+      std::span<const uint8_t> payload,
       PayloadSizeLimits limits,
       // Codec-specific details.
       const RTPVideoHeader& rtp_video_header);
@@ -52,9 +75,9 @@ class RtpPacketizer {
   // Returns true on success, false otherwise.
   virtual bool NextPacket(RtpPacketToSend* packet) = 0;
 
-  // Split payload_len into sum of integers with respect to `limits`.
+  // Splits `payload_size` into sum of integers with respect to `limits`.
   // Returns empty vector on failure.
-  static std::vector<int> SplitAboutEqually(int payload_len,
+  static std::vector<int> SplitAboutEqually(size_t payload_size,
                                             const PayloadSizeLimits& limits);
 };
 }  // namespace webrtc

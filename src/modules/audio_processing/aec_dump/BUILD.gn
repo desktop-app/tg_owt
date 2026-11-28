@@ -17,10 +17,8 @@ rtc_source_set("aec_dump") {
     "../../../api/task_queue",
     "../../../rtc_base/system:file_wrapper",
     "../../../rtc_base/system:rtc_export",
-  ]
-  absl_deps = [
     "//third_party/abseil-cpp/absl/base:nullability",
-    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
 }
 
@@ -34,22 +32,26 @@ if (rtc_include_tests) {
 
     deps = [
       "..:aec_dump_interface",
-      "..:audioproc_test_utils",
-      "../",
+      "..:audio_frame_view",
+      "../../../api/audio:audio_frame_api",
+      "../../../api/audio:audio_processing",
       "../../../test:test_support",
     ]
   }
 
-  rtc_library("mock_aec_dump_unittests") {
-    testonly = true
+  rtc_cc_test("aec_dump_integration_test") {
     configs += [ "..:apm_debug_dump" ]
     sources = [ "aec_dump_integration_test.cc" ]
 
     deps = [
       ":mock_aec_dump",
-      "..:api",
-      "..:audioproc_test_utils",
-      "../",
+      "../../../api:scoped_refptr",
+      "../../../api/audio:audio_processing",
+      "../../../api/audio:builtin_audio_processing_builder",
+      "../../../api/environment:environment_factory",
+      "../../../rtc_base:checks",
+      "../../../test:create_test_environment",
+      "../../../test:test_support",
       "//testing/gtest",
     ]
   }
@@ -67,7 +69,9 @@ if (rtc_enable_protobuf) {
     deps = [
       ":aec_dump",
       "..:aec_dump_interface",
+      "..:audio_frame_view",
       "../../../api/audio:audio_frame_api",
+      "../../../api/audio:audio_processing",
       "../../../api/task_queue",
       "../../../rtc_base:checks",
       "../../../rtc_base:logging",
@@ -77,24 +81,21 @@ if (rtc_enable_protobuf) {
       "../../../rtc_base:rtc_event",
       "../../../rtc_base/system:file_wrapper",
       "../../../system_wrappers",
-    ]
-    absl_deps = [
       "//third_party/abseil-cpp/absl/base:nullability",
-      "//third_party/abseil-cpp/absl/strings",
+      "//third_party/abseil-cpp/absl/strings:string_view",
     ]
 
     deps += [ "../:audioproc_debug_proto" ]
   }
 
   if (rtc_include_tests) {
-    rtc_library("aec_dump_unittests") {
-      testonly = true
+    rtc_cc_test("aec_dump_unittest") {
       defines = []
       deps = [
         ":aec_dump",
         ":aec_dump_impl",
-        "..:audioproc_debug_proto",
-        "../",
+        "..:aec_dump_interface",
+        "../../../api/audio:audio_processing",
         "../../../rtc_base:task_queue_for_test",
         "../../../test:fileutils",
         "../../../test:test_support",
@@ -113,9 +114,8 @@ rtc_library("null_aec_dump_factory") {
     ":aec_dump",
     "..:aec_dump_interface",
     "../../../api/task_queue",
-  ]
-  absl_deps = [
+    "../../../rtc_base/system:file_wrapper",
     "//third_party/abseil-cpp/absl/base:nullability",
-    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
 }

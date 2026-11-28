@@ -10,6 +10,8 @@
 
 #include "modules/audio_processing/echo_detector/circular_buffer.h"
 
+#include <optional>
+
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -47,7 +49,7 @@ TEST(CircularBufferTests, OverflowTest) {
 
 TEST(CircularBufferTests, ReadFromEmpty) {
   CircularBuffer test_buffer(3);
-  EXPECT_EQ(absl::nullopt, test_buffer.Pop());
+  EXPECT_EQ(std::nullopt, test_buffer.Pop());
 }
 
 }  // namespace webrtc

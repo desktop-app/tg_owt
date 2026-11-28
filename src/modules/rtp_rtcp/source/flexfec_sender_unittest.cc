@@ -10,28 +10,37 @@
 
 #include "modules/rtp_rtcp/include/flexfec_sender.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "api/environment/environment.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
+#include "modules/include/module_fec_types.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/fec_test_helper.h"
+#include "modules/rtp_rtcp/source/rtp_header_extension_size.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "modules/rtp_rtcp/source/rtp_sender.h"
 #include "system_wrappers/include/clock.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 
 namespace {
 
-using test::fec::AugmentedPacket;
 using test::fec::AugmentedPacketGenerator;
 
 constexpr int kFlexfecPayloadType = 123;
 constexpr uint32_t kMediaSsrc = 1234;
 constexpr uint32_t kFlexfecSsrc = 5678;
-const char kNoMid[] = "";
+constexpr char kNoMid[] = "";
 const std::vector<RtpExtension> kNoRtpHeaderExtensions;
 const std::vector<RtpExtensionSize> kNoRtpHeaderExtensionSizes;
 // Assume a single protected media SSRC.
@@ -65,10 +74,8 @@ std::unique_ptr<RtpPacketToSend> GenerateSingleFlexfecPacket(
   AugmentedPacketGenerator packet_generator(kMediaSsrc);
   packet_generator.NewFrame(kNumPackets);
   for (size_t i = 0; i < kNumPackets; ++i) {
-    std::unique_ptr<AugmentedPacket> packet =
-        packet_generator.NextPacket(i, kPayloadLength);
-    RtpPacketToSend rtp_packet(nullptr);  // No header extensions.
-    rtp_packet.Parse(packet->data);
+    RtpPacketToSend rtp_packet =
+        packet_generator.NextPacket<RtpPacketToSend>(i, kPayloadLength);
     sender->AddPacketAndGenerateFec(rtp_packet);
   }
   std::vector<std::unique_ptr<RtpPacketToSend>> fec_packets =
@@ -83,27 +90,30 @@ std::unique_ptr<RtpPacketToSend> GenerateSingleFlexfecPacket(
 
 TEST(FlexfecSenderTest, Ssrc) {
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kNoRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kNoRtpHeaderExtensions,
+                       kNoRtpHeaderExtensionSizes, nullptr /* rtp_state */);
 
   EXPECT_EQ(kFlexfecSsrc, sender.FecSsrc());
 }
 
 TEST(FlexfecSenderTest, NoFecAvailableBeforeMediaAdded) {
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kNoRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kNoRtpHeaderExtensions,
+                       kNoRtpHeaderExtensionSizes, nullptr /* rtp_state */);
 
   EXPECT_TRUE(sender.GetFecPackets().empty());
 }
 
 TEST(FlexfecSenderTest, ProtectOneFrameWithOneFecPacket) {
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kNoRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kNoRtpHeaderExtensions,
+                       kNoRtpHeaderExtensionSizes, nullptr /* rtp_state */);
   auto fec_packet = GenerateSingleFlexfecPacket(&sender);
 
   EXPECT_EQ(kRtpHeaderSize, fec_packet->headers_size());
@@ -116,6 +126,8 @@ TEST(FlexfecSenderTest, ProtectOneFrameWithOneFecPacket) {
 }
 
 TEST(FlexfecSenderTest, ProtectTwoFramesWithOneFecPacket) {
+  SimulatedClock clock(kInitialSimulatedClockTime);
+  const Environment env = CreateTestEnvironment({.time = &clock});
   // FEC parameters selected to generate a single FEC packet per frame.
   FecProtectionParams params;
   params.fec_rate = 15;
@@ -123,20 +135,17 @@ TEST(FlexfecSenderTest, ProtectTwoFramesWithOneFecPacket) {
   params.fec_mask_type = kFecMaskRandom;
   constexpr size_t kNumFrames = 2;
   constexpr size_t kNumPacketsPerFrame = 2;
-  SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kNoRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kNoRtpHeaderExtensions,
+                       kNoRtpHeaderExtensionSizes, nullptr /* rtp_state */);
   sender.SetProtectionParameters(params, params);
 
   AugmentedPacketGenerator packet_generator(kMediaSsrc);
   for (size_t i = 0; i < kNumFrames; ++i) {
     packet_generator.NewFrame(kNumPacketsPerFrame);
     for (size_t j = 0; j < kNumPacketsPerFrame; ++j) {
-      std::unique_ptr<AugmentedPacket> packet =
-          packet_generator.NextPacket(i, kPayloadLength);
-      RtpPacketToSend rtp_packet(nullptr);
-      rtp_packet.Parse(packet->data);
+      RtpPacketToSend rtp_packet =
+          packet_generator.NextPacket<RtpPacketToSend>(i, kPayloadLength);
       sender.AddPacketAndGenerateFec(rtp_packet);
     }
   }
@@ -155,6 +164,8 @@ TEST(FlexfecSenderTest, ProtectTwoFramesWithOneFecPacket) {
 }
 
 TEST(FlexfecSenderTest, ProtectTwoFramesWithTwoFecPackets) {
+  SimulatedClock clock(kInitialSimulatedClockTime);
+  const Environment env = CreateTestEnvironment({.time = &clock});
   // FEC parameters selected to generate a single FEC packet per frame.
   FecProtectionParams params;
   params.fec_rate = 30;
@@ -162,20 +173,17 @@ TEST(FlexfecSenderTest, ProtectTwoFramesWithTwoFecPackets) {
   params.fec_mask_type = kFecMaskRandom;
   constexpr size_t kNumFrames = 2;
   constexpr size_t kNumPacketsPerFrame = 2;
-  SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kNoRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kNoRtpHeaderExtensions,
+                       kNoRtpHeaderExtensionSizes, nullptr /* rtp_state */);
   sender.SetProtectionParameters(params, params);
 
   AugmentedPacketGenerator packet_generator(kMediaSsrc);
   for (size_t i = 0; i < kNumFrames; ++i) {
     packet_generator.NewFrame(kNumPacketsPerFrame);
     for (size_t j = 0; j < kNumPacketsPerFrame; ++j) {
-      std::unique_ptr<AugmentedPacket> packet =
-          packet_generator.NextPacket(i, kPayloadLength);
-      RtpPacketToSend rtp_packet(nullptr);
-      rtp_packet.Parse(packet->data);
+      RtpPacketToSend rtp_packet =
+          packet_generator.NextPacket<RtpPacketToSend>(i, kPayloadLength);
       sender.AddPacketAndGenerateFec(rtp_packet);
     }
     std::vector<std::unique_ptr<RtpPacketToSend>> fec_packets =
@@ -196,11 +204,12 @@ TEST(FlexfecSenderTest, ProtectTwoFramesWithTwoFecPackets) {
 
 // In the tests, we only consider RTP header extensions that are useful for BWE.
 TEST(FlexfecSenderTest, NoRtpHeaderExtensionsForBweByDefault) {
-  const std::vector<RtpExtension> kRtpHeaderExtensions{};
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  const std::vector<RtpExtension> kRtpHeaderExtensions{};
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
+                       nullptr /* rtp_state */);
   auto fec_packet = GenerateSingleFlexfecPacket(&sender);
 
   EXPECT_FALSE(fec_packet->HasExtension<AbsoluteSendTime>());
@@ -209,12 +218,13 @@ TEST(FlexfecSenderTest, NoRtpHeaderExtensionsForBweByDefault) {
 }
 
 TEST(FlexfecSenderTest, RegisterAbsoluteSendTimeRtpHeaderExtension) {
-  const std::vector<RtpExtension> kRtpHeaderExtensions{
-      {RtpExtension::kAbsSendTimeUri, 1}};
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  const std::vector<RtpExtension> kRtpHeaderExtensions{
+      {RtpExtension::kAbsSendTimeUri, RtpHeaderExtensionId(1)}};
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
+                       nullptr /* rtp_state */);
   auto fec_packet = GenerateSingleFlexfecPacket(&sender);
 
   EXPECT_TRUE(fec_packet->HasExtension<AbsoluteSendTime>());
@@ -223,12 +233,13 @@ TEST(FlexfecSenderTest, RegisterAbsoluteSendTimeRtpHeaderExtension) {
 }
 
 TEST(FlexfecSenderTest, RegisterTransmissionOffsetRtpHeaderExtension) {
-  const std::vector<RtpExtension> kRtpHeaderExtensions{
-      {RtpExtension::kTimestampOffsetUri, 1}};
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  const std::vector<RtpExtension> kRtpHeaderExtensions{
+      {RtpExtension::kTimestampOffsetUri, RtpHeaderExtensionId(1)}};
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
+                       nullptr /* rtp_state */);
   auto fec_packet = GenerateSingleFlexfecPacket(&sender);
 
   EXPECT_FALSE(fec_packet->HasExtension<AbsoluteSendTime>());
@@ -237,12 +248,13 @@ TEST(FlexfecSenderTest, RegisterTransmissionOffsetRtpHeaderExtension) {
 }
 
 TEST(FlexfecSenderTest, RegisterTransportSequenceNumberRtpHeaderExtension) {
-  const std::vector<RtpExtension> kRtpHeaderExtensions{
-      {RtpExtension::kTransportSequenceNumberUri, 1}};
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  const std::vector<RtpExtension> kRtpHeaderExtensions{
+      {RtpExtension::kTransportSequenceNumberUri, RtpHeaderExtensionId(1)}};
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
+                       nullptr /* rtp_state */);
   auto fec_packet = GenerateSingleFlexfecPacket(&sender);
 
   EXPECT_FALSE(fec_packet->HasExtension<AbsoluteSendTime>());
@@ -251,14 +263,15 @@ TEST(FlexfecSenderTest, RegisterTransportSequenceNumberRtpHeaderExtension) {
 }
 
 TEST(FlexfecSenderTest, RegisterAllRtpHeaderExtensionsForBwe) {
-  const std::vector<RtpExtension> kRtpHeaderExtensions{
-      {RtpExtension::kAbsSendTimeUri, 1},
-      {RtpExtension::kTimestampOffsetUri, 2},
-      {RtpExtension::kTransportSequenceNumberUri, 3}};
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  const std::vector<RtpExtension> kRtpHeaderExtensions{
+      {RtpExtension::kAbsSendTimeUri, RtpHeaderExtensionId(1)},
+      {RtpExtension::kTimestampOffsetUri, RtpHeaderExtensionId(2)},
+      {RtpExtension::kTransportSequenceNumberUri, RtpHeaderExtensionId(3)}};
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
+                       nullptr /* rtp_state */);
   auto fec_packet = GenerateSingleFlexfecPacket(&sender);
 
   EXPECT_TRUE(fec_packet->HasExtension<AbsoluteSendTime>());
@@ -268,19 +281,21 @@ TEST(FlexfecSenderTest, RegisterAllRtpHeaderExtensionsForBwe) {
 
 TEST(FlexfecSenderTest, MaxPacketOverhead) {
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kNoRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       nullptr /* rtp_state */, &clock);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kNoRtpHeaderExtensions,
+                       kNoRtpHeaderExtensionSizes, nullptr /* rtp_state */);
 
   EXPECT_EQ(kFlexfecMaxHeaderSize, sender.MaxPacketOverhead());
 }
 
 TEST(FlexfecSenderTest, MaxPacketOverheadWithExtensions) {
-  const std::vector<RtpExtension> kRtpHeaderExtensions{
-      {RtpExtension::kAbsSendTimeUri, 1},
-      {RtpExtension::kTimestampOffsetUri, 2},
-      {RtpExtension::kTransportSequenceNumberUri, 3}};
   SimulatedClock clock(kInitialSimulatedClockTime);
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  const std::vector<RtpExtension> kRtpHeaderExtensions{
+      {RtpExtension::kAbsSendTimeUri, RtpHeaderExtensionId(1)},
+      {RtpExtension::kTimestampOffsetUri, RtpHeaderExtensionId(2)},
+      {RtpExtension::kTransportSequenceNumberUri, RtpHeaderExtensionId(3)}};
   const size_t kExtensionHeaderLength = 1;
   const size_t kRtpOneByteHeaderLength = 4;
   const size_t kExtensionsTotalSize =
@@ -288,22 +303,23 @@ TEST(FlexfecSenderTest, MaxPacketOverheadWithExtensions) {
                   AbsoluteSendTime::kValueSizeBytes + kExtensionHeaderLength +
                   TransmissionOffset::kValueSizeBytes + kExtensionHeaderLength +
                   TransportSequenceNumber::kValueSizeBytes);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kRtpHeaderExtensions, RTPSender::FecExtensionSizes(),
-                       nullptr /* rtp_state */, &clock);
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kRtpHeaderExtensions,
+                       RTPSender::FecExtensionSizes(), nullptr /* rtp_state */);
 
   EXPECT_EQ(kExtensionsTotalSize + kFlexfecMaxHeaderSize,
             sender.MaxPacketOverhead());
 }
 
 TEST(FlexfecSenderTest, MidIncludedInPacketsWhenSet) {
-  const std::vector<RtpExtension> kRtpHeaderExtensions{
-      {RtpExtension::kMidUri, 1}};
-  const char kMid[] = "mid";
   SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kMid,
+  const Environment env = CreateTestEnvironment({.time = &clock});
+  const std::vector<RtpExtension> kRtpHeaderExtensions{
+      {RtpExtension::kMidUri, RtpHeaderExtensionId(1)}};
+  const char kMid[] = "mid";
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kMid,
                        kRtpHeaderExtensions, RTPSender::FecExtensionSizes(),
-                       nullptr /* rtp_state */, &clock);
+                       nullptr /* rtp_state */);
 
   auto fec_packet = GenerateSingleFlexfecPacket(&sender);
 
@@ -313,13 +329,14 @@ TEST(FlexfecSenderTest, MidIncludedInPacketsWhenSet) {
 }
 
 TEST(FlexfecSenderTest, SetsAndGetsRtpState) {
+  SimulatedClock clock(kInitialSimulatedClockTime);
+  const Environment env = CreateTestEnvironment({.time = &clock});
   RtpState initial_rtp_state;
   initial_rtp_state.sequence_number = 100;
   initial_rtp_state.start_timestamp = 200;
-  SimulatedClock clock(kInitialSimulatedClockTime);
-  FlexfecSender sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc, kNoMid,
-                       kNoRtpHeaderExtensions, kNoRtpHeaderExtensionSizes,
-                       &initial_rtp_state, &clock);
+  FlexfecSender sender(env, kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
+                       kNoMid, kNoRtpHeaderExtensions,
+                       kNoRtpHeaderExtensionSizes, &initial_rtp_state);
 
   auto fec_packet = GenerateSingleFlexfecPacket(&sender);
   EXPECT_EQ(initial_rtp_state.sequence_number, fec_packet->SequenceNumber());

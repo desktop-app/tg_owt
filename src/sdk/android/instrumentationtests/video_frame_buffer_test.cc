@@ -8,38 +8,44 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "api/video/video_frame_buffer.h"
+
+#include <jni.h>
+
+#include "api/scoped_refptr.h"
 #include "api/video/i420_buffer.h"
+#include "rtc_base/checks.h"
+#include "sdk/android/generated_instrumentationtests_jni/VideoFrameBufferTest_jni.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 #include "sdk/android/src/jni/video_frame.h"
 #include "sdk/android/src/jni/wrapped_native_i420_buffer.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 namespace webrtc {
 namespace jni {
 
-JNI_FUNCTION_DECLARATION(jint,
-                         VideoFrameBufferTest_nativeGetBufferType,
-                         JNIEnv* jni,
-                         jclass,
-                         jobject video_frame_buffer) {
-  const JavaParamRef<jobject> j_video_frame_buffer(video_frame_buffer);
-  rtc::scoped_refptr<VideoFrameBuffer> buffer =
-      JavaToNativeFrameBuffer(jni, j_video_frame_buffer);
+static jint JNI_VideoFrameBufferTest_GetBufferType(
+    JNIEnv* jni,
+    const jni_zero::JavaRef<jobject>& video_frame_buffer) {
+  webrtc::scoped_refptr<VideoFrameBuffer> buffer =
+      JavaToNativeFrameBuffer(jni, video_frame_buffer);
   return static_cast<jint>(buffer->type());
 }
 
-JNI_FUNCTION_DECLARATION(jobject,
-                         VideoFrameBufferTest_nativeGetNativeI420Buffer,
-                         JNIEnv* jni,
-                         jclass,
-                         jobject i420_buffer) {
-  const JavaParamRef<jobject> j_i420_buffer(i420_buffer);
-  rtc::scoped_refptr<VideoFrameBuffer> buffer =
-      JavaToNativeFrameBuffer(jni, j_i420_buffer);
+static jni_zero::ScopedJavaLocalRef<jobject>
+JNI_VideoFrameBufferTest_GetNativeI420Buffer(
+    JNIEnv* jni,
+    const jni_zero::JavaRef<jobject>& i420_buffer) {
+  webrtc::scoped_refptr<VideoFrameBuffer> buffer =
+      JavaToNativeFrameBuffer(jni, i420_buffer);
   const I420BufferInterface* inputBuffer = buffer->GetI420();
   RTC_DCHECK(inputBuffer != nullptr);
-  rtc::scoped_refptr<I420Buffer> outputBuffer = I420Buffer::Copy(*inputBuffer);
-  return WrapI420Buffer(jni, outputBuffer).Release();
+  webrtc::scoped_refptr<I420Buffer> outputBuffer =
+      I420Buffer::Copy(*inputBuffer);
+  return WrapI420Buffer(jni, outputBuffer);
 }
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(VideoFrameBufferTest)

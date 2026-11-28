@@ -9,35 +9,22 @@
  */
 #include "net/dcsctp/socket/transmission_control_block.h"
 
-#include <array>
+#include <cstddef>
 #include <cstdint>
-#include <memory>
-#include <type_traits>
-#include <vector>
+#include <span>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "api/task_queue/task_queue_base.h"
-#include "net/dcsctp/common/handover_testing.h"
 #include "net/dcsctp/common/internal_types.h"
-#include "net/dcsctp/packet/chunk/reconfig_chunk.h"
-#include "net/dcsctp/packet/parameter/incoming_ssn_reset_request_parameter.h"
-#include "net/dcsctp/packet/parameter/outgoing_ssn_reset_request_parameter.h"
-#include "net/dcsctp/packet/parameter/parameter.h"
-#include "net/dcsctp/packet/parameter/reconfiguration_response_parameter.h"
-#include "net/dcsctp/public/dcsctp_message.h"
-#include "net/dcsctp/rx/data_tracker.h"
-#include "net/dcsctp/rx/reassembly_queue.h"
+#include "net/dcsctp/public/dcsctp_options.h"
+#include "net/dcsctp/public/dcsctp_socket.h"
+#include "net/dcsctp/public/types.h"
 #include "net/dcsctp/socket/capabilities.h"
-#include "net/dcsctp/socket/mock_context.h"
 #include "net/dcsctp/socket/mock_dcsctp_socket_callbacks.h"
-#include "net/dcsctp/testing/data_generator.h"
-#include "net/dcsctp/testing/testing_macros.h"
+#include "net/dcsctp/socket/packet_sender.h"
 #include "net/dcsctp/timer/timer.h"
 #include "net/dcsctp/tx/mock_send_queue.h"
-#include "net/dcsctp/tx/retransmission_queue.h"
-#include "rtc_base/gunit.h"
 #include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace dcsctp {
 namespace {
@@ -63,7 +50,7 @@ class TransmissionControlBlockTest : public testing::Test {
   Capabilities capabilities_;
   StrictMock<MockDcSctpSocketCallbacks> callbacks_;
   StrictMock<MockSendQueue> send_queue_;
-  testing::MockFunction<void(rtc::ArrayView<const uint8_t>, SendPacketStatus)>
+  testing::MockFunction<void(std::span<const uint8_t>, SendPacketStatus)>
       on_send_fn_;
   testing::MockFunction<bool()> on_connection_established;
   PacketSender sender_;
@@ -92,7 +79,8 @@ TEST_F(TransmissionControlBlockTest, LogsAllCapabilitiesInToSring) {
   capabilities_.negotiated_maximum_outgoing_streams = 2000;
   capabilities_.message_interleaving = true;
   capabilities_.partial_reliability = true;
-  capabilities_.zero_checksum = true;
+  capabilities_.zero_checksum_method =
+      ZeroChecksumAlternateErrorDetectionMethod::LowerLayerDtls();
   capabilities_.reconfig = true;
 
   TransmissionControlBlock tcb(

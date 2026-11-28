@@ -10,7 +10,6 @@ import("../../../webrtc.gni")
 
 rtc_source_set("types") {
   deps = [
-    "../../../api:array_view",
     "../../../api/units:time_delta",
     "../../../rtc_base:strong_alias",
   ]
@@ -19,17 +18,15 @@ rtc_source_set("types") {
     "dcsctp_options.h",
     "types.h",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
-rtc_source_set("socket") {
+rtc_library("socket") {
   deps = [
     ":types",
-    "../../../api:array_view",
-    "../../../api/task_queue:task_queue",
+    "../../../api/task_queue",
     "../../../api/units:timestamp",
-    "../../../rtc_base:checks",
     "../../../rtc_base:strong_alias",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   sources = [
     "dcsctp_handover_state.cc",
@@ -38,23 +35,19 @@ rtc_source_set("socket") {
     "packet_observer.h",
     "timeout.h",
   ]
-  absl_deps = [
-    "//third_party/abseil-cpp/absl/strings",
-    "//third_party/abseil-cpp/absl/types:optional",
-  ]
 }
 
-rtc_source_set("factory") {
+rtc_library("factory") {
   deps = [
     ":socket",
     ":types",
     "../socket:dcsctp_socket",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   sources = [
     "dcsctp_socket_factory.cc",
     "dcsctp_socket_factory.h",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 }
 
 rtc_source_set("mocks") {
@@ -66,40 +59,41 @@ rtc_source_set("mocks") {
   deps = [
     ":factory",
     ":socket",
+    ":types",
     "../../../test:test_support",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
 }
 
-rtc_source_set("utils") {
+rtc_library("utils") {
   deps = [
     ":socket",
     ":types",
-    "../../../api:array_view",
     "../../../rtc_base:logging",
     "../../../rtc_base:stringutils",
-    "../socket:dcsctp_socket",
+    "../../../rtc_base:text2pcap",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   sources = [
     "text_pcap_packet_observer.cc",
     "text_pcap_packet_observer.h",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("dcsctp_public_unittests") {
-    testonly = true
-
+  rtc_cc_test("mock_dcsctp_socket_test") {
     deps = [
       ":mocks",
-      ":types",
-      "../../../rtc_base:checks",
-      "../../../rtc_base:gunit_helpers",
       "../../../test:test_support",
     ]
-    sources = [
-      "mock_dcsctp_socket_test.cc",
-      "types_test.cc",
+    sources = [ "mock_dcsctp_socket_test.cc" ]
+  }
+
+  rtc_cc_test("types_test") {
+    deps = [
+      ":types",
+      "../../../test:test_support",
     ]
+    sources = [ "types_test.cc" ]
   }
 }

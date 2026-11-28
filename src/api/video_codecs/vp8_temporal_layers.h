@@ -11,11 +11,13 @@
 #ifndef API_VIDEO_CODECS_VP8_TEMPORAL_LAYERS_H_
 #define API_VIDEO_CODECS_VP8_TEMPORAL_LAYERS_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
 #include "api/fec_controller_override.h"
-#include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_encoder.h"
 #include "api/video_codecs/vp8_frame_buffer_controller.h"
 #include "api/video_codecs/vp8_frame_config.h"
 
@@ -64,9 +66,6 @@ class Vp8TemporalLayers final : public Vp8FrameBufferController {
   void OnPacketLossRateUpdate(float packet_loss_rate) override;
 
   void OnRttUpdate(int64_t rtt_ms) override;
-
-  void OnLossNotification(
-      const VideoEncoder::LossNotification& loss_notification) override;
 
  private:
   std::vector<std::unique_ptr<Vp8FrameBufferController>> controllers_;

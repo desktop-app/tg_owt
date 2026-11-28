@@ -9,8 +9,9 @@
  */
 #include "api/units/frequency.h"
 
-#include <limits>
+#include <cstdint>
 
+#include "api/units/time_delta.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -19,6 +20,7 @@ TEST(FrequencyTest, ConstExpr) {
   constexpr Frequency kFrequencyZero = Frequency::Zero();
   constexpr Frequency kFrequencyPlusInf = Frequency::PlusInfinity();
   constexpr Frequency kFrequencyMinusInf = Frequency::MinusInfinity();
+  static_assert(Frequency() == kFrequencyZero);
   static_assert(kFrequencyZero.IsZero(), "");
   static_assert(kFrequencyPlusInf.IsPlusInfinity(), "");
   static_assert(kFrequencyMinusInf.IsMinusInfinity(), "");
@@ -81,27 +83,6 @@ TEST(FrequencyTest, ComparisonOperators) {
 
   EXPECT_GT(Frequency::PlusInfinity(), large);
   EXPECT_LT(Frequency::MinusInfinity(), Frequency::Zero());
-}
-
-TEST(FrequencyTest, Clamping) {
-  const Frequency upper = Frequency::Hertz(800);
-  const Frequency lower = Frequency::Hertz(100);
-  const Frequency under = Frequency::Hertz(100);
-  const Frequency inside = Frequency::Hertz(500);
-  const Frequency over = Frequency::Hertz(1000);
-  EXPECT_EQ(under.Clamped(lower, upper), lower);
-  EXPECT_EQ(inside.Clamped(lower, upper), inside);
-  EXPECT_EQ(over.Clamped(lower, upper), upper);
-
-  Frequency mutable_frequency = lower;
-  mutable_frequency.Clamp(lower, upper);
-  EXPECT_EQ(mutable_frequency, lower);
-  mutable_frequency = inside;
-  mutable_frequency.Clamp(lower, upper);
-  EXPECT_EQ(mutable_frequency, inside);
-  mutable_frequency = over;
-  mutable_frequency.Clamp(lower, upper);
-  EXPECT_EQ(mutable_frequency, upper);
 }
 
 TEST(FrequencyTest, MathOperations) {

@@ -9,8 +9,14 @@
  */
 #include "modules/video_coding/utility/vp9_uncompressed_header_parser.h"
 
-#include "absl/numeric/bits.h"
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+
 #include "absl/strings/string_view.h"
+#include "modules/video_coding/utility/vp9_constants.h"
 #include "rtc_base/bitstream_reader.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/strings/string_builder.h"
@@ -251,15 +257,13 @@ const Vp9InterpolationFilter kLiteralToType[4] = {
 }  // namespace
 
 std::string Vp9UncompressedHeader::ToString() const {
-  char buf[1024];
-  rtc::SimpleStringBuilder oss(buf);
+  StringBuilder oss;
 
-  oss << "Vp9UncompressedHeader { "
-      << "profile = " << profile;
+  oss << "Vp9UncompressedHeader { " << "profile = " << profile;
 
   if (show_existing_frame) {
     oss << ", show_existing_frame = " << *show_existing_frame << " }";
-    return oss.str();
+    return oss.Release();
   }
 
   oss << ", frame type = " << (is_keyframe ? "key" : "delta")
@@ -378,7 +382,7 @@ std::string Vp9UncompressedHeader::ToString() const {
   oss << ", compressed_header_size_bytes = " << compressed_header_size;
 
   oss << " }";
-  return oss.str();
+  return oss.Release();
 }
 
 void Parse(BitstreamReader& br,
@@ -488,6 +492,8 @@ void Parse(BitstreamReader& br,
   // Frame context index.
   frame_info->frame_context_idx = br.ReadBits(2);
 
+  frame_info->loop_filter_params_offset_bits =
+      total_buffer_size_bits - br.RemainingBitCount();
   Vp9ReadLoopfilter(br);
 
   // Read base QP.
@@ -505,21 +511,21 @@ void Parse(BitstreamReader& br,
       (total_buffer_size_bits / 8) - (br.RemainingBitCount() / 8);
 }
 
-absl::optional<Vp9UncompressedHeader> ParseUncompressedVp9Header(
-    rtc::ArrayView<const uint8_t> buf) {
+std::optional<Vp9UncompressedHeader> ParseUncompressedVp9Header(
+    std::span<const uint8_t> buf) {
   BitstreamReader reader(buf);
   Vp9UncompressedHeader frame_info;
   Parse(reader, &frame_info, /*qp_only=*/false);
   if (reader.Ok() && frame_info.frame_width > 0) {
     return frame_info;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 namespace vp9 {
 
 bool GetQp(const uint8_t* buf, size_t length, int* qp) {
-  BitstreamReader reader(rtc::MakeArrayView(buf, length));
+  BitstreamReader reader(std::span(buf, length));
   Vp9UncompressedHeader frame_info;
   Parse(reader, &frame_info, /*qp_only=*/true);
   if (!reader.Ok()) {

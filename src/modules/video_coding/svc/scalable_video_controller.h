@@ -15,6 +15,7 @@
 #include "absl/container/inlined_vector.h"
 #include "api/transport/rtp/dependency_descriptor.h"
 #include "api/video/video_bitrate_allocation.h"
+#include "api/video/video_codec_constants.h"
 #include "common_video/generic_frame_descriptor/generic_frame_info.h"
 
 namespace webrtc {
@@ -92,6 +93,12 @@ class ScalableVideoController {
   // set to true.
   // Returned vector shouldn't be empty.
   virtual std::vector<LayerFrameConfig> NextFrameConfig(bool restart) = 0;
+
+  // Indicates that the layer frame is intentionally skipped with the intention
+  // to progress the pattern for the next frame.
+  // TODO(bugs.webrtc.org/445115234): Make pure virtual when implementations
+  // have been updated.
+  virtual void OnFrameDropped(const LayerFrameConfig& config) {}
 
   // Returns configuration to pass to EncoderCallback.
   virtual GenericFrameInfo OnEncodeDone(const LayerFrameConfig& config) = 0;

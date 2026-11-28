@@ -14,12 +14,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/rtp_headers.h"
 #include "api/rtp_parameters.h"
+#include "call/sframe_options.h"
 
 namespace webrtc {
 // Currently only VP8/VP9 specific.
@@ -27,13 +28,7 @@ struct RtpPayloadState {
   int16_t picture_id = -1;
   uint8_t tl0_pic_idx = 0;
   int64_t shared_frame_id = 0;
-};
-
-// Settings for LNTF (LossNotification). Still highly experimental.
-struct LntfConfig {
-  std::string ToString() const;
-
-  bool enabled{false};
+  int64_t frame_id = 0;
 };
 
 // Settings for NACK, see RFC 4585 for details.
@@ -67,6 +62,25 @@ struct UlpfecConfig {
   int red_rtx_payload_type;
 };
 
+struct RtpStreamConfig {
+  std::string ToString() const;
+
+  uint32_t ssrc = 0;
+  std::string rid;
+  std::string payload_name;
+  int payload_type = -1;
+  bool raw_payload = false;
+  struct Rtx {
+    std::string ToString() const;
+    // SSRC to use for the RTX stream.
+    uint32_t ssrc = 0;
+
+    // Payload type to use for the RTX stream.
+    int payload_type = -1;
+  };
+  std::optional<Rtx> rtx;
+};
+
 static const size_t kDefaultMaxPacketSize = 1500 - 40;  // TCP over IPv4.
 struct RtpConfig {
   RtpConfig();
@@ -87,6 +101,10 @@ struct RtpConfig {
   // The value to send in the MID RTP header extension if the extension is
   // included in the list of extensions.
   std::string mid;
+
+  // The list of CSRCs to be included in the RTP header. Only the first
+  // kRtpCsrcSize CSRCs are used.
+  std::vector<uint32_t> csrcs;
 
   // See RtcpMode for description.
   RtcpMode rtcp_mode = RtcpMode::kCompound;
@@ -114,8 +132,11 @@ struct RtpConfig {
   // frame descriptor RTP header extension).
   bool raw_payload = false;
 
-  // See LntfConfig for description.
-  LntfConfig lntf;
+  // Sframe end-to-end encryption settings for this send stream.
+  SframeSendOptions sframe_options;
+
+  // Configurations for each RTP stream
+  std::vector<RtpStreamConfig> stream_configs;
 
   // See NackConfig for description.
   NackConfig nack;
@@ -165,11 +186,14 @@ struct RtpConfig {
   bool IsMediaSsrc(uint32_t ssrc) const;
   bool IsRtxSsrc(uint32_t ssrc) const;
   bool IsFlexfecSsrc(uint32_t ssrc) const;
-  absl::optional<uint32_t> GetRtxSsrcAssociatedWithMediaSsrc(
+  std::optional<uint32_t> GetRtxSsrcAssociatedWithMediaSsrc(
       uint32_t media_ssrc) const;
   uint32_t GetMediaSsrcAssociatedWithRtxSsrc(uint32_t rtx_ssrc) const;
   uint32_t GetMediaSsrcAssociatedWithFlexfecSsrc(uint32_t flexfec_ssrc) const;
-  absl::optional<std::string> GetRidForSsrc(uint32_t ssrc) const;
+  std::optional<std::string> GetRidForSsrc(uint32_t ssrc) const;
+
+  // Returns send config for RTP stream by provided simulcast `index`.
+  RtpStreamConfig GetStreamConfig(size_t index) const;
 };
 }  // namespace webrtc
 #endif  // CALL_RTP_CONFIG_H_

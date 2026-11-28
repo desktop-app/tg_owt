@@ -9,6 +9,13 @@
  */
 #include "rtc_base/numerics/sample_stats.h"
 
+#include <cmath>
+
+#include "api/units/data_rate.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "rtc_base/checks.h"
+
 namespace webrtc {
 
 double SampleStats<double>::Max() {
@@ -53,14 +60,11 @@ int SampleStats<double>::Count() {
   return static_cast<int>(GetSamples().size());
 }
 
-void SampleStats<TimeDelta>::AddSample(TimeDelta delta) {
+void SampleStats<TimeDelta>::AddSample(TimeDelta delta, Timestamp time) {
   RTC_DCHECK(delta.IsFinite());
-  stats_.AddSample(delta.seconds<double>());
+  stats_.AddSample({.value = delta.seconds<double>(), .time = time});
 }
 
-void SampleStats<TimeDelta>::AddSampleMs(double delta_ms) {
-  AddSample(TimeDelta::Millis(delta_ms));
-}
 void SampleStats<TimeDelta>::AddSamples(const SampleStats<TimeDelta>& other) {
   stats_.AddSamples(other.stats_);
 }
@@ -101,12 +105,8 @@ int SampleStats<TimeDelta>::Count() {
   return stats_.Count();
 }
 
-void SampleStats<DataRate>::AddSample(DataRate sample) {
-  stats_.AddSample(sample.bps<double>());
-}
-
-void SampleStats<DataRate>::AddSampleBps(double rate_bps) {
-  stats_.AddSample(rate_bps);
+void SampleStats<DataRate>::AddSample(DataRate rate, Timestamp time) {
+  stats_.AddSample({.value = rate.bps<double>(), .time = time});
 }
 
 void SampleStats<DataRate>::AddSamples(const SampleStats<DataRate>& other) {

@@ -11,21 +11,34 @@
 #include "pc/peer_connection_factory.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdio>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
-#include "api/audio/audio_mixer.h"
+#include "api/audio/audio_device.h"
+#include "api/audio/audio_processing.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
+#include "api/audio_options.h"
+#include "api/create_modular_peer_connection_factory.h"
 #include "api/create_peerconnection_factory.h"
-#include "api/data_channel_interface.h"
-#include "api/enable_media.h"
+#include "api/enable_media_with_defaults.h"
+#include "api/environment/environment.h"
 #include "api/environment/environment_factory.h"
-#include "api/jsep.h"
+#include "api/field_trials_view.h"
+#include "api/make_ref_counted.h"
 #include "api/media_stream_interface.h"
-#include "api/task_queue/default_task_queue_factory.h"
+#include "api/media_types.h"
+#include "api/peer_connection_interface.h"
+#include "api/rtp_parameters.h"
+#include "api/scoped_refptr.h"
 #include "api/test/mock_packet_socket_factory.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_decoder_factory_template.h"
 #include "api/video_codecs/video_decoder_factory_template_dav1d_adapter.h"
 #include "api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h"
@@ -37,88 +50,70 @@
 #include "api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h"
 #include "api/video_codecs/video_encoder_factory_template_open_h264_adapter.h"
 #include "media/base/fake_frame_source.h"
-#include "modules/audio_device/include/audio_device.h"
-#include "modules/audio_processing/include/audio_processing.h"
-#include "p2p/base/fake_port_allocator.h"
+#include "media/base/media_constants.h"
+#include "modules/audio_processing/include/mock_audio_processing.h"
 #include "p2p/base/port.h"
 #include "p2p/base/port_allocator.h"
-#include "p2p/base/port_interface.h"
+#include "p2p/test/fake_port_allocator.h"
+#include "pc/connection_context.h"
 #include "pc/test/fake_audio_capture_module.h"
-#include "pc/test/fake_video_track_source.h"
-#include "pc/test/mock_peer_connection_observers.h"
-#include "rtc_base/gunit.h"
-#include "rtc_base/internal/default_socket_server.h"
-#include "rtc_base/rtc_certificate_generator.h"
-#include "rtc_base/socket_address.h"
-#include "rtc_base/time_utils.h"
-#include "test/gmock.h"
-#include "test/gtest.h"
-#include "test/scoped_key_value_config.h"
-
-#ifdef WEBRTC_ANDROID
-#include "pc/test/android_test_initializer.h"
-#endif
 #include "pc/test/fake_rtc_certificate_generator.h"
 #include "pc/test/fake_video_track_renderer.h"
+#include "pc/test/fake_video_track_source.h"
+#include "pc/test/mock_peer_connection_observers.h"
+#include "rtc_base/event.h"
+#include "rtc_base/internal/default_socket_server.h"
+#include "rtc_base/net_helper.h"
+#include "rtc_base/network.h"
+#include "rtc_base/socket_address.h"
+#include "rtc_base/socket_server.h"
+#include "rtc_base/thread.h"
+#include "test/create_test_environment.h"
+#include "test/create_test_field_trials.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
+#include "test/run_loop.h"
+#include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 namespace {
 
+using test::MockAudioProcessing;
+using test::MockAudioProcessingBuilder;
 using ::testing::_;
+using ::testing::A;
 using ::testing::AtLeast;
-using ::testing::InvokeWithoutArgs;
 using ::testing::NiceMock;
+using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::UnorderedElementsAre;
 
-static const char kStunIceServer[] = "stun:stun.l.google.com:19302";
-static const char kTurnIceServer[] = "turn:test.com:1234";
-static const char kTurnIceServerWithTransport[] =
-    "turn:hello.com?transport=tcp";
-static const char kSecureTurnIceServer[] = "turns:hello.com?transport=tcp";
-static const char kSecureTurnIceServerWithoutTransportParam[] =
+constexpr char kStunIceServer[] = "stun:stun.l.google.com:19302";
+constexpr char kTurnIceServer[] = "turn:test.com:1234";
+constexpr char kTurnIceServerWithTransport[] = "turn:hello.com?transport=tcp";
+constexpr char kSecureTurnIceServer[] = "turns:hello.com?transport=tcp";
+constexpr char kSecureTurnIceServerWithoutTransportParam[] =
     "turns:hello.com:443";
-static const char kSecureTurnIceServerWithoutTransportAndPortParam[] =
+constexpr char kSecureTurnIceServerWithoutTransportAndPortParam[] =
     "turns:hello.com";
-static const char kTurnIceServerWithNoUsernameInUri[] = "turn:test.com:1234";
-static const char kTurnPassword[] = "turnpassword";
-static const int kDefaultStunPort = 3478;
-static const int kDefaultStunTlsPort = 5349;
-static const char kTurnUsername[] = "test";
-static const char kStunIceServerWithIPv4Address[] = "stun:1.2.3.4:1234";
-static const char kStunIceServerWithIPv4AddressWithoutPort[] = "stun:1.2.3.4";
-static const char kStunIceServerWithIPv6Address[] = "stun:[2401:fa00:4::]:1234";
-static const char kStunIceServerWithIPv6AddressWithoutPort[] =
+constexpr char kTurnIceServerWithNoUsernameInUri[] = "turn:test.com:1234";
+constexpr char kTurnPassword[] = "turnpassword";
+constexpr int kDefaultStunPort = 3478;
+constexpr int kDefaultStunTlsPort = 5349;
+constexpr char kTurnUsername[] = "test";
+constexpr char kStunIceServerWithIPv4Address[] = "stun:1.2.3.4:1234";
+constexpr char kStunIceServerWithIPv4AddressWithoutPort[] = "stun:1.2.3.4";
+constexpr char kStunIceServerWithIPv6Address[] = "stun:[2401:fa00:4::]:1234";
+constexpr char kStunIceServerWithIPv6AddressWithoutPort[] =
     "stun:[2401:fa00:4::]";
-static const char kTurnIceServerWithIPv6Address[] = "turn:[2401:fa00:4::]:1234";
+constexpr char kTurnIceServerWithIPv6Address[] = "turn:[2401:fa00:4::]:1234";
 
-class NullPeerConnectionObserver : public PeerConnectionObserver {
- public:
-  virtual ~NullPeerConnectionObserver() = default;
-  void OnSignalingChange(
-      PeerConnectionInterface::SignalingState new_state) override {}
-  void OnAddStream(rtc::scoped_refptr<MediaStreamInterface> stream) override {}
-  void OnRemoveStream(
-      rtc::scoped_refptr<MediaStreamInterface> stream) override {}
-  void OnDataChannel(
-      rtc::scoped_refptr<DataChannelInterface> data_channel) override {}
-  void OnRenegotiationNeeded() override {}
-  void OnIceConnectionChange(
-      PeerConnectionInterface::IceConnectionState new_state) override {}
-  void OnIceGatheringChange(
-      PeerConnectionInterface::IceGatheringState new_state) override {}
-  void OnIceCandidate(const IceCandidateInterface* candidate) override {}
-};
-
-class MockNetworkManager : public rtc::NetworkManager {
+class MockNetworkManager : public NetworkManager {
  public:
   MOCK_METHOD(void, StartUpdating, (), (override));
   MOCK_METHOD(void, StopUpdating, (), (override));
-  MOCK_METHOD(std::vector<const rtc::Network*>,
-              GetNetworks,
-              (),
-              (const override));
-  MOCK_METHOD(std::vector<const rtc::Network*>,
+  MOCK_METHOD(std::vector<const Network*>, GetNetworks, (), (const, override));
+  MOCK_METHOD(std::vector<const Network*>,
               GetAnyAddressNetworks,
               (),
               (override));
@@ -127,20 +122,17 @@ class MockNetworkManager : public rtc::NetworkManager {
 class PeerConnectionFactoryTest : public ::testing::Test {
  public:
   PeerConnectionFactoryTest()
-      : socket_server_(rtc::CreateDefaultSocketServer()),
+      : socket_server_(CreateDefaultSocketServer()),
         main_thread_(socket_server_.get()) {}
 
  private:
-  void SetUp() {
-#ifdef WEBRTC_ANDROID
-    InitializeAndroidObjects();
-#endif
+  void SetUp() override {
     // Use fake audio device module since we're only testing the interface
     // level, and using a real one could make tests flaky e.g. when run in
     // parallel.
     factory_ = CreatePeerConnectionFactory(
-        rtc::Thread::Current(), rtc::Thread::Current(), rtc::Thread::Current(),
-        rtc::scoped_refptr<AudioDeviceModule>(FakeAudioCaptureModule::Create()),
+        Thread::Current(), Thread::Current(),
+        scoped_refptr<AudioDeviceModule>(FakeAudioCaptureModule::Create()),
         CreateBuiltinAudioEncoderFactory(), CreateBuiltinAudioDecoderFactory(),
         std::make_unique<VideoEncoderFactoryTemplate<
             LibvpxVp8EncoderTemplateAdapter, LibvpxVp9EncoderTemplateAdapter,
@@ -148,22 +140,21 @@ class PeerConnectionFactoryTest : public ::testing::Test {
         std::make_unique<VideoDecoderFactoryTemplate<
             LibvpxVp8DecoderTemplateAdapter, LibvpxVp9DecoderTemplateAdapter,
             OpenH264DecoderTemplateAdapter, Dav1dDecoderTemplateAdapter>>(),
-        nullptr /* audio_mixer */, nullptr /* audio_processing */);
+        nullptr /* audio_mixer */, nullptr /* audio_processing */,
+        nullptr /* audio_frame_processor */, CreateTestFieldTrialsPtr());
 
-    ASSERT_TRUE(factory_.get() != NULL);
-    packet_socket_factory_.reset(
-        new rtc::BasicPacketSocketFactory(socket_server_.get()));
-    port_allocator_.reset(new cricket::FakePortAllocator(
-        rtc::Thread::Current(), packet_socket_factory_.get(), &field_trials_));
+    ASSERT_TRUE(factory_.get() != nullptr);
+    port_allocator_ = std::make_unique<FakePortAllocator>(
+        CreateTestEnvironment(), socket_server_.get());
     raw_port_allocator_ = port_allocator_.get();
   }
 
  protected:
-  void VerifyStunServers(cricket::ServerAddresses stun_servers) {
+  void VerifyStunServers(ServerAddresses stun_servers) {
     EXPECT_EQ(stun_servers, raw_port_allocator_->stun_servers());
   }
 
-  void VerifyTurnServers(std::vector<cricket::RelayServerConfig> turn_servers) {
+  void VerifyTurnServers(std::vector<RelayServerConfig> turn_servers) {
     EXPECT_EQ(turn_servers.size(), raw_port_allocator_->turn_servers().size());
     for (size_t i = 0; i < turn_servers.size(); ++i) {
       ASSERT_EQ(1u, turn_servers[i].ports.size());
@@ -181,7 +172,7 @@ class PeerConnectionFactoryTest : public ::testing::Test {
   }
 
   void VerifyAudioCodecCapability(const RtpCodecCapability& codec) {
-    EXPECT_EQ(codec.kind, cricket::MEDIA_TYPE_AUDIO);
+    EXPECT_EQ(codec.kind, MediaType::AUDIO);
     EXPECT_FALSE(codec.name.empty());
     EXPECT_GT(codec.clock_rate, 0);
     EXPECT_GT(codec.num_channels, 0);
@@ -189,7 +180,7 @@ class PeerConnectionFactoryTest : public ::testing::Test {
 
   void VerifyVideoCodecCapability(const RtpCodecCapability& codec,
                                   bool sender) {
-    EXPECT_EQ(codec.kind, cricket::MEDIA_TYPE_VIDEO);
+    EXPECT_EQ(codec.kind, MediaType::VIDEO);
     EXPECT_FALSE(codec.name.empty());
     EXPECT_GT(codec.clock_rate, 0);
     if (sender) {
@@ -249,47 +240,15 @@ class PeerConnectionFactoryTest : public ::testing::Test {
     }
   }
 
-  test::ScopedKeyValueConfig field_trials_;
-  std::unique_ptr<rtc::SocketServer> socket_server_;
-  rtc::AutoSocketServerThread main_thread_;
-  rtc::scoped_refptr<PeerConnectionFactoryInterface> factory_;
+  std::unique_ptr<SocketServer> socket_server_;
+  test::RunLoop main_thread_;
+  scoped_refptr<PeerConnectionFactoryInterface> factory_;
   NullPeerConnectionObserver observer_;
-  std::unique_ptr<rtc::PacketSocketFactory> packet_socket_factory_;
-  std::unique_ptr<cricket::FakePortAllocator> port_allocator_;
+  std::unique_ptr<FakePortAllocator> port_allocator_;
   // Since the PC owns the port allocator after it's been initialized,
   // this should only be used when known to be safe.
-  cricket::FakePortAllocator* raw_port_allocator_;
+  FakePortAllocator* raw_port_allocator_;
 };
-
-// Since there is no public PeerConnectionFactory API to control RTX usage, need
-// to reconstruct factory with our own ConnectionContext.
-rtc::scoped_refptr<PeerConnectionFactoryInterface>
-CreatePeerConnectionFactoryWithRtxDisabled() {
-  PeerConnectionFactoryDependencies pcf_dependencies;
-  pcf_dependencies.signaling_thread = rtc::Thread::Current();
-  pcf_dependencies.worker_thread = rtc::Thread::Current();
-  pcf_dependencies.network_thread = rtc::Thread::Current();
-  pcf_dependencies.task_queue_factory = CreateDefaultTaskQueueFactory();
-
-  pcf_dependencies.adm = FakeAudioCaptureModule::Create();
-  pcf_dependencies.audio_encoder_factory = CreateBuiltinAudioEncoderFactory();
-  pcf_dependencies.audio_decoder_factory = CreateBuiltinAudioDecoderFactory();
-  pcf_dependencies.video_encoder_factory =
-      std::make_unique<VideoEncoderFactoryTemplate<
-          LibvpxVp8EncoderTemplateAdapter, LibvpxVp9EncoderTemplateAdapter,
-          OpenH264EncoderTemplateAdapter, LibaomAv1EncoderTemplateAdapter>>();
-  pcf_dependencies.video_decoder_factory =
-      std::make_unique<VideoDecoderFactoryTemplate<
-          LibvpxVp8DecoderTemplateAdapter, LibvpxVp9DecoderTemplateAdapter,
-          OpenH264DecoderTemplateAdapter, Dav1dDecoderTemplateAdapter>>(),
-  EnableMedia(pcf_dependencies);
-
-  rtc::scoped_refptr<ConnectionContext> context =
-      ConnectionContext::Create(CreateEnvironment(), &pcf_dependencies);
-  context->set_use_rtx(false);
-  return rtc::make_ref_counted<PeerConnectionFactory>(context,
-                                                      &pcf_dependencies);
-}
 
 // Verify creation of PeerConnection using internal ADM, video factory and
 // internal libjingle threads.
@@ -298,19 +257,15 @@ CreatePeerConnectionFactoryWithRtxDisabled() {
 // for a PeerConnectionFactory unit test.
 // See https://bugs.chromium.org/p/webrtc/issues/detail?id=7806 for details.
 TEST(PeerConnectionFactoryTestInternal, DISABLED_CreatePCUsingInternalModules) {
-#ifdef WEBRTC_ANDROID
-  InitializeAndroidObjects();
-#endif
-
-  rtc::scoped_refptr<PeerConnectionFactoryInterface> factory(
+  scoped_refptr<PeerConnectionFactoryInterface> factory(
       CreatePeerConnectionFactory(
-          nullptr /* network_thread */, nullptr /* worker_thread */,
-          nullptr /* signaling_thread */, nullptr /* default_adm */,
-          CreateBuiltinAudioEncoderFactory(),
+          nullptr /* network_thread */, nullptr /* signaling_thread */,
+          nullptr /* default_adm */, CreateBuiltinAudioEncoderFactory(),
           CreateBuiltinAudioDecoderFactory(),
           nullptr /* video_encoder_factory */,
           nullptr /* video_decoder_factory */, nullptr /* audio_mixer */,
-          nullptr /* audio_processing */));
+          nullptr /* audio_processing */, nullptr /* audio_frame_processor */,
+          CreateTestFieldTrialsPtr()));
 
   NullPeerConnectionObserver observer;
   PeerConnectionInterface::RTCConfiguration config;
@@ -328,7 +283,7 @@ TEST(PeerConnectionFactoryTestInternal, DISABLED_CreatePCUsingInternalModules) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpSenderAudioCapabilities) {
   RtpCapabilities audio_capabilities =
-      factory_->GetRtpSenderCapabilities(cricket::MEDIA_TYPE_AUDIO);
+      factory_->GetRtpSenderCapabilities(MediaType::AUDIO);
   EXPECT_FALSE(audio_capabilities.codecs.empty());
   for (const auto& codec : audio_capabilities.codecs) {
     VerifyAudioCodecCapability(codec);
@@ -341,7 +296,7 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpSenderAudioCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpSenderVideoCapabilities) {
   RtpCapabilities video_capabilities =
-      factory_->GetRtpSenderCapabilities(cricket::MEDIA_TYPE_VIDEO);
+      factory_->GetRtpSenderCapabilities(MediaType::VIDEO);
   EXPECT_FALSE(video_capabilities.codecs.empty());
   for (const auto& codec : video_capabilities.codecs) {
     VerifyVideoCodecCapability(codec, true);
@@ -354,33 +309,23 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpSenderVideoCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpSenderRtxEnabledCapabilities) {
   RtpCapabilities video_capabilities =
-      factory_->GetRtpSenderCapabilities(cricket::MEDIA_TYPE_VIDEO);
+      factory_->GetRtpSenderCapabilities(MediaType::VIDEO);
   const auto it = std::find_if(
       video_capabilities.codecs.begin(), video_capabilities.codecs.end(),
-      [](const auto& c) { return c.name == cricket::kRtxCodecName; });
+      [](const auto& c) { return c.name == kRtxCodecName; });
   EXPECT_TRUE(it != video_capabilities.codecs.end());
-}
-
-TEST(PeerConnectionFactoryTestInternal, CheckRtpSenderRtxDisabledCapabilities) {
-  auto factory = CreatePeerConnectionFactoryWithRtxDisabled();
-  RtpCapabilities video_capabilities =
-      factory->GetRtpSenderCapabilities(cricket::MEDIA_TYPE_VIDEO);
-  const auto it = std::find_if(
-      video_capabilities.codecs.begin(), video_capabilities.codecs.end(),
-      [](const auto& c) { return c.name == cricket::kRtxCodecName; });
-  EXPECT_TRUE(it == video_capabilities.codecs.end());
 }
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpSenderDataCapabilities) {
   RtpCapabilities data_capabilities =
-      factory_->GetRtpSenderCapabilities(cricket::MEDIA_TYPE_DATA);
+      factory_->GetRtpSenderCapabilities(MediaType::DATA);
   EXPECT_TRUE(data_capabilities.codecs.empty());
   EXPECT_TRUE(data_capabilities.header_extensions.empty());
 }
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverAudioCapabilities) {
   RtpCapabilities audio_capabilities =
-      factory_->GetRtpReceiverCapabilities(cricket::MEDIA_TYPE_AUDIO);
+      factory_->GetRtpReceiverCapabilities(MediaType::AUDIO);
   EXPECT_FALSE(audio_capabilities.codecs.empty());
   for (const auto& codec : audio_capabilities.codecs) {
     VerifyAudioCodecCapability(codec);
@@ -393,7 +338,7 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverAudioCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverVideoCapabilities) {
   RtpCapabilities video_capabilities =
-      factory_->GetRtpReceiverCapabilities(cricket::MEDIA_TYPE_VIDEO);
+      factory_->GetRtpReceiverCapabilities(MediaType::VIDEO);
   EXPECT_FALSE(video_capabilities.codecs.empty());
   for (const auto& codec : video_capabilities.codecs) {
     VerifyVideoCodecCapability(codec, false);
@@ -406,27 +351,16 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverVideoCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverRtxEnabledCapabilities) {
   RtpCapabilities video_capabilities =
-      factory_->GetRtpReceiverCapabilities(cricket::MEDIA_TYPE_VIDEO);
+      factory_->GetRtpReceiverCapabilities(MediaType::VIDEO);
   const auto it = std::find_if(
       video_capabilities.codecs.begin(), video_capabilities.codecs.end(),
-      [](const auto& c) { return c.name == cricket::kRtxCodecName; });
+      [](const auto& c) { return c.name == kRtxCodecName; });
   EXPECT_TRUE(it != video_capabilities.codecs.end());
-}
-
-TEST(PeerConnectionFactoryTestInternal,
-     CheckRtpReceiverRtxDisabledCapabilities) {
-  auto factory = CreatePeerConnectionFactoryWithRtxDisabled();
-  RtpCapabilities video_capabilities =
-      factory->GetRtpReceiverCapabilities(cricket::MEDIA_TYPE_VIDEO);
-  const auto it = std::find_if(
-      video_capabilities.codecs.begin(), video_capabilities.codecs.end(),
-      [](const auto& c) { return c.name == cricket::kRtxCodecName; });
-  EXPECT_TRUE(it == video_capabilities.codecs.end());
 }
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverDataCapabilities) {
   RtpCapabilities data_capabilities =
-      factory_->GetRtpReceiverCapabilities(cricket::MEDIA_TYPE_DATA);
+      factory_->GetRtpReceiverCapabilities(MediaType::DATA);
   EXPECT_TRUE(data_capabilities.codecs.empty());
   EXPECT_TRUE(data_capabilities.header_extensions.empty());
 }
@@ -454,16 +388,16 @@ TEST_F(PeerConnectionFactoryTest, CreatePCUsingIceServers) {
   auto result =
       factory_->CreatePeerConnectionOrError(config, std::move(pc_dependencies));
   ASSERT_TRUE(result.ok());
-  cricket::ServerAddresses stun_servers;
-  rtc::SocketAddress stun1("stun.l.google.com", 19302);
+  ServerAddresses stun_servers;
+  SocketAddress stun1("stun.l.google.com", 19302);
   stun_servers.insert(stun1);
   VerifyStunServers(stun_servers);
-  std::vector<cricket::RelayServerConfig> turn_servers;
-  cricket::RelayServerConfig turn1("test.com", 1234, kTurnUsername,
-                                   kTurnPassword, cricket::PROTO_UDP);
+  std::vector<RelayServerConfig> turn_servers;
+  RelayServerConfig turn1("test.com", 1234, kTurnUsername, kTurnPassword,
+                          PROTO_UDP);
   turn_servers.push_back(turn1);
-  cricket::RelayServerConfig turn2("hello.com", kDefaultStunPort, kTurnUsername,
-                                   kTurnPassword, cricket::PROTO_TCP);
+  RelayServerConfig turn2("hello.com", kDefaultStunPort, kTurnUsername,
+                          kTurnPassword, PROTO_TCP);
   turn_servers.push_back(turn2);
   VerifyTurnServers(turn_servers);
 }
@@ -487,16 +421,16 @@ TEST_F(PeerConnectionFactoryTest, CreatePCUsingIceServersUrls) {
   auto result =
       factory_->CreatePeerConnectionOrError(config, std::move(pc_dependencies));
   ASSERT_TRUE(result.ok());
-  cricket::ServerAddresses stun_servers;
-  rtc::SocketAddress stun1("stun.l.google.com", 19302);
+  ServerAddresses stun_servers;
+  SocketAddress stun1("stun.l.google.com", 19302);
   stun_servers.insert(stun1);
   VerifyStunServers(stun_servers);
-  std::vector<cricket::RelayServerConfig> turn_servers;
-  cricket::RelayServerConfig turn1("test.com", 1234, kTurnUsername,
-                                   kTurnPassword, cricket::PROTO_UDP);
+  std::vector<RelayServerConfig> turn_servers;
+  RelayServerConfig turn1("test.com", 1234, kTurnUsername, kTurnPassword,
+                          PROTO_UDP);
   turn_servers.push_back(turn1);
-  cricket::RelayServerConfig turn2("hello.com", kDefaultStunPort, kTurnUsername,
-                                   kTurnPassword, cricket::PROTO_TCP);
+  RelayServerConfig turn2("hello.com", kDefaultStunPort, kTurnUsername,
+                          kTurnPassword, PROTO_TCP);
   turn_servers.push_back(turn2);
   VerifyTurnServers(turn_servers);
 }
@@ -518,9 +452,9 @@ TEST_F(PeerConnectionFactoryTest, CreatePCUsingNoUsernameInUri) {
   auto result =
       factory_->CreatePeerConnectionOrError(config, std::move(pc_dependencies));
   ASSERT_TRUE(result.ok());
-  std::vector<cricket::RelayServerConfig> turn_servers;
-  cricket::RelayServerConfig turn("test.com", 1234, kTurnUsername,
-                                  kTurnPassword, cricket::PROTO_UDP);
+  std::vector<RelayServerConfig> turn_servers;
+  RelayServerConfig turn("test.com", 1234, kTurnUsername, kTurnPassword,
+                         PROTO_UDP);
   turn_servers.push_back(turn);
   VerifyTurnServers(turn_servers);
 }
@@ -542,9 +476,9 @@ TEST_F(PeerConnectionFactoryTest, CreatePCUsingTurnUrlWithTransportParam) {
   auto result =
       factory_->CreatePeerConnectionOrError(config, std::move(pc_dependencies));
   ASSERT_TRUE(result.ok());
-  std::vector<cricket::RelayServerConfig> turn_servers;
-  cricket::RelayServerConfig turn("hello.com", kDefaultStunPort, kTurnUsername,
-                                  kTurnPassword, cricket::PROTO_TCP);
+  std::vector<RelayServerConfig> turn_servers;
+  RelayServerConfig turn("hello.com", kDefaultStunPort, kTurnUsername,
+                         kTurnPassword, PROTO_TCP);
   turn_servers.push_back(turn);
   VerifyTurnServers(turn_servers);
 }
@@ -572,18 +506,16 @@ TEST_F(PeerConnectionFactoryTest, CreatePCUsingSecureTurnUrl) {
   auto result =
       factory_->CreatePeerConnectionOrError(config, std::move(pc_dependencies));
   ASSERT_TRUE(result.ok());
-  std::vector<cricket::RelayServerConfig> turn_servers;
-  cricket::RelayServerConfig turn1("hello.com", kDefaultStunTlsPort,
-                                   kTurnUsername, kTurnPassword,
-                                   cricket::PROTO_TLS);
+  std::vector<RelayServerConfig> turn_servers;
+  RelayServerConfig turn1("hello.com", kDefaultStunTlsPort, kTurnUsername,
+                          kTurnPassword, PROTO_TLS);
   turn_servers.push_back(turn1);
   // TURNS with transport param should be default to tcp.
-  cricket::RelayServerConfig turn2("hello.com", 443, kTurnUsername,
-                                   kTurnPassword, cricket::PROTO_TLS);
+  RelayServerConfig turn2("hello.com", 443, kTurnUsername, kTurnPassword,
+                          PROTO_TLS);
   turn_servers.push_back(turn2);
-  cricket::RelayServerConfig turn3("hello.com", kDefaultStunTlsPort,
-                                   kTurnUsername, kTurnPassword,
-                                   cricket::PROTO_TLS);
+  RelayServerConfig turn3("hello.com", kDefaultStunTlsPort, kTurnUsername,
+                          kTurnPassword, PROTO_TLS);
   turn_servers.push_back(turn3);
   VerifyTurnServers(turn_servers);
 }
@@ -611,20 +543,20 @@ TEST_F(PeerConnectionFactoryTest, CreatePCUsingIPLiteralAddress) {
   auto result =
       factory_->CreatePeerConnectionOrError(config, std::move(pc_dependencies));
   ASSERT_TRUE(result.ok());
-  cricket::ServerAddresses stun_servers;
-  rtc::SocketAddress stun1("1.2.3.4", 1234);
+  ServerAddresses stun_servers;
+  SocketAddress stun1("1.2.3.4", 1234);
   stun_servers.insert(stun1);
-  rtc::SocketAddress stun2("1.2.3.4", 3478);
+  SocketAddress stun2("1.2.3.4", 3478);
   stun_servers.insert(stun2);  // Default port
-  rtc::SocketAddress stun3("2401:fa00:4::", 1234);
+  SocketAddress stun3("2401:fa00:4::", 1234);
   stun_servers.insert(stun3);
-  rtc::SocketAddress stun4("2401:fa00:4::", 3478);
+  SocketAddress stun4("2401:fa00:4::", 3478);
   stun_servers.insert(stun4);  // Default port
   VerifyStunServers(stun_servers);
 
-  std::vector<cricket::RelayServerConfig> turn_servers;
-  cricket::RelayServerConfig turn1("2401:fa00:4::", 1234, kTurnUsername,
-                                   kTurnPassword, cricket::PROTO_UDP);
+  std::vector<RelayServerConfig> turn_servers;
+  RelayServerConfig turn1("2401:fa00:4::", 1234, kTurnUsername, kTurnPassword,
+                          PROTO_UDP);
   turn_servers.push_back(turn1);
   VerifyTurnServers(turn_servers);
 }
@@ -632,16 +564,16 @@ TEST_F(PeerConnectionFactoryTest, CreatePCUsingIPLiteralAddress) {
 // This test verifies the captured stream is rendered locally using a
 // local video track.
 TEST_F(PeerConnectionFactoryTest, LocalRendering) {
-  rtc::scoped_refptr<FakeVideoTrackSource> source =
+  scoped_refptr<FakeVideoTrackSource> source =
       FakeVideoTrackSource::Create(/*is_screencast=*/false);
 
-  cricket::FakeFrameSource frame_source(1280, 720,
-                                        rtc::kNumMicrosecsPerSec / 30);
+  FakeFrameSource frame_source(1280, 720, TimeDelta::Seconds(1) / 30,
+                               Timestamp::Zero());
 
-  ASSERT_TRUE(source.get() != NULL);
-  rtc::scoped_refptr<VideoTrackInterface> track(
+  ASSERT_TRUE(source.get() != nullptr);
+  scoped_refptr<VideoTrackInterface> track(
       factory_->CreateVideoTrack(source, "testlabel"));
-  ASSERT_TRUE(track.get() != NULL);
+  ASSERT_TRUE(track.get() != nullptr);
   FakeVideoTrackRenderer local_renderer(track.get());
 
   EXPECT_EQ(0, local_renderer.num_rendered_frames());
@@ -660,19 +592,36 @@ TEST_F(PeerConnectionFactoryTest, LocalRendering) {
   EXPECT_FALSE(local_renderer.black_frame());
 }
 
+TEST(PeerConnectionFactoryDependenciesTest,
+     CanInjectFieldTrialsWithEnvironment) {
+  std::unique_ptr<FieldTrialsView> field_trials = CreateTestFieldTrialsPtr("");
+  ASSERT_THAT(field_trials, NotNull());
+  FieldTrialsView* raw_field_trials = field_trials.get();
+
+  PeerConnectionFactoryDependencies pcf_dependencies;
+  pcf_dependencies.env = CreateEnvironment(std::move(field_trials));
+  pcf_dependencies.adm = FakeAudioCaptureModule::Create();
+  EnableMediaWithDefaults(pcf_dependencies);
+
+  scoped_refptr<PeerConnectionFactory> pcf =
+      PeerConnectionFactory::Create(std::move(pcf_dependencies));
+  EXPECT_EQ(&pcf->field_trials(), raw_field_trials);
+}
+
 TEST(PeerConnectionFactoryDependenciesTest, UsesNetworkManager) {
   constexpr TimeDelta kWaitTimeout = TimeDelta::Seconds(10);
   auto mock_network_manager = std::make_unique<NiceMock<MockNetworkManager>>();
 
-  rtc::Event called;
+  Event called;
   EXPECT_CALL(*mock_network_manager, StartUpdating())
       .Times(AtLeast(1))
-      .WillRepeatedly(InvokeWithoutArgs([&] { called.Set(); }));
+      .WillRepeatedly([&] { called.Set(); });
 
   PeerConnectionFactoryDependencies pcf_dependencies;
   pcf_dependencies.network_manager = std::move(mock_network_manager);
+  pcf_dependencies.env = CreateTestEnvironment();
 
-  rtc::scoped_refptr<PeerConnectionFactoryInterface> pcf =
+  scoped_refptr<PeerConnectionFactoryInterface> pcf =
       CreateModularPeerConnectionFactory(std::move(pcf_dependencies));
 
   PeerConnectionInterface::RTCConfiguration config;
@@ -688,20 +637,21 @@ TEST(PeerConnectionFactoryDependenciesTest, UsesNetworkManager) {
 TEST(PeerConnectionFactoryDependenciesTest, UsesPacketSocketFactory) {
   constexpr TimeDelta kWaitTimeout = TimeDelta::Seconds(10);
   auto mock_socket_factory =
-      std::make_unique<NiceMock<rtc::MockPacketSocketFactory>>();
+      std::make_unique<NiceMock<MockPacketSocketFactory>>();
 
-  rtc::Event called;
-  EXPECT_CALL(*mock_socket_factory, CreateUdpSocket(_, _, _))
-      .WillOnce(InvokeWithoutArgs([&] {
+  Event called;
+  EXPECT_CALL(*mock_socket_factory, CreateUdpSocket)
+      .WillOnce([&] {
         called.Set();
         return nullptr;
-      }))
-      .WillRepeatedly(Return(nullptr));
+      })
+      .WillRepeatedly([] { return nullptr; });
 
   PeerConnectionFactoryDependencies pcf_dependencies;
   pcf_dependencies.packet_socket_factory = std::move(mock_socket_factory);
+  pcf_dependencies.env = CreateTestEnvironment();
 
-  rtc::scoped_refptr<PeerConnectionFactoryInterface> pcf =
+  scoped_refptr<PeerConnectionFactoryInterface> pcf =
       CreateModularPeerConnectionFactory(std::move(pcf_dependencies));
 
   // By default, localhost addresses are ignored, which makes tests fail if test
@@ -718,6 +668,123 @@ TEST(PeerConnectionFactoryDependenciesTest, UsesPacketSocketFactory) {
   ASSERT_TRUE(pc.ok());
 
   called.Wait(kWaitTimeout);
+}
+
+TEST(PeerConnectionFactoryDependenciesTest,
+     CreatesAudioProcessingWithProvidedBuilder) {
+  auto ap_factory = std::make_unique<MockAudioProcessingBuilder>();
+  auto audio_processing = make_ref_counted<NiceMock<MockAudioProcessing>>();
+  // Validate that provided audio_processing is used by expecting that a request
+  // to start AEC Dump with unnatural size limit is propagated to the
+  // `audio_processing`.
+  EXPECT_CALL(*audio_processing, CreateAndAttachAecDump(A<FILE*>(), 24'242, _));
+  EXPECT_CALL(*ap_factory, Build).WillOnce(Return(audio_processing));
+
+  PeerConnectionFactoryDependencies pcf_dependencies;
+  pcf_dependencies.adm = FakeAudioCaptureModule::Create();
+  pcf_dependencies.audio_processing_builder = std::move(ap_factory);
+  pcf_dependencies.env = CreateTestEnvironment();
+  EnableMediaWithDefaults(pcf_dependencies);
+
+  scoped_refptr<PeerConnectionFactoryInterface> pcf =
+      CreateModularPeerConnectionFactory(std::move(pcf_dependencies));
+  // Provide a valid file to avoid triggering the null pointer guard.
+  // The AEC dump machinery takes ownership of the file and closes it.
+  std::string temp_filename =
+      test::TempFilename(test::OutputPath(), "aec_dump");
+  pcf->StartAecDump(fopen(temp_filename.c_str(), "wb"), 24'242);
+  // Destroy the PCF to ensure the file is closed before attempting removal.
+  pcf = nullptr;
+  test::RemoveFile(temp_filename);
+}
+
+TEST(PeerConnectionFactoryDependenciesTest, RepeatMediaEngineInitialization) {
+  scoped_refptr<AudioDeviceModule> adm = FakeAudioCaptureModule::Create();
+  PeerConnectionFactoryDependencies pcf_dependencies;
+  pcf_dependencies.adm = adm;
+  pcf_dependencies.signaling_thread = Thread::Current();
+  pcf_dependencies.network_thread = Thread::Current();
+  pcf_dependencies.env = CreateTestEnvironment();
+  EnableMediaWithDefaults(pcf_dependencies);
+
+  scoped_refptr<PeerConnectionFactoryInterface> pcf =
+      CreateModularPeerConnectionFactory(std::move(pcf_dependencies));
+
+  for (int i = 0; i < 10; ++i) {
+    EXPECT_FALSE(adm->Initialized());
+    PeerConnectionInterface::RTCConfiguration config;
+    NullPeerConnectionObserver observer;
+    auto pc = pcf->CreatePeerConnectionOrError(
+        config, PeerConnectionDependencies(&observer));
+    ASSERT_TRUE(pc.ok());
+    EXPECT_TRUE(adm->Initialized());
+  }
+  EXPECT_FALSE(adm->Initialized());
+}
+
+#if !defined(WEBRTC_CHROMIUM_BUILD) && !defined(WEBRTC_WEBKIT_BUILD)
+TEST(PeerConnectionFactoryDependenciesTest,
+     CreateAudioSourceAppliesOptionsToAudioProcessing) {
+  auto ap_factory = std::make_unique<MockAudioProcessingBuilder>();
+  auto audio_processing = make_ref_counted<NiceMock<MockAudioProcessing>>();
+
+  // Capture the sequence of applied configurations to verify value-toggling
+  // and options persistence.
+  std::vector<bool> aec_enabled_sequence;
+  EXPECT_CALL(*audio_processing, ApplyConfig(_))
+      .WillRepeatedly([&](const AudioProcessing::Config& config) {
+        aec_enabled_sequence.push_back(config.echo_canceller.enabled);
+      });
+  EXPECT_CALL(*ap_factory, Build).WillOnce(Return(audio_processing));
+
+  PeerConnectionFactoryDependencies pcf_dependencies;
+  pcf_dependencies.adm = FakeAudioCaptureModule::Create();
+  pcf_dependencies.audio_processing_builder = std::move(ap_factory);
+  pcf_dependencies.signaling_thread = Thread::Current();
+  pcf_dependencies.network_thread = Thread::Current();
+  pcf_dependencies.env = CreateTestEnvironment();
+  EnableMediaWithDefaults(pcf_dependencies);
+
+  scoped_refptr<PeerConnectionFactoryInterface> pcf =
+      CreateModularPeerConnectionFactory(std::move(pcf_dependencies));
+
+  // 1. Create AudioSource with custom options (AEC disabled).
+  AudioOptions options;
+  options.echo_cancellation = false;
+  auto source = pcf->CreateAudioSource(options);
+
+  // Verify no Init/ApplyConfig has been called yet (lazy initialization).
+  EXPECT_TRUE(aec_enabled_sequence.empty());
+
+  // 2. Create PeerConnection to trigger media engine initialization.
+  PeerConnectionInterface::RTCConfiguration config;
+  NullPeerConnectionObserver observer;
+  auto pc_or_error = pcf->CreatePeerConnectionOrError(
+      config, PeerConnectionDependencies(&observer));
+  ASSERT_TRUE(pc_or_error.ok());
+
+  // Verify the exact sequence of applied configurations:
+  // - 1st Init (defaults): true (default option is applied)
+  // - 2nd Applied Custom: false (custom options from CreateAudioSource are
+  // applied)
+  ASSERT_EQ(aec_enabled_sequence.size(), 2u);
+  EXPECT_EQ(aec_enabled_sequence[0], true);
+  EXPECT_EQ(aec_enabled_sequence[1], false);
+
+  pcf = nullptr;
+}
+#endif
+
+TEST(ConnectionContextTest, SuppliedNetworkThreadIsUsed) {
+  Environment env = CreateTestEnvironment();
+  std::unique_ptr<Thread> network_thread = Thread::CreateWithSocketServer();
+  network_thread->Start();
+  PeerConnectionFactoryDependencies dependencies;
+  dependencies.signaling_thread = Thread::Current();
+  dependencies.network_thread = network_thread.get();
+  auto context = ConnectionContext::Create(env, &dependencies);
+  ASSERT_THAT(context, NotNull());
+  EXPECT_EQ(context->network_thread(), network_thread.get());
 }
 
 }  // namespace

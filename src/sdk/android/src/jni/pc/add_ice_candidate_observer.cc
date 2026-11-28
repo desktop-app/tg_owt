@@ -10,12 +10,13 @@
 
 #include "sdk/android/src/jni/pc/add_ice_candidate_observer.h"
 
-#include <utility>
+#include <jni.h>
 
+#include "api/rtc_error.h"
 #include "sdk/android/generated_peerconnection_jni/AddIceObserver_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
-#include "sdk/android/src/jni/jni_helpers.h"
-#include "sdk/media_constraints.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
+#include "sdk/android/src/jni/jvm.h"
 
 namespace webrtc {
 namespace jni {
@@ -25,7 +26,7 @@ AddIceCandidateObserverJni::AddIceCandidateObserverJni(
     const JavaRef<jobject>& j_observer)
     : j_observer_global_(env, j_observer) {}
 
-void AddIceCandidateObserverJni::OnComplete(webrtc::RTCError error) {
+void AddIceCandidateObserverJni::OnComplete(RTCError error) {
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   if (error.ok()) {
     Java_AddIceObserver_onAddSuccess(env, j_observer_global_);
@@ -37,3 +38,5 @@ void AddIceCandidateObserverJni::OnComplete(webrtc::RTCError error) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(AddIceObserver)

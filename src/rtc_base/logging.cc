@@ -10,15 +10,51 @@
 
 #include "rtc_base/logging.h"
 
-#include <string.h>
+#include <algorithm>
+#include <atomic>
+#include <cinttypes>
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "absl/base/no_destructor.h"
+#include "absl/base/nullability.h"
+#include "absl/strings/string_view.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/units/timestamp.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/platform_thread_types.h"
+#include "rtc_base/string_utils.h"
+#include "rtc_base/strings/string_builder.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/system/ignore_warnings.h"
+#include "rtc_base/thread_annotations.h"
+#include "rtc_base/time_utils.h"
+
+namespace webrtc {
+namespace {
+
+// By default, release builds don't log, debug builds at info level.
+#if RTC_DLOG_IS_ON
+constexpr LoggingSeverity kDefaultLoggingSeverity = LS_INFO;
+#else
+constexpr LoggingSeverity kDefaultLoggingSeverity = LS_NONE;
+#endif
+
+}  // namespace
+}  // namespace webrtc
 
 #if RTC_LOG_ENABLED()
 
 #if defined(WEBRTC_WIN)
 #include <windows.h>
-#if _MSC_VER < 1900
-#define snprintf _snprintf
-#endif
 #undef ERROR  // wingdi.h
 #endif
 
@@ -33,39 +69,12 @@
 static const int kMaxLogLineSize = 1024 - 60;
 #endif  // WEBRTC_MAC && !defined(WEBRTC_IOS) || WEBRTC_ANDROID
 
-#include <inttypes.h>
-#include <stdio.h>
-#include <time.h>
-
-#include <algorithm>
-#include <cstdarg>
-#include <vector>
-
-#include "absl/base/attributes.h"
-#include "absl/strings/string_view.h"
-#include "api/units/timestamp.h"
-#include "rtc_base/checks.h"
-#include "rtc_base/platform_thread_types.h"
-#include "rtc_base/string_encode.h"
-#include "rtc_base/string_utils.h"
-#include "rtc_base/strings/string_builder.h"
-#include "rtc_base/synchronization/mutex.h"
-#include "rtc_base/thread_annotations.h"
-#include "rtc_base/time_utils.h"
-
-namespace rtc {
+namespace webrtc {
 namespace {
 
-// By default, release builds don't log, debug builds at info level
-#if !defined(NDEBUG)
-constexpr LoggingSeverity kDefaultLoggingSeverity = LS_INFO;
-#else
-constexpr LoggingSeverity kDefaultLoggingSeverity = LS_NONE;
-#endif
-
 // Note: `g_min_sev` and `g_dbg_sev` can be changed while running.
-LoggingSeverity g_min_sev = kDefaultLoggingSeverity;
-LoggingSeverity g_dbg_sev = kDefaultLoggingSeverity;
+constinit std::atomic<LoggingSeverity> g_min_sev = kDefaultLoggingSeverity;
+constinit std::atomic<LoggingSeverity> g_dbg_sev = kDefaultLoggingSeverity;
 
 // Return the filename portion of the string (that following the last slash).
 const char* FilenameFromPath(const char* file) {
@@ -77,17 +86,177 @@ const char* FilenameFromPath(const char* file) {
     return (end1 > end2) ? end1 + 1 : end2 + 1;
 }
 
-// Global lock for log subsystem, only needed to serialize access to streams_.
-webrtc::Mutex& GetLoggingLock() {
-  static webrtc::Mutex& mutex = *new webrtc::Mutex();
-  return mutex;
+// Set by ResetLoggingForTesting() to let the next InitializeLogging() call
+// replace the active configuration. Never set in production.
+constinit std::atomic<bool> g_reinitialize_for_testing = false;
+
+// Internal helper to manage config state.
+// NOTE: The return value is non-const only while transitioning away from and
+// deprecating legacy global methods that allow modifying the logging config
+// after initialization. Once those methods are removed, this should return a
+// const reference again to ensure lockless read-only access.
+LoggingConfig& GetOrInitConfig(LoggingConfig* init_config = nullptr,
+                               bool* config_applied = nullptr) {
+  static absl::NoDestructor<LoggingConfig> config([&]() {
+    if (config_applied != nullptr) {
+      *config_applied = true;
+    }
+    if (init_config != nullptr) {
+      return std::move(*init_config);
+    }
+    return LoggingConfig();  // Default configuration
+  }());
+  return *config;
+}
+
+// The log sinks that are added at runtime, with LogMessage::AddLogToStream().
+// Unlike the LoggingConfig sinks, they are guarded by a lock, which is also
+// held while they are called. That way, calls to these sinks are serialized,
+// and a sink isn't called anymore once it has been removed.
+// The lock also serializes all updates of `g_dbg_sev` and `g_min_sev`, so that
+// concurrent updates don't overwrite each other.
+class DynamicLogSinks {
+ public:
+  // Returns the instance, which is created on first use and never destroyed.
+  static DynamicLogSinks& Get() {
+    static absl::NoDestructor<DynamicLogSinks> instance;
+    return *instance;
+  }
+
+  // Adds `sink`, or updates its severity if it has already been added.
+  void Add(LogSink* absl_nonnull sink, LoggingSeverity min_severity) {
+    MutexLock lock(&mutex_);
+    auto it = std::ranges::find_if(
+        sinks_, [&](const Entry& entry) { return entry.sink == sink; });
+    if (it != sinks_.end()) {
+      it->min_severity = min_severity;
+    } else {
+      // The most recently added sink is called first.
+      sinks_.insert(sinks_.begin(), {sink, min_severity});
+    }
+    active_instance_.store(this, std::memory_order_release);
+    UpdateMinLogSeverityLocked();
+  }
+
+  void Remove(LogSink* absl_nonnull sink) {
+    MutexLock lock(&mutex_);
+    std::erase_if(sinks_,
+                  [sink](const Entry& entry) { return entry.sink == sink; });
+    if (sinks_.empty()) {
+      active_instance_.store(nullptr, std::memory_order_relaxed);
+    }
+    UpdateMinLogSeverityLocked();
+  }
+
+  void SetDebugSeverity(LoggingSeverity severity) {
+    MutexLock lock(&mutex_);
+    g_dbg_sev.store(severity, std::memory_order_relaxed);
+    UpdateMinLogSeverityLocked();
+  }
+
+  static void OnLogMessage(const LogLineRef& line) {
+    // `active_instance_` may become nullptr after the load if the last sink is
+    // concurrently removed, which is safe because the `Get()` singleton is
+    // never destroyed.
+    if (DynamicLogSinks* instance =
+            active_instance_.load(std::memory_order_acquire);
+        instance != nullptr) {
+      MutexLock lock(&instance->mutex_);
+      for (const Entry& entry : instance->sinks_) {
+        if (line.severity() >= entry.min_severity) {
+          entry.sink->OnLogMessage(line);
+        }
+      }
+    }
+  }
+
+ private:
+  // A sink and the minimum severity of the messages that it receives.
+  struct Entry {
+    LogSink* absl_nonnull sink;
+    LoggingSeverity min_severity;
+  };
+
+  void UpdateMinLogSeverityLocked() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+    LoggingSeverity min_sev = g_dbg_sev.load(std::memory_order_relaxed);
+    const LoggingConfig& config = GetLoggingConfig();
+    if (!config.sinks().empty()) {
+      min_sev = std::min(min_sev, config.min_severity());
+    }
+    for (const Entry& entry : sinks_) {
+      min_sev = std::min(min_sev, entry.min_severity);
+    }
+    g_min_sev.store(min_sev, std::memory_order_relaxed);
+  }
+
+  // Points to the `Get()` instance while it has sinks, and is nullptr
+  // otherwise. Every log message reads it, so that sinks that can be added at
+  // runtime only cost an atomic load while none are added.
+  constinit static inline std::atomic<DynamicLogSinks*> active_instance_ =
+      nullptr;
+
+  Mutex mutex_;
+  std::vector<Entry> sinks_ RTC_GUARDED_BY(mutex_);
+};
+
+void ApplyConfigToLogMessage(const LoggingConfig& config) {
+  // TODO: bugs.webrtc.org/42234107 - Store the options without the deprecated
+  // setters once they are removed.
+  RTC_PUSH_IGNORING_WDEPRECATED_DECLARATIONS()
+  LogMessage::LogTimestamps(config.log_timestamp());
+  LogMessage::SetLogToStderr(config.log_to_stderr());
+  RTC_POP_IGNORING_WDEPRECATED_DECLARATIONS()
+  DynamicLogSinks::Get().SetDebugSeverity(config.debug_severity());
 }
 
 }  // namespace
 
-std::string LogLineRef::DefaultLogLine() const {
-  rtc::StringBuilder log_output;
-  if (timestamp_ != webrtc::Timestamp::MinusInfinity()) {
+bool InitializeLogging(LoggingConfig config) {
+  // Only the call that initializes the configuration, or the first call after
+  // ResetLoggingForTesting(), applies it.
+  bool config_applied = false;
+  LoggingConfig& active = GetOrInitConfig(&config, &config_applied);
+  if (!config_applied && g_reinitialize_for_testing.exchange(false)) {
+    active = std::move(config);
+    config_applied = true;
+  }
+  if (config_applied) {
+    ApplyConfigToLogMessage(active);
+  }
+  return config_applied;
+}
+
+const LoggingConfig& GetLoggingConfig() {
+  return GetOrInitConfig();
+}
+
+LoggingConfig ResetLoggingForTesting(
+    std::optional<LoggingConfig> restore_config) {
+  LoggingConfig& active = GetOrInitConfig();
+  // Unless a configuration is restored, let the next InitializeLogging() call
+  // replace the default configuration.
+  g_reinitialize_for_testing.store(!restore_config.has_value());
+  LoggingConfig previous = std::exchange(
+      active, std::move(restore_config).value_or(LoggingConfig()));
+  ApplyConfigToLogMessage(active);
+  return previous;
+}
+
+LogLineRef::LogLineRef() = default;
+LogLineRef::~LogLineRef() = default;
+
+const std::string& LogLineRef::DefaultLogLine() const {
+  if (default_log_line_.has_value()) {
+    return *default_log_line_;
+  }
+  absl::string_view prefix = GetLoggingConfig().log_prefix();
+  StringBuilder log_output;
+  // 48 characters is an estimate for the timestamp ("[000:000]"), the thread
+  // and queue name ("[<thread_id>:<queue_name>] ") and the line number
+  // ("(:<line>): ").
+  log_output.Reserve(prefix.size() + filename_.size() + message_.size() + 48);
+  log_output << prefix;
+  if (timestamp_ != Timestamp::MinusInfinity()) {
     // TODO(kwiberg): Switch to absl::StrFormat, if binary size is ok.
     char timestamp[50];  // Maximum string length of an int64_t is 20.
     int len =
@@ -96,8 +265,19 @@ std::string LogLineRef::DefaultLogLine() const {
     RTC_DCHECK_LT(len, sizeof(timestamp));
     log_output << timestamp;
   }
+  // Print thread information if requested. Depending on the settings and
+  // available information, this will print:
+  //   [<thread_id>]
+  //   [<queue_or_thread_name>]
+  //   [<thread_id>:<queue_or_thread_name>]
   if (thread_id_.has_value()) {
-    log_output << "[" << *thread_id_ << "] ";
+    log_output << "[" << *thread_id_;
+    if (!queue_name_.empty()) {
+      log_output << ":" << queue_name_.substr(0, 10);
+    }
+    log_output << "] ";
+  } else if (!queue_name_.empty()) {
+    log_output << "[" << queue_name_.substr(0, 10) << "] ";
   }
   if (!filename_.empty()) {
 #if defined(WEBRTC_ANDROID)
@@ -107,7 +287,8 @@ std::string LogLineRef::DefaultLogLine() const {
 #endif
   }
   log_output << message_;
-  return log_output.Release();
+  default_log_line_ = log_output.Release();
+  return *default_log_line_;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -116,17 +297,8 @@ std::string LogLineRef::DefaultLogLine() const {
 
 bool LogMessage::log_to_stderr_ = true;
 
-// The list of logging streams currently configured.
-// Note: we explicitly do not clean this up, because of the uncertain ordering
-// of destructors at program exit.  Let the person who sets the stream trigger
-// cleanup by setting to null, or let it leak (safe at program exit).
-ABSL_CONST_INIT LogSink* LogMessage::streams_ RTC_GUARDED_BY(GetLoggingLock()) =
-    nullptr;
-ABSL_CONST_INIT std::atomic<bool> LogMessage::streams_empty_ = {true};
-
 // Boolean options default to false.
-ABSL_CONST_INIT bool LogMessage::log_thread_ = false;
-ABSL_CONST_INIT bool LogMessage::log_timestamp_ = false;
+constinit bool LogMessage::log_timestamp_ = false;
 
 LogMessage::LogMessage(const char* file, int line, LoggingSeverity sev)
     : LogMessage(file, line, sev, ERRCTX_NONE, 0) {}
@@ -137,6 +309,7 @@ LogMessage::LogMessage(const char* file,
                        LogErrorContext err_ctx,
                        int err) {
   log_line_.set_severity(sev);
+  const LoggingConfig& config = GetLoggingConfig();
   if (log_timestamp_) {
     int64_t log_start_time = LogStartTime();
     // Use SystemTimeMillis so that even if tests use fake clocks, the timestamp
@@ -145,11 +318,17 @@ LogMessage::LogMessage(const char* file,
     // Also ensure WallClockStartTime is initialized, so that it matches
     // LogStartTime.
     WallClockStartTime();
-    log_line_.set_timestamp(webrtc::Timestamp::Millis(time));
+    log_line_.set_timestamp(Timestamp::Millis(time));
   }
 
-  if (log_thread_) {
+  if (config.log_thread()) {
     log_line_.set_thread_id(CurrentThreadId());
+  }
+
+  if (config.log_queue_name()) {
+    if (TaskQueueBase* tq = TaskQueueBase::Current(); tq != nullptr) {
+      log_line_.set_queue_name(tq->queue_name());
+    }
   }
 
   if (file != nullptr) {
@@ -161,8 +340,7 @@ LogMessage::LogMessage(const char* file,
   }
 
   if (err_ctx != ERRCTX_NONE) {
-    char tmp_buf[1024];
-    SimpleStringBuilder tmp(tmp_buf);
+    StringBuilder tmp;
     tmp.AppendFormat("[0x%08X]", err);
     switch (err_ctx) {
       case ERRCTX_ERRNO:
@@ -188,7 +366,7 @@ LogMessage::LogMessage(const char* file,
       default:
         break;
     }
-    extra_ = tmp.str();
+    extra_ = tmp.Release();
   }
 }
 
@@ -208,35 +386,43 @@ LogMessage::~LogMessage() {
 
   log_line_.set_message(print_stream_.Release());
 
-  if (log_line_.severity() >= g_dbg_sev) {
+  const LoggingConfig& config = GetLoggingConfig();
+
+  // Not `config.debug_severity()`, since LogToDebug() can change the debug
+  // severity after initialization.
+  if (log_line_.severity() >= g_dbg_sev.load(std::memory_order_relaxed)) {
     OutputToDebug(log_line_);
   }
 
-  webrtc::MutexLock lock(&GetLoggingLock());
-  for (LogSink* entry = streams_; entry != nullptr; entry = entry->next_) {
-    if (log_line_.severity() >= entry->min_severity_) {
-      entry->OnLogMessage(log_line_);
+  if (log_line_.severity() >= config.min_severity()) {
+    for (const auto& sink : config.sinks()) {
+      sink->OnLogMessage(log_line_);
     }
   }
+
+  DynamicLogSinks::OnLogMessage(log_line_);
 }
 
-void LogMessage::AddTag(const char* tag) {
+void LogMessage::AddTag([[maybe_unused]] const char* tag) {
 #ifdef WEBRTC_ANDROID
   log_line_.set_tag(tag);
 #endif
 }
 
-rtc::StringBuilder& LogMessage::stream() {
+StringBuilder& LogMessage::stream() {
   return print_stream_;
 }
 
-int LogMessage::GetMinLogSeverity() {
-  return g_min_sev;
+void LogMessage::ReserveStream(size_t size) {
+  // FinishPrintStream() appends " : " and `extra_`, if not empty.
+  const size_t extra_size = extra_.empty() ? 0 : extra_.size() + 3;
+  print_stream_.Reserve(print_stream_.size() + size + extra_size);
 }
 
-LoggingSeverity LogMessage::GetLogToDebug() {
-  return g_dbg_sev;
+int LogMessage::GetMinLogSeverity() {
+  return g_min_sev.load(std::memory_order_relaxed);
 }
+
 int64_t LogMessage::LogStartTime() {
   static const int64_t g_start = SystemTimeMillis();
   return g_start;
@@ -247,8 +433,11 @@ uint32_t LogMessage::WallClockStartTime() {
   return g_start_wallclock;
 }
 
-void LogMessage::LogThreads(bool on) {
-  log_thread_ = on;
+bool LogMessage::LogThreads(bool enabled) {
+  LoggingConfig& config = GetOrInitConfig();
+  bool prev = config.log_thread();
+  config.set_log_thread(enabled);
+  return prev;
 }
 
 void LogMessage::LogTimestamps(bool on) {
@@ -256,108 +445,23 @@ void LogMessage::LogTimestamps(bool on) {
 }
 
 void LogMessage::LogToDebug(LoggingSeverity min_sev) {
-  g_dbg_sev = min_sev;
-  webrtc::MutexLock lock(&GetLoggingLock());
-  UpdateMinLogSeverity();
+  DynamicLogSinks::Get().SetDebugSeverity(min_sev);
 }
 
 void LogMessage::SetLogToStderr(bool log_to_stderr) {
   log_to_stderr_ = log_to_stderr;
 }
 
-int LogMessage::GetLogToStream(LogSink* stream) {
-  webrtc::MutexLock lock(&GetLoggingLock());
-  LoggingSeverity sev = LS_NONE;
-  for (LogSink* entry = streams_; entry != nullptr; entry = entry->next_) {
-    if (stream == nullptr || stream == entry) {
-      sev = std::min(sev, entry->min_severity_);
-    }
-  }
-  return sev;
-}
-
 void LogMessage::AddLogToStream(LogSink* stream, LoggingSeverity min_sev) {
-  webrtc::MutexLock lock(&GetLoggingLock());
-  stream->min_severity_ = min_sev;
-  stream->next_ = streams_;
-  streams_ = stream;
-  streams_empty_.store(false, std::memory_order_relaxed);
-  UpdateMinLogSeverity();
+  DynamicLogSinks::Get().Add(stream, min_sev);
 }
 
 void LogMessage::RemoveLogToStream(LogSink* stream) {
-  webrtc::MutexLock lock(&GetLoggingLock());
-  for (LogSink** entry = &streams_; *entry != nullptr;
-       entry = &(*entry)->next_) {
-    if (*entry == stream) {
-      *entry = (*entry)->next_;
-      break;
-    }
-  }
-  streams_empty_.store(streams_ == nullptr, std::memory_order_relaxed);
-  UpdateMinLogSeverity();
-}
-
-void LogMessage::ConfigureLogging(absl::string_view params) {
-  LoggingSeverity current_level = LS_VERBOSE;
-  LoggingSeverity debug_level = GetLogToDebug();
-
-  std::vector<std::string> tokens;
-  tokenize(params, ' ', &tokens);
-
-  for (const std::string& token : tokens) {
-    if (token.empty())
-      continue;
-
-    // Logging features
-    if (token == "tstamp") {
-      LogTimestamps();
-    } else if (token == "thread") {
-      LogThreads();
-
-      // Logging levels
-    } else if (token == "verbose") {
-      current_level = LS_VERBOSE;
-    } else if (token == "info") {
-      current_level = LS_INFO;
-    } else if (token == "warning") {
-      current_level = LS_WARNING;
-    } else if (token == "error") {
-      current_level = LS_ERROR;
-    } else if (token == "none") {
-      current_level = LS_NONE;
-
-      // Logging targets
-    } else if (token == "debug") {
-      debug_level = current_level;
-    }
-  }
-
-#if defined(WEBRTC_WIN) && !defined(WINUWP)
-  if ((LS_NONE != debug_level) && !::IsDebuggerPresent()) {
-    // First, attempt to attach to our parent's console... so if you invoke
-    // from the command line, we'll see the output there.  Otherwise, create
-    // our own console window.
-    // Note: These methods fail if a console already exists, which is fine.
-    if (!AttachConsole(ATTACH_PARENT_PROCESS))
-      ::AllocConsole();
-  }
-#endif  // defined(WEBRTC_WIN) && !defined(WINUWP)
-
-  LogToDebug(debug_level);
-}
-
-void LogMessage::UpdateMinLogSeverity()
-    RTC_EXCLUSIVE_LOCKS_REQUIRED(GetLoggingLock()) {
-  LoggingSeverity min_sev = g_dbg_sev;
-  for (LogSink* entry = streams_; entry != nullptr; entry = entry->next_) {
-    min_sev = std::min(min_sev, entry->min_severity_);
-  }
-  g_min_sev = min_sev;
+  DynamicLogSinks::Get().Remove(stream);
 }
 
 void LogMessage::OutputToDebug(const LogLineRef& log_line) {
-  std::string msg_str = log_line.DefaultLogLine();
+  const std::string& msg_str = log_line.DefaultLogLine();
   bool log_to_stderr = log_to_stderr_;
 #if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS) && defined(NDEBUG)
   // On the Mac, all stderr output goes to the Console log and causes clutter.
@@ -377,7 +481,9 @@ void LogMessage::OutputToDebug(const LogLineRef& log_line) {
 #if defined(WEBRTC_WIN)
   // Always log to the debugger.
   // Perhaps stderr should be controlled by a preference, as on Mac?
+#if RTC_DLOG_IS_ON
   OutputDebugStringA(msg_str.c_str());
+#endif
   if (log_to_stderr) {
     // This handles dynamically allocated consoles, too.
     if (HANDLE error_handle = ::GetStdHandle(STD_ERROR_HANDLE)) {
@@ -439,11 +545,8 @@ void LogMessage::OutputToDebug(const LogLineRef& log_line) {
   }
 }
 
-// static
 bool LogMessage::IsNoop(LoggingSeverity severity) {
-  if (severity >= g_dbg_sev || severity >= g_min_sev)
-    return false;
-  return streams_empty_.load(std::memory_order_relaxed);
+  return severity < g_min_sev.load(std::memory_order_relaxed);
 }
 
 void LogMessage::FinishPrintStream() {
@@ -453,8 +556,72 @@ void LogMessage::FinishPrintStream() {
 }
 
 namespace webrtc_logging_impl {
+namespace {
 
-void Log(const LogArgType* fmt, ...) {
+// Returns the total size of the std::string and string view arguments in
+// `args`, whose types are listed in `fmt`. The sizes of the other arguments
+// are estimated at compile time, see LogStreamer<>::Call().
+size_t StringArgsSize(const LogArgType* fmt, va_list args) {
+  size_t size = 0;
+  for (; *fmt != LogArgType::kEnd; ++fmt) {
+    switch (*fmt) {
+      case LogArgType::kInt:
+        va_arg(args, int);
+        break;
+      case LogArgType::kLong:
+        va_arg(args, long);
+        break;
+      case LogArgType::kLongLong:
+        va_arg(args, long long);
+        break;
+      case LogArgType::kUInt:
+        va_arg(args, unsigned);
+        break;
+      case LogArgType::kULong:
+        va_arg(args, unsigned long);
+        break;
+      case LogArgType::kULongLong:
+        va_arg(args, unsigned long long);
+        break;
+      case LogArgType::kDouble:
+        va_arg(args, double);
+        break;
+      case LogArgType::kLongDouble:
+        va_arg(args, long double);
+        break;
+      case LogArgType::kCharP:
+        va_arg(args, const char*);
+        break;
+      case LogArgType::kVoidP:
+        va_arg(args, const void*);
+        break;
+      case LogArgType::kStdString:
+        size += va_arg(args, const std::string*)->size();
+        break;
+      case LogArgType::kStringView:
+        size += va_arg(args, const absl::string_view*)->size();
+        break;
+      case LogArgType::kStdStringView:
+        size += va_arg(args, const std::string_view*)->size();
+        break;
+      case LogArgType::kEnd:
+      case LogArgType::kLogMetadata:
+      case LogArgType::kLogMetadataErr:
+#ifdef WEBRTC_ANDROID
+      case LogArgType::kLogMetadataTag:
+#else
+      case LogArgType::kReserved:
+#endif
+        // Unexpected types are reported when the message is formatted.
+        return size;
+    }
+  }
+  return size;
+}
+
+}  // namespace
+
+void Log(size_t size_hint, const LogArgType* fmt, ...) {
   va_list args;
   va_start(args, fmt);
 
@@ -462,7 +629,8 @@ void Log(const LogArgType* fmt, ...) {
   const char* tag = nullptr;
   switch (*fmt) {
     case LogArgType::kLogMetadata: {
-      meta = {va_arg(args, LogMetadata), ERRCTX_NONE, 0};
+      meta = {
+          .meta = va_arg(args, LogMetadata), .err_ctx = ERRCTX_NONE, .err = 0};
       break;
     }
     case LogArgType::kLogMetadataErr: {
@@ -476,8 +644,23 @@ void Log(const LogArgType* fmt, ...) {
       tag = tag_meta.tag;
       break;
     }
+#else
+    case LogArgType::kReserved:
 #endif
-    default: {
+    case LogArgType::kEnd:
+    case LogArgType::kInt:
+    case LogArgType::kLong:
+    case LogArgType::kLongLong:
+    case LogArgType::kUInt:
+    case LogArgType::kULong:
+    case LogArgType::kULongLong:
+    case LogArgType::kDouble:
+    case LogArgType::kLongDouble:
+    case LogArgType::kCharP:
+    case LogArgType::kStdString:
+    case LogArgType::kStringView:
+    case LogArgType::kVoidP:
+    case LogArgType::kStdStringView: {
       RTC_DCHECK_NOTREACHED();
       va_end(args);
       return;
@@ -489,6 +672,14 @@ void Log(const LogArgType* fmt, ...) {
   if (tag) {
     log_message.AddTag(tag);
   }
+
+  // Add the sizes of the string arguments, which are only known at runtime, so
+  // that the message can typically be formatted with a single allocation.
+  va_list size_args;
+  va_copy(size_args, args);
+  const size_t reserve_size = size_hint + StringArgsSize(fmt + 1, size_args);
+  va_end(size_args);
+  log_message.ReserveStream(reserve_size);
 
   for (++fmt; *fmt != LogArgType::kEnd; ++fmt) {
     switch (*fmt) {
@@ -514,7 +705,7 @@ void Log(const LogArgType* fmt, ...) {
         log_message.stream() << va_arg(args, double);
         break;
       case LogArgType::kLongDouble:
-        log_message.stream() << va_arg(args, long double);
+        log_message.stream().AppendFormat("%Lf", va_arg(args, long double));
         break;
       case LogArgType::kCharP: {
         const char* s = va_arg(args, const char*);
@@ -527,14 +718,26 @@ void Log(const LogArgType* fmt, ...) {
       case LogArgType::kStringView:
         log_message.stream() << *va_arg(args, const absl::string_view*);
         break;
-      case LogArgType::kVoidP:
-        log_message.stream() << rtc::ToHex(
-            reinterpret_cast<uintptr_t>(va_arg(args, const void*)));
+      case LogArgType::kStdStringView:
+        log_message.stream() << *va_arg(args, const std::string_view*);
         break;
-      default:
+      case LogArgType::kVoidP:
+        log_message.stream()
+            << ToHex(reinterpret_cast<uintptr_t>(va_arg(args, const void*)));
+        break;
+      case LogArgType::kEnd:
+      case LogArgType::kLogMetadata:
+      case LogArgType::kLogMetadataErr:
+#ifdef WEBRTC_ANDROID
+      case LogArgType::kLogMetadataTag:
+#else
+      case LogArgType::kReserved:
+#endif
+      {
         RTC_DCHECK_NOTREACHED();
         va_end(args);
         return;
+      }
     }
   }
 
@@ -542,18 +745,50 @@ void Log(const LogArgType* fmt, ...) {
 }
 
 }  // namespace webrtc_logging_impl
-}  // namespace rtc
-#endif
+}  // namespace webrtc
+#else   // RTC_LOG_ENABLED()
+namespace webrtc {
+bool InitializeLogging(LoggingConfig /* config */) {
+  return false;
+}
 
-namespace rtc {
+const LoggingConfig& GetLoggingConfig() {
+  static const absl::NoDestructor<LoggingConfig> config;
+  return *config;
+}
+
+LoggingConfig ResetLoggingForTesting(
+    std::optional<LoggingConfig> /* restore_config */) {
+  return LoggingConfig();
+}
+
+const std::string& LogLineRef::DefaultLogLine() const {
+  if (!default_log_line_.has_value()) {
+    default_log_line_.emplace();
+  }
+  return *default_log_line_;
+}
+}  // namespace webrtc
+#endif  // RTC_LOG_ENABLED()
+
+namespace webrtc {
+LoggingConfig::LoggingConfig() : debug_severity_(kDefaultLoggingSeverity) {}
+LoggingConfig::LoggingConfig(LoggingConfig&&) = default;
+LoggingConfig& LoggingConfig::operator=(LoggingConfig&&) = default;
+LoggingConfig::~LoggingConfig() = default;
+
 // Default implementation, override is recomended.
 void LogSink::OnLogMessage(const LogLineRef& log_line) {
+  // The default implementation still uses the deprecated string overloads, for
+  // sinks that override those.
+  RTC_PUSH_IGNORING_WDEPRECATED_DECLARATIONS()
 #if defined(WEBRTC_ANDROID)
   OnLogMessage(log_line.DefaultLogLine(), log_line.severity(),
                log_line.tag().data());
 #else
   OnLogMessage(log_line.DefaultLogLine(), log_line.severity());
 #endif
+  RTC_POP_IGNORING_WDEPRECATED_DECLARATIONS()
 }
 
 // Inefficient default implementation, override is recommended.
@@ -566,6 +801,10 @@ void LogSink::OnLogMessage(const std::string& msg,
 void LogSink::OnLogMessage(const std::string& msg,
                            LoggingSeverity /* severity */) {
   OnLogMessage(msg);
+}
+
+void LogSink::OnLogMessage(const std::string& msg) {
+  OnLogMessage(absl::string_view(msg));
 }
 
 // Inefficient default implementation, override is recommended.
@@ -583,4 +822,5 @@ void LogSink::OnLogMessage(absl::string_view msg,
 void LogSink::OnLogMessage(absl::string_view msg) {
   OnLogMessage(std::string(msg));
 }
-}  // namespace rtc
+
+}  // namespace webrtc

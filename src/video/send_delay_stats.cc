@@ -10,10 +10,18 @@
 
 #include "video/send_delay_stats.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <utility>
 
+#include "api/sequence_checker.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "call/video_send_stream.h"
 #include "rtc_base/logging.h"
+#include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/metrics.h"
+#include "video/stats_counter.h"
 
 namespace webrtc {
 namespace {
@@ -41,7 +49,7 @@ SendDelayStats::~SendDelayStats() {
 }
 
 void SendDelayStats::UpdateHistograms() {
-  MutexLock lock(&mutex_);
+  RTC_DCHECK_RUN_ON(&worker_sequence_checker_);
   for (auto& [unused, counter] : send_delay_counters_) {
     AggregatedStats stats = counter.GetStats();
     if (stats.num_samples >= kMinRequiredPeriodicSamples) {
@@ -52,7 +60,7 @@ void SendDelayStats::UpdateHistograms() {
 }
 
 void SendDelayStats::AddSsrcs(const VideoSendStream::Config& config) {
-  MutexLock lock(&mutex_);
+  RTC_DCHECK_RUN_ON(&worker_sequence_checker_);
   if (send_delay_counters_.size() + config.rtp.ssrcs.size() > kMaxSsrcMapSize)
     return;
   for (uint32_t ssrc : config.rtp.ssrcs) {
@@ -64,7 +72,7 @@ void SendDelayStats::OnSendPacket(uint16_t packet_id,
                                   Timestamp capture_time,
                                   uint32_t ssrc) {
   // Packet sent to transport.
-  MutexLock lock(&mutex_);
+  RTC_DCHECK_RUN_ON(&worker_sequence_checker_);
   auto it = send_delay_counters_.find(ssrc);
   if (it == send_delay_counters_.end())
     return;
@@ -86,11 +94,11 @@ void SendDelayStats::OnSendPacket(uint16_t packet_id,
 }
 
 bool SendDelayStats::OnSentPacket(int packet_id, Timestamp time) {
+  RTC_DCHECK_RUN_ON(&worker_sequence_checker_);
   // Packet leaving socket.
   if (packet_id == -1)
     return false;
 
-  MutexLock lock(&mutex_);
   auto it = packets_.find(packet_id);
   if (it == packets_.end())
     return false;
@@ -104,6 +112,7 @@ bool SendDelayStats::OnSentPacket(int packet_id, Timestamp time) {
 }
 
 void SendDelayStats::RemoveOld(Timestamp now) {
+  RTC_DCHECK_RUN_ON(&worker_sequence_checker_);
   while (!packets_.empty()) {
     auto it = packets_.begin();
     if (now - it->second.capture_time < kMaxSentPacketDelay)

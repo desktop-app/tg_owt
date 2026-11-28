@@ -10,21 +10,34 @@
 
 #include "modules/video_coding/rtp_frame_reference_finder.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
-#include "absl/types/variant.h"
+#include "api/field_trials_view.h"
+#include "api/video/video_codec_type.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
+#include "modules/rtp_rtcp/source/rtp_video_header.h"
+#include "modules/video_coding/codecs/interface/common_constants.h"
+#include "modules/video_coding/codecs/vp8/include/vp8_globals.h"
+#include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
 #include "modules/video_coding/rtp_frame_id_only_ref_finder.h"
 #include "modules/video_coding/rtp_generic_ref_finder.h"
 #include "modules/video_coding/rtp_seq_num_only_ref_finder.h"
 #include "modules/video_coding/rtp_vp8_ref_finder.h"
 #include "modules/video_coding/rtp_vp9_ref_finder.h"
+#include "rtc_base/numerics/sequence_number_util.h"
 
 namespace webrtc {
 namespace internal {
 class RtpFrameReferenceFinderImpl {
  public:
-  RtpFrameReferenceFinderImpl() = default;
+  explicit RtpFrameReferenceFinderImpl(const FieldTrialsView* field_trials)
+      : field_trials_(field_trials) {}
 
   RtpFrameReferenceFinder::ReturnVector ManageFrame(
       std::unique_ptr<RtpFrameObject> frame);
@@ -32,15 +45,17 @@ class RtpFrameReferenceFinderImpl {
   void ClearTo(uint16_t seq_num);
 
  private:
-  using RefFinder = absl::variant<absl::monostate,
-                                  RtpGenericFrameRefFinder,
-                                  RtpFrameIdOnlyRefFinder,
-                                  RtpSeqNumOnlyRefFinder,
-                                  RtpVp8RefFinder,
-                                  RtpVp9RefFinder>;
+  using RefFinder = std::variant<std::monostate,
+                                 RtpGenericFrameRefFinder,
+                                 RtpFrameIdOnlyRefFinder,
+                                 RtpSeqNumOnlyRefFinder,
+                                 RtpVp8RefFinder,
+                                 RtpVp9RefFinder>;
 
   template <typename T>
   T& GetRefFinderAs();
+
+  const FieldTrialsView* const field_trials_;
   RefFinder ref_finder_;
 };
 
@@ -56,7 +71,7 @@ RtpFrameReferenceFinder::ReturnVector RtpFrameReferenceFinderImpl::ManageFrame(
   switch (frame->codec_type()) {
     case kVideoCodecVP8: {
       const RTPVideoHeaderVP8& vp8_header =
-          absl::get<RTPVideoHeaderVP8>(video_header.video_type_header);
+          std::get<RTPVideoHeaderVP8>(video_header.video_type_header);
 
       if (vp8_header.temporalIdx == kNoTemporalIdx ||
           vp8_header.tl0PicIdx == kNoTl0PicIdx) {
@@ -73,7 +88,7 @@ RtpFrameReferenceFinder::ReturnVector RtpFrameReferenceFinderImpl::ManageFrame(
     }
     case kVideoCodecVP9: {
       const RTPVideoHeaderVP9& vp9_header =
-          absl::get<RTPVideoHeaderVP9>(video_header.video_type_header);
+          std::get<RTPVideoHeaderVP9>(video_header.video_type_header);
 
       if (vp9_header.temporal_idx == kNoTemporalIdx) {
         if (vp9_header.picture_id == kNoPictureId) {
@@ -88,7 +103,7 @@ RtpFrameReferenceFinder::ReturnVector RtpFrameReferenceFinderImpl::ManageFrame(
       return GetRefFinderAs<RtpVp9RefFinder>().ManageFrame(std::move(frame));
     }
     case kVideoCodecGeneric: {
-      if (auto* generic_header = absl::get_if<RTPVideoHeaderLegacyGeneric>(
+      if (auto* generic_header = std::get_if<RTPVideoHeaderLegacyGeneric>(
               &video_header.video_type_header)) {
         return GetRefFinderAs<RtpFrameIdOnlyRefFinder>().ManageFrame(
             std::move(frame), generic_header->picture_id);
@@ -106,7 +121,7 @@ RtpFrameReferenceFinder::ReturnVector RtpFrameReferenceFinderImpl::ManageFrame(
 
 RtpFrameReferenceFinder::ReturnVector
 RtpFrameReferenceFinderImpl::PaddingReceived(uint16_t seq_num) {
-  if (auto* ref_finder = absl::get_if<RtpSeqNumOnlyRefFinder>(&ref_finder_)) {
+  if (auto* ref_finder = std::get_if<RtpSeqNumOnlyRefFinder>(&ref_finder_)) {
     return ref_finder->PaddingReceived(seq_num);
   }
   return {};
@@ -114,9 +129,9 @@ RtpFrameReferenceFinderImpl::PaddingReceived(uint16_t seq_num) {
 
 void RtpFrameReferenceFinderImpl::ClearTo(uint16_t seq_num) {
   struct ClearToVisitor {
-    void operator()(absl::monostate& ref_finder) {}
-    void operator()(RtpGenericFrameRefFinder& ref_finder) {}
-    void operator()(RtpFrameIdOnlyRefFinder& ref_finder) {}
+    void operator()(std::monostate& /* ref_finder */) {}
+    void operator()(RtpGenericFrameRefFinder& /* ref_finder */) {}
+    void operator()(RtpFrameIdOnlyRefFinder& /* ref_finder */) {}
     void operator()(RtpSeqNumOnlyRefFinder& ref_finder) {
       ref_finder.ClearTo(seq_num);
     }
@@ -129,33 +144,46 @@ void RtpFrameReferenceFinderImpl::ClearTo(uint16_t seq_num) {
     uint16_t seq_num;
   };
 
-  absl::visit(ClearToVisitor{seq_num}, ref_finder_);
+  std::visit(ClearToVisitor{seq_num}, ref_finder_);
 }
 
 template <typename T>
 T& RtpFrameReferenceFinderImpl::GetRefFinderAs() {
-  if (auto* ref_finder = absl::get_if<T>(&ref_finder_)) {
+  if (auto* ref_finder = std::get_if<T>(&ref_finder_)) {
     return *ref_finder;
   }
-  return ref_finder_.emplace<T>();
+  if constexpr (std::is_same_v<T, RtpSeqNumOnlyRefFinder>) {
+    return ref_finder_.emplace<T>(field_trials_);
+  } else {
+    return ref_finder_.emplace<T>();
+  }
 }
 
 }  // namespace internal
 
-RtpFrameReferenceFinder::RtpFrameReferenceFinder()
-    : RtpFrameReferenceFinder(0) {}
+RtpFrameReferenceFinder::RtpFrameReferenceFinder(
+    const FieldTrialsView* field_trials)
+    : RtpFrameReferenceFinder(field_trials, 0) {}
 
-RtpFrameReferenceFinder::RtpFrameReferenceFinder(int64_t picture_id_offset)
+RtpFrameReferenceFinder::RtpFrameReferenceFinder(
+    const FieldTrialsView* field_trials,
+    int64_t picture_id_offset)
     : picture_id_offset_(picture_id_offset),
-      impl_(std::make_unique<internal::RtpFrameReferenceFinderImpl>()) {}
+      impl_(std::make_unique<internal::RtpFrameReferenceFinderImpl>(
+          field_trials)) {}
 
 RtpFrameReferenceFinder::~RtpFrameReferenceFinder() = default;
 
 RtpFrameReferenceFinder::ReturnVector RtpFrameReferenceFinder::ManageFrame(
     std::unique_ptr<RtpFrameObject> frame) {
-  // If we have cleared past this frame, drop it.
+  // Drop frames cleared past -- but only when the 32-bit RTP timestamp also
+  // confirms the frame is older. The 16-bit AheadOf is ambiguous across a
+  // sequence-number wrap after prolonged decode stalls
+  // (issues.webrtc.org/516639936).
   if (cleared_to_seq_num_ != -1 &&
-      AheadOf<uint16_t>(cleared_to_seq_num_, frame->first_seq_num())) {
+      AheadOf<uint16_t>(cleared_to_seq_num_, frame->first_seq_num()) &&
+      (!cleared_to_timestamp_.has_value() ||
+       AheadOf<uint32_t>(*cleared_to_timestamp_, frame->RtpTimestamp()))) {
     return {};
   }
 
@@ -171,8 +199,10 @@ RtpFrameReferenceFinder::ReturnVector RtpFrameReferenceFinder::PaddingReceived(
   return frames;
 }
 
-void RtpFrameReferenceFinder::ClearTo(uint16_t seq_num) {
+void RtpFrameReferenceFinder::ClearTo(uint16_t seq_num,
+                                      std::optional<uint32_t> rtp_timestamp) {
   cleared_to_seq_num_ = seq_num;
+  cleared_to_timestamp_ = rtp_timestamp;
   impl_->ClearTo(seq_num);
 }
 

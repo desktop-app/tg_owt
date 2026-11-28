@@ -11,8 +11,16 @@
 #ifndef API_TEST_MOCK_VIDEO_ENCODER_H_
 #define API_TEST_MOCK_VIDEO_ENCODER_H_
 
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <vector>
 
+#include "api/fec_controller_override.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_frame_type.h"
+#include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder.h"
 #include "test/gmock.h"
 
@@ -24,7 +32,12 @@ class MockEncodedImageCallback : public EncodedImageCallback {
               OnEncodedImage,
               (const EncodedImage&, const CodecSpecificInfo*),
               (override));
-  MOCK_METHOD(void, OnDroppedFrame, (DropReason reason), (override));
+  MOCK_METHOD(void,
+              OnFrameDropped,
+              (uint32_t rtp_timestamp,
+               int spatial_id,
+               bool is_end_of_temporal_unit),
+              (override));
 };
 
 class MockVideoEncoder : public VideoEncoder {
@@ -56,6 +69,12 @@ class MockVideoEncoder : public VideoEncoder {
               SetRates,
               (const RateControlParameters& parameters),
               (override));
+  MOCK_METHOD(
+      void,
+      SetComplexity,
+      (std::span<const VideoCodecComplexity> complexity_by_spatial_layer,
+       ComplexityControlMode complexity_control_mode),
+      (override));
   MOCK_METHOD(void,
               OnPacketLossRateUpdate,
               (float packet_loss_rate),

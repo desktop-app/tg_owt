@@ -10,14 +10,14 @@
 
 #include "api/units/time_delta.h"
 
-#include "api/array_view.h"
+#include <string>
+
 #include "rtc_base/strings/string_builder.h"
 
 namespace webrtc {
 
 std::string ToString(TimeDelta value) {
-  char buf[64];
-  rtc::SimpleStringBuilder sb(buf);
+  StringBuilder sb;
   if (value.IsPlusInfinity()) {
     sb << "+inf ms";
   } else if (value.IsMinusInfinity()) {
@@ -30,7 +30,7 @@ std::string ToString(TimeDelta value) {
     else
       sb << value.seconds() << " s";
   }
-  return sb.str();
+  return sb.Release();
 }
 
 }  // namespace webrtc

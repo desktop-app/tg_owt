@@ -10,9 +10,15 @@
 
 #include "modules/audio_coding/neteq/timestamp_scaler.h"
 
+#include <cstdint>
+#include <utility>
+
+#include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/environment/environment.h"
 #include "modules/audio_coding/neteq/mock/mock_decoder_database.h"
 #include "modules/audio_coding/neteq/packet.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -23,11 +29,12 @@ using ::testing::ReturnNull;
 namespace webrtc {
 
 TEST(TimestampScaler, TestNoScaling) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
   // Use PCMu, because it doesn't use scaled timestamps.
-  const DecoderDatabase::DecoderInfo info(SdpAudioFormat("pcmu", 8000, 1),
-                                          absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info(env, SdpAudioFormat("pcmu", 8000, 1),
+                                          factory.get());
   static const uint8_t kRtpPayloadType = 0;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadType))
       .WillRepeatedly(Return(&info));
@@ -45,11 +52,12 @@ TEST(TimestampScaler, TestNoScaling) {
 }
 
 TEST(TimestampScaler, TestNoScalingLargeStep) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
   // Use PCMu, because it doesn't use scaled timestamps.
-  const DecoderDatabase::DecoderInfo info(SdpAudioFormat("pcmu", 8000, 1),
-                                          absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info(env, SdpAudioFormat("pcmu", 8000, 1),
+                                          factory.get());
   static const uint8_t kRtpPayloadType = 0;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadType))
       .WillRepeatedly(Return(&info));
@@ -72,11 +80,12 @@ TEST(TimestampScaler, TestNoScalingLargeStep) {
 }
 
 TEST(TimestampScaler, TestG722) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
   // Use G722, which has a factor 2 scaling.
-  const DecoderDatabase::DecoderInfo info(SdpAudioFormat("g722", 8000, 1),
-                                          absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info(env, SdpAudioFormat("g722", 8000, 1),
+                                          factory.get());
   static const uint8_t kRtpPayloadType = 17;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadType))
       .WillRepeatedly(Return(&info));
@@ -98,11 +107,12 @@ TEST(TimestampScaler, TestG722) {
 }
 
 TEST(TimestampScaler, TestG722LargeStep) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
   // Use G722, which has a factor 2 scaling.
-  const DecoderDatabase::DecoderInfo info(SdpAudioFormat("g722", 8000, 1),
-                                          absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info(env, SdpAudioFormat("g722", 8000, 1),
+                                          factory.get());
   static const uint8_t kRtpPayloadType = 17;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadType))
       .WillRepeatedly(Return(&info));
@@ -128,13 +138,14 @@ TEST(TimestampScaler, TestG722LargeStep) {
 }
 
 TEST(TimestampScaler, TestG722WithCng) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
   // Use G722, which has a factor 2 scaling.
-  const DecoderDatabase::DecoderInfo info_g722(SdpAudioFormat("g722", 8000, 1),
-                                               absl::nullopt, factory.get());
-  const DecoderDatabase::DecoderInfo info_cng(SdpAudioFormat("cn", 16000, 1),
-                                              absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info_g722(
+      env, SdpAudioFormat("g722", 8000, 1), factory.get());
+  const DecoderDatabase::DecoderInfo info_cng(
+      env, SdpAudioFormat("cn", 16000, 1), factory.get());
   static const uint8_t kRtpPayloadTypeG722 = 17;
   static const uint8_t kRtpPayloadTypeCng = 13;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadTypeG722))
@@ -172,11 +183,12 @@ TEST(TimestampScaler, TestG722WithCng) {
 // Since it is simply calling the other ToInternal method, we are not doing
 // as many tests here.
 TEST(TimestampScaler, TestG722Packet) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
   // Use G722, which has a factor 2 scaling.
-  const DecoderDatabase::DecoderInfo info(SdpAudioFormat("g722", 8000, 1),
-                                          absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info(env, SdpAudioFormat("g722", 8000, 1),
+                                          factory.get());
   static const uint8_t kRtpPayloadType = 17;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadType))
       .WillRepeatedly(Return(&info));
@@ -202,11 +214,12 @@ TEST(TimestampScaler, TestG722Packet) {
 // correctly. Since it is simply calling the ToInternal(Packet* packet) method,
 // we are not doing as many tests here.
 TEST(TimestampScaler, TestG722PacketList) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
   // Use G722, which has a factor 2 scaling.
-  const DecoderDatabase::DecoderInfo info(SdpAudioFormat("g722", 8000, 1),
-                                          absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info(env, SdpAudioFormat("g722", 8000, 1),
+                                          factory.get());
   static const uint8_t kRtpPayloadType = 17;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadType))
       .WillRepeatedly(Return(&info));
@@ -236,11 +249,12 @@ TEST(TimestampScaler, TestG722PacketList) {
 }
 
 TEST(TimestampScaler, TestG722Reset) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
   // Use G722, which has a factor 2 scaling.
-  const DecoderDatabase::DecoderInfo info(SdpAudioFormat("g722", 8000, 1),
-                                          absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info(env, SdpAudioFormat("g722", 8000, 1),
+                                          factory.get());
   static const uint8_t kRtpPayloadType = 17;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadType))
       .WillRepeatedly(Return(&info));
@@ -278,10 +292,11 @@ TEST(TimestampScaler, TestG722Reset) {
 // keep it, since it can be taken as a test case for the situation of a trivial
 // timestamp scaler.
 TEST(TimestampScaler, TestOpusLargeStep) {
+  const Environment env = CreateTestEnvironment();
   MockDecoderDatabase db;
   auto factory = CreateBuiltinAudioDecoderFactory();
-  const DecoderDatabase::DecoderInfo info(SdpAudioFormat("opus", 48000, 2),
-                                          absl::nullopt, factory.get());
+  const DecoderDatabase::DecoderInfo info(env, SdpAudioFormat("opus", 48000, 2),
+                                          factory.get());
   static const uint8_t kRtpPayloadType = 17;
   EXPECT_CALL(db, GetDecoderInfo(kRtpPayloadType))
       .WillRepeatedly(Return(&info));
@@ -315,7 +330,7 @@ TEST(TimestampScaler, Failures) {
   uint32_t timestamp = 4711;  // Some number.
   EXPECT_EQ(timestamp, scaler.ToInternal(timestamp, kRtpPayloadType));
 
-  Packet* packet = NULL;
+  Packet* packet = nullptr;
   scaler.ToInternal(packet);  // Should not crash. That's all we can test.
 
   EXPECT_CALL(db, Die());  // Called when database object is deleted.

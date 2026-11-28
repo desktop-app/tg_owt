@@ -11,15 +11,17 @@
 #ifndef MODULES_AUDIO_CODING_INCLUDE_AUDIO_CODING_MODULE_H_
 #define MODULES_AUDIO_CODING_INCLUDE_AUDIO_CODING_MODULE_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <string>
+#include <optional>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/audio_codecs/audio_encoder.h"
 #include "api/function_view.h"
 #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -34,22 +36,34 @@ class AudioPacketizationCallback {
  public:
   virtual ~AudioPacketizationCallback() {}
 
-  virtual int32_t SendData(AudioFrameType frame_type,
-                           uint8_t payload_type,
-                           uint32_t timestamp,
-                           const uint8_t* payload_data,
-                           size_t payload_len_bytes,
-                           int64_t absolute_capture_timestamp_ms) {
-    // TODO(bugs.webrtc.org/10739): Deprecate the old SendData and make this one
-    // pure virtual.
+  virtual int32_t SendData(
+      AudioFrameType frame_type,
+      uint8_t payload_type,
+      uint32_t timestamp,
+      const uint8_t* payload_data,
+      size_t payload_len_bytes,
+      int64_t absolute_capture_timestamp_ms,
+      std::optional<uint8_t> audio_level_dbov_override,
+      std::optional<std::vector<uint32_t>> csrcs_override) {
     return SendData(frame_type, payload_type, timestamp, payload_data,
-                    payload_len_bytes);
+                    payload_len_bytes, absolute_capture_timestamp_ms);
   }
   virtual int32_t SendData(AudioFrameType frame_type,
                            uint8_t payload_type,
                            uint32_t timestamp,
                            const uint8_t* payload_data,
-                           size_t payload_len_bytes) {
+                           size_t payload_len_bytes,
+                           int64_t /* absolute_capture_timestamp_ms */) {
+    // TODO(bugs.webrtc.org/10739): Deprecate the old SendData and make this one
+    // pure virtual.
+    return SendData(frame_type, payload_type, timestamp, payload_data,
+                    payload_len_bytes);
+  }
+  virtual int32_t SendData(AudioFrameType /* frame_type */,
+                           uint8_t /* payload_type */,
+                           uint32_t /* timestamp */,
+                           const uint8_t* /* payload_data */,
+                           size_t /* payload_len_bytes */) {
     RTC_DCHECK_NOTREACHED() << "This method must be overridden, or not used.";
     return -1;
   }
@@ -69,7 +83,7 @@ class AudioCodingModule {
   // access to the unique_ptr; it may call the encoder, steal the encoder and
   // replace it with another encoder or with nullptr, etc.
   virtual void ModifyEncoder(
-      rtc::FunctionView<void(std::unique_ptr<AudioEncoder>*)> modifier) = 0;
+      FunctionView<void(std::unique_ptr<AudioEncoder>*)> modifier) = 0;
 
   // Utility method for simply replacing the existing encoder with a new one.
   void SetEncoder(std::unique_ptr<AudioEncoder> new_encoder) {
@@ -77,6 +91,10 @@ class AudioCodingModule {
       *encoder = std::move(new_encoder);
     });
   }
+
+  // Reset encoder and audio coding module. This throws away any audio passed
+  // and starts fresh.
+  virtual void Reset() = 0;
 
   // int32_t RegisterTransportCallback()
   // Register a transport callback which will be called to deliver

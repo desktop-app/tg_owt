@@ -10,13 +10,17 @@
 #ifndef NET_DCSCTP_TX_OUTSTANDING_DATA_H_
 #define NET_DCSCTP_TX_OUTSTANDING_DATA_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <deque>
-#include <map>
+#include <functional>
+#include <optional>
 #include <set>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
+#include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/common/sequence_numbers.h"
@@ -24,6 +28,7 @@
 #include "net/dcsctp/packet/chunk/iforward_tsn_chunk.h"
 #include "net/dcsctp/packet/chunk/sack_chunk.h"
 #include "net/dcsctp/packet/data.h"
+#include "net/dcsctp/public/dcsctp_handover_state.h"
 #include "net/dcsctp/public/types.h"
 #include "rtc_base/containers/flat_set.h"
 
@@ -85,23 +90,32 @@ class OutstandingData {
         last_cumulative_tsn_ack_(last_cumulative_tsn_ack),
         discard_from_send_queue_(std::move(discard_from_send_queue)) {}
 
-  AckInfo HandleSack(
-      UnwrappedTSN cumulative_tsn_ack,
-      rtc::ArrayView<const SackChunk::GapAckBlock> gap_ack_blocks,
-      bool is_in_fast_recovery);
+  AckInfo HandleSack(webrtc::Timestamp now,
+                     UnwrappedTSN cumulative_tsn_ack,
+                     std::span<const SackChunk::GapAckBlock> gap_ack_blocks,
+                     bool is_in_fast_recovery);
 
   // Returns as many of the chunks that are eligible for fast retransmissions
-  // and that would fit in a single packet of `max_size`. The eligible chunks
-  // that didn't fit will be marked for (normal) retransmission and will not be
-  // returned if this method is called again.
+  // and that would fit in a single packet of `max_size`. Any chunks encountered
+  // that have expired at `now` are abandoned instead of being returned. The
+  // eligible chunks that didn't fit will be marked for (normal) retransmission
+  // and will not be returned if this method is called again.
   std::vector<std::pair<TSN, Data>> GetChunksToBeFastRetransmitted(
+      webrtc::Timestamp now,
       size_t max_size);
 
-  // Given `max_size` of space left in a packet, which chunks can be added to
-  // it?
-  std::vector<std::pair<TSN, Data>> GetChunksToBeRetransmitted(size_t max_size);
+  // Given `max_size` of space left in a packet, returns the chunks that can be
+  // added to it. Any chunks encountered that have expired at `now` are
+  // abandoned (along with all other fragments of the same message).
+  std::vector<std::pair<TSN, Data>> GetChunksToBeRetransmitted(
+      webrtc::Timestamp now,
+      size_t max_size);
 
-  size_t unacked_bytes() const { return unacked_bytes_; }
+  // How many inflight bytes there are, as sent on the wire as packets.
+  size_t unacked_packet_bytes() const { return unacked_packet_bytes_; }
+
+  // How many inflight bytes there are, counting only the payload.
+  size_t unacked_payload_bytes() const { return unacked_payload_bytes_; }
 
   // Returns the number of DATA chunks that are in-flight (not acked or nacked).
   size_t unacked_items() const { return unacked_items_; }
@@ -132,8 +146,8 @@ class OutstandingData {
 
   // Schedules `data` to be sent, with the provided partial reliability
   // parameters. Returns the TSN if the item was actually added and scheduled to
-  // be sent, and absl::nullopt if it shouldn't be sent.
-  absl::optional<UnwrappedTSN> Insert(
+  // be sent, and std::nullopt if it shouldn't be sent.
+  std::optional<UnwrappedTSN> Insert(
       OutgoingMessageId message_id,
       const Data& data,
       webrtc::Timestamp time_sent,
@@ -142,7 +156,7 @@ class OutstandingData {
       LifecycleId lifecycle_id = LifecycleId::NotSet());
 
   // Nacks all outstanding data.
-  void NackAll();
+  void NackAll(webrtc::Timestamp now);
 
   // Creates a FORWARD-TSN chunk.
   ForwardTsnChunk CreateForwardTsn() const;
@@ -170,6 +184,12 @@ class OutstandingData {
   // as a breakpoint that a FORWARD-TSN shouldn't cross.
   void BeginResetStreams();
 
+  void AddHandoverState(webrtc::Timestamp now,
+                        DcSctpSocketHandoverState& state) const;
+  void RestoreFromState(webrtc::Timestamp now,
+                        UnwrappedTSN last_cumulative_tsn_ack,
+                        const DcSctpSocketHandoverState& state);
+
  private:
   // A fragmented message's DATA chunk while in the retransmission queue, and
   // its associated metadata.
@@ -181,17 +201,21 @@ class OutstandingData {
       kAbandon,
     };
 
-    Item(OutgoingMessageId message_id,
+    Item(UnwrappedTSN tsn,
+         OutgoingMessageId message_id,
          Data data,
          webrtc::Timestamp time_sent,
          MaxRetransmits max_retransmissions,
          webrtc::Timestamp expires_at,
-         LifecycleId lifecycle_id)
+         LifecycleId lifecycle_id,
+         uint16_t num_retransmissions = 0)
         : message_id_(message_id),
           time_sent_(time_sent),
           max_retransmissions_(max_retransmissions),
+          num_retransmissions_(num_retransmissions),
           expires_at_(expires_at),
           lifecycle_id_(lifecycle_id),
+          retransmission_boundary_tsn_(tsn.next_value()),
           data_(std::move(data)) {}
 
     Item(const Item&) = delete;
@@ -200,6 +224,10 @@ class OutstandingData {
     OutgoingMessageId message_id() const { return message_id_; }
 
     webrtc::Timestamp time_sent() const { return time_sent_; }
+    webrtc::Timestamp expires_at() const { return expires_at_; }
+
+    MaxRetransmits max_retransmissions() const { return max_retransmissions_; }
+    uint16_t num_retransmissions() const { return num_retransmissions_; }
 
     const Data& data() const { return data_; }
 
@@ -208,18 +236,48 @@ class OutstandingData {
 
     // Nacks an item. If it has been nacked enough times, or if `retransmit_now`
     // is set, it might be marked for retransmission. If the item has reached
-    // its max retransmission value, it will instead be abandoned. The action
-    // performed is indicated as return value.
-    NackAction Nack(bool retransmit_now);
+    // its max retransmission value or has expired, it will instead be
+    // abandoned. The action performed is indicated as return value.
+    NackAction Nack(webrtc::Timestamp now, bool retransmit_now);
 
     // Prepares the item to be retransmitted. Sets it as outstanding and
-    // clears all nack counters.
-    void MarkAsRetransmitted();
+    // clears all nack counters. `next_tsn` is the TSN that will be assigned to
+    // the next chunk sent after this retransmission.
+    void MarkAsRetransmitted(UnwrappedTSN next_tsn);
 
-    // Marks this item as abandoned.
+    void MarkAsToBeRetransmitted() {
+      lifecycle_ = Lifecycle::kToBeRetransmitted;
+      ack_state_ = AckState::kNacked;
+    }
+
+    void MarkAsNacked() { ack_state_ = AckState::kNacked; }
+
+    // Indicates if a SACK, whose highest newly acknowledged TSN is
+    // `highest_tsn_newly_acked`, is a valid miss indication for this chunk.
+    //
+    // A SACK can only be used as evidence that a retransmitted chunk was lost
+    // if the SACK was generated by the peer after the retransmission could
+    // have been received, which is when it newly acknowledges a chunk that was
+    // sent after the retransmission.
+    //
+    // This is only applied to retransmitted chunks, as the HTNA algorithm
+    // already guarantees it for the original transmission - except when in
+    // fast recovery and the cumulative TSN ack advances, where all missing
+    // chunks are to be counted (RFC 4960 section 7.2.4).
+    bool IsMissIndication(UnwrappedTSN highest_tsn_newly_acked) const {
+      return !has_been_retransmitted() ||
+             highest_tsn_newly_acked >= retransmission_boundary_tsn_;
+    }
+
     void Abandon();
 
-    bool is_outstanding() const { return ack_state_ == AckState::kUnacked; }
+    bool is_outstanding() const {
+      return ack_state_ != AckState::kAcked && lifecycle_ == Lifecycle::kActive;
+    }
+    bool is_unacked() const {
+      return ack_state_ == AckState::kUnacked &&
+             lifecycle_ == Lifecycle::kActive;
+    }
     bool is_acked() const { return ack_state_ == AckState::kAcked; }
     bool is_nacked() const { return ack_state_ == AckState::kNacked; }
     bool is_abandoned() const { return lifecycle_ == Lifecycle::kAbandoned; }
@@ -287,6 +345,12 @@ class OutstandingData {
     // An optional lifecycle id, which may only be set for the last fragment.
     const LifecycleId lifecycle_id_;
 
+    // The value of `next_tsn()` at the time of the most recent transmission of
+    // this chunk, i.e. chunks with a TSN at or above this value were sent after
+    // it. Initially the chunk's own TSN + 1; updated on every retransmission.
+    // See `IsMissIndication`.
+    UnwrappedTSN retransmission_boundary_tsn_;
+
     // The actual data to send/retransmit.
     const Data data_;
   };
@@ -305,7 +369,7 @@ class OutstandingData {
   // Will mark the chunks covered by the `gap_ack_blocks` from an incoming SACK
   // as "acked" and update `ack_info` by adding new TSNs to `added_tsns`.
   void AckGapBlocks(UnwrappedTSN cumulative_tsn_ack,
-                    rtc::ArrayView<const SackChunk::GapAckBlock> gap_ack_blocks,
+                    std::span<const SackChunk::GapAckBlock> gap_ack_blocks,
                     AckInfo& ack_info);
 
   // Mark chunks reported as "missing", as "nacked" or "to be retransmitted"
@@ -313,9 +377,11 @@ class OutstandingData {
   // `ack_info.highest_tsn_acked` (highest TSN newly acknowledged) are
   // nacked/retransmitted. The method will set `ack_info.has_packet_loss`.
   void NackBetweenAckBlocks(
+      webrtc::Timestamp now,
       UnwrappedTSN cumulative_tsn_ack,
-      rtc::ArrayView<const SackChunk::GapAckBlock> gap_ack_blocks,
+      std::span<const SackChunk::GapAckBlock> gap_ack_blocks,
       bool is_in_fast_recovery,
+      bool cumulative_tsn_acked_advanced,
       OutstandingData::AckInfo& ack_info);
 
   // Process the acknowledgement of the chunk referenced by `iter` and updates
@@ -328,20 +394,28 @@ class OutstandingData {
   // performed, meaning that packet loss was detected and acted upon. If
   // `do_fast_retransmit` is set and if the item has been nacked sufficiently
   // many times so that it should be retransmitted, this will schedule it to be
-  // "fast retransmitted". This is only done just before going into fast
-  // recovery.
+  // "fast retransmitted", i.e. retransmitted without regard to cwnd. This is
+  // done for losses detected by SACKs, but not for those detected by T3-rtx
+  // expiry.
   //
   // Note that since nacking an item may result in it becoming abandoned, which
   // in turn could alter `outstanding_data_`, any iterators are invalidated
   // after having called this method.
-  bool NackItem(UnwrappedTSN tsn, bool retransmit_now, bool do_fast_retransmit);
+  bool NackItem(webrtc::Timestamp now,
+                UnwrappedTSN tsn,
+                bool retransmit_now,
+                bool do_fast_retransmit);
 
   // Given that a message fragment, `item` has been abandoned, abandon all other
   // fragments that share the same message - both never-before-sent fragments
   // that are still in the SendQueue and outstanding chunks.
   void AbandonAllFor(const OutstandingData::Item& item);
 
+  // Extracts chunks from `chunks` that can fit within `max_size` bytes. Any
+  // chunk encountered that has expired at `now` is abandoned along with all
+  // other fragments of its message.
   std::vector<std::pair<TSN, Data>> ExtractChunksThatCanFit(
+      webrtc::Timestamp now,
       std::set<UnwrappedTSN>& chunks,
       size_t max_size);
 
@@ -358,8 +432,10 @@ class OutstandingData {
   // `TSN=last_cumulative_tsn_ack_ + 1` and the following items are in strict
   // increasing TSN order. The last item has `TSN=highest_outstanding_tsn()`.
   std::deque<Item> outstanding_data_;
-  // The number of bytes that are in-flight (sent but not yet acked or nacked).
-  size_t unacked_bytes_ = 0;
+  // The number of bytes that are in-flight, counting only the payload.
+  size_t unacked_payload_bytes_ = 0;
+  // The number of bytes that are in-flight, as sent on the wire (as packets).
+  size_t unacked_packet_bytes_ = 0;
   // The number of DATA chunks that are in-flight (sent but not yet acked or
   // nacked).
   size_t unacked_items_ = 0;

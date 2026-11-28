@@ -10,12 +10,22 @@
 
 #include "sdk/android/src/jni/video_encoder_factory_wrapper.h"
 
+#include <jni.h>
+
+#include <memory>
+#include <optional>
+#include <vector>
+
+#include "api/environment/environment.h"
+#include "api/units/data_rate.h"
 #include "api/video/render_resolution.h"
+#include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_encoder.h"
-#include "rtc_base/logging.h"
+#include "api/video_codecs/video_encoder_factory.h"
 #include "sdk/android/generated_video_jni/VideoEncoderFactory_jni.h"
-#include "sdk/android/native_api/jni/class_loader.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/jvm.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/video_codec_info.h"
 #include "sdk/android/src/jni/video_encoder_wrapper.h"
 
@@ -37,36 +47,36 @@ class VideoEncoderSelectorWrapper
                                                j_codec_info);
   }
 
-  absl::optional<SdpVideoFormat> OnAvailableBitrate(
+  std::optional<SdpVideoFormat> OnAvailableBitrate(
       const DataRate& rate) override {
     JNIEnv* jni = AttachCurrentThreadIfNeeded();
     ScopedJavaLocalRef<jobject> codec_info =
         Java_VideoEncoderSelector_onAvailableBitrate(jni, encoder_selector_,
                                                      rate.kbps<int>());
     if (codec_info.is_null()) {
-      return absl::nullopt;
+      return std::nullopt;
     }
     return VideoCodecInfoToSdpVideoFormat(jni, codec_info);
   }
 
-  absl::optional<SdpVideoFormat> OnResolutionChange(
+  std::optional<SdpVideoFormat> OnResolutionChange(
       const RenderResolution& resolution) override {
     JNIEnv* jni = AttachCurrentThreadIfNeeded();
     ScopedJavaLocalRef<jobject> codec_info =
         Java_VideoEncoderSelector_onResolutionChange(
             jni, encoder_selector_, resolution.Width(), resolution.Height());
     if (codec_info.is_null()) {
-      return absl::nullopt;
+      return std::nullopt;
     }
     return VideoCodecInfoToSdpVideoFormat(jni, codec_info);
   }
 
-  absl::optional<SdpVideoFormat> OnEncoderBroken() override {
+  std::optional<SdpVideoFormat> OnEncoderBroken() override {
     JNIEnv* jni = AttachCurrentThreadIfNeeded();
     ScopedJavaLocalRef<jobject> codec_info =
         Java_VideoEncoderSelector_onEncoderBroken(jni, encoder_selector_);
     if (codec_info.is_null()) {
-      return absl::nullopt;
+      return std::nullopt;
     }
     return VideoCodecInfoToSdpVideoFormat(jni, codec_info);
   }
@@ -92,7 +102,8 @@ VideoEncoderFactoryWrapper::VideoEncoderFactoryWrapper(
 }
 VideoEncoderFactoryWrapper::~VideoEncoderFactoryWrapper() = default;
 
-std::unique_ptr<VideoEncoder> VideoEncoderFactoryWrapper::CreateVideoEncoder(
+std::unique_ptr<VideoEncoder> VideoEncoderFactoryWrapper::Create(
+    const Environment& env,
     const SdpVideoFormat& format) {
   JNIEnv* jni = AttachCurrentThreadIfNeeded();
   ScopedJavaLocalRef<jobject> j_codec_info =
@@ -101,7 +112,7 @@ std::unique_ptr<VideoEncoder> VideoEncoderFactoryWrapper::CreateVideoEncoder(
       jni, encoder_factory_, j_codec_info);
   if (!encoder.obj())
     return nullptr;
-  return JavaToNativeVideoEncoder(jni, encoder);
+  return JavaToNativeVideoEncoder(jni, encoder, NativeToJavaPointer(&env));
 }
 
 std::vector<SdpVideoFormat> VideoEncoderFactoryWrapper::GetSupportedFormats()
@@ -128,3 +139,5 @@ VideoEncoderFactoryWrapper::GetEncoderSelector() const {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(VideoEncoderFactory)

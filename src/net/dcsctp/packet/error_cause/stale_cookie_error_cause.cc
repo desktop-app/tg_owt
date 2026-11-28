@@ -9,17 +9,14 @@
  */
 #include "net/dcsctp/packet/error_cause/stale_cookie_error_cause.h"
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
-#include <type_traits>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "net/dcsctp/packet/bounded_byte_reader.h"
 #include "net/dcsctp/packet/bounded_byte_writer.h"
-#include "net/dcsctp/packet/tlv_trait.h"
 #include "rtc_base/strings/string_builder.h"
 
 namespace dcsctp {
@@ -31,13 +28,12 @@ namespace dcsctp {
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //  |                 Measure of Staleness (usec.)                  |
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int StaleCookieErrorCause::kType;
 
-absl::optional<StaleCookieErrorCause> StaleCookieErrorCause::Parse(
-    rtc::ArrayView<const uint8_t> data) {
-  absl::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
+std::optional<StaleCookieErrorCause> StaleCookieErrorCause::Parse(
+    std::span<const uint8_t> data) {
+  std::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
   if (!reader.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   uint32_t staleness_us = reader->Load32<4>();
   return StaleCookieErrorCause(staleness_us);
@@ -49,7 +45,7 @@ void StaleCookieErrorCause::SerializeTo(std::vector<uint8_t>& out) const {
 }
 
 std::string StaleCookieErrorCause::ToString() const {
-  rtc::StringBuilder sb;
+  webrtc::StringBuilder sb;
   sb << "Stale Cookie Error, staleness_us=" << staleness_us_;
   return sb.Release();
 }

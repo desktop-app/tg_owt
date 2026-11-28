@@ -13,26 +13,35 @@
 #include <DispatcherQueue.h>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directX.direct3d11.interop.h>
-#include <windows.graphics.h>
-#include <wrl/client.h>
 #include <wrl/event.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <utility>
-#include <vector>
 
-#include "modules/desktop_capture/win/wgc_desktop_frame.h"
+#include "api/make_ref_counted.h"
+#include "api/sequence_checker.h"
+#include "api/units/time_delta.h"
+#include "modules/desktop_capture/desktop_capture_options.h"
+#include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/shared_desktop_frame.h"
+#include "modules/desktop_capture/win/dxgi_desktop_frame.h"
+#include "modules/desktop_capture/win/screen_capture_utils.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/thread.h"
 #include "rtc_base/time_utils.h"
 #include "rtc_base/win/create_direct3d_device.h"
 #include "rtc_base/win/get_activation_factory.h"
+#include "rtc_base/win/windows_version.h"
 #include "system_wrappers/include/metrics.h"
-#include "system_wrappers/include/sleep.h"
 
 using Microsoft::WRL::ComPtr;
 namespace WGC = ABI::Windows::Graphics::Capture;
+using IClosable = ABI::Windows::Foundation::IClosable;
 
 namespace webrtc {
 namespace {
@@ -41,6 +50,10 @@ namespace {
 // the DesktopFrame interface.
 constexpr auto kPixelFormat = ABI::Windows::Graphics::DirectX::
     DirectXPixelFormat::DirectXPixelFormat_B8G8R8A8UIntNormalized;
+
+// We must wait a little longer for the first frame to avoid failing the
+// capture when there is a longer startup time.
+constexpr int kFirstFrameTimeoutMs = 5000;
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
@@ -52,7 +65,7 @@ enum class StartCaptureResult {
   kD3dDelayLoadFailed = 4,
   kD3dDeviceCreationFailed = 5,
   kFramePoolActivationFailed = 6,
-  // kFramePoolCastFailed = 7, (deprecated)
+  kFramePoolCastFailed = 7,
   // kGetItemSizeFailed = 8, (deprecated)
   kCreateFramePoolFailed = 9,
   kCreateCaptureSessionFailed = 10,
@@ -76,7 +89,17 @@ enum class GetFrameResult {
   kResizeMappedTextureFailed = 10,
   kRecreateFramePoolFailed = 11,
   kFramePoolEmpty = 12,
-  kMaxValue = kFramePoolEmpty
+  kWaitForFirstFrameFailed = 13,
+  kMaxValue = kWaitForFirstFrameFailed
+};
+
+enum class WaitForFirstFrameResult {
+  kSuccess = 0,
+  kTryGetNextFrameFailed = 1,
+  kAddFrameArrivedCallbackFailed = 2,
+  kWaitingTimedOut = 3,
+  kRemoveFrameArrivedCallbackFailed = 4,
+  kMaxValue = kRemoveFrameArrivedCallbackFailed
 };
 
 void RecordStartCaptureResult(StartCaptureResult error) {
@@ -91,23 +114,91 @@ void RecordGetFrameResult(GetFrameResult error) {
       static_cast<int>(error), static_cast<int>(GetFrameResult::kMaxValue));
 }
 
+void RecordGetFirstFrameTime(int64_t elapsed_time_ms) {
+  RTC_HISTOGRAM_COUNTS(
+      "WebRTC.DesktopCapture.Win.WgcCaptureSessionTimeToFirstFrame",
+      elapsed_time_ms, /*min=*/1, /*max=*/5000, /*bucket_count=*/100);
+}
+
+void RecordWaitForFirstFrameResult(WaitForFirstFrameResult error) {
+  RTC_HISTOGRAM_ENUMERATION(
+      "WebRTC.DesktopCapture.Win.WgcCaptureSessionWaitForFirstFrameResult",
+      static_cast<int>(error),
+      static_cast<int>(WaitForFirstFrameResult::kMaxValue));
+}
+
 bool SizeHasChanged(ABI::Windows::Graphics::SizeInt32 size_new,
                     ABI::Windows::Graphics::SizeInt32 size_old) {
   return (size_new.Height != size_old.Height ||
           size_new.Width != size_old.Width);
 }
 
+bool DoesWgcSkipStaticFrames() {
+  return (rtc_win::GetVersion() >= rtc_win::Version::VERSION_WIN11_24H2);
+}
+
 }  // namespace
 
-WgcCaptureSession::WgcCaptureSession(ComPtr<ID3D11Device> d3d11_device,
+WgcCaptureSession::RefCountedEvent::RefCountedEvent(bool manual_reset,
+                                                    bool initially_signaled)
+    : Event(manual_reset, initially_signaled) {}
+
+WgcCaptureSession::RefCountedEvent::~RefCountedEvent() = default;
+
+WgcCaptureSession::AgileFrameArrivedHandler::AgileFrameArrivedHandler(
+    scoped_refptr<RefCountedEvent> event)
+    : frame_arrived_event_(event) {}
+
+IFACEMETHODIMP WgcCaptureSession::AgileFrameArrivedHandler::Invoke(
+    ABI::Windows::Graphics::Capture::IDirect3D11CaptureFramePool* sender,
+    IInspectable* args) {
+  frame_arrived_event_->Set();
+  return S_OK;
+}
+
+WgcCaptureSession::WgcCaptureSession(intptr_t source_id,
+                                     ComPtr<ID3D11Device> d3d11_device,
                                      ComPtr<WGC::IGraphicsCaptureItem> item,
                                      ABI::Windows::Graphics::SizeInt32 size)
     : d3d11_device_(std::move(d3d11_device)),
       item_(std::move(item)),
-      size_(size) {}
+      size_(size),
+      source_id_(source_id) {
+  is_window_source_ = ::IsWindow(reinterpret_cast<HWND>(source_id_));
+}
 
 WgcCaptureSession::~WgcCaptureSession() {
-  RemoveEventHandler();
+  RemoveEventHandlers();
+  if (frame_pool_) {
+    ComPtr<IClosable> closable;
+    HRESULT hr = frame_pool_.As(&closable);
+    if (FAILED(hr)) {
+      RTC_LOG(LS_WARNING) << "Failed to query frame pool as IClosable: " << hr;
+      return;
+    }
+    hr = closable->Close();
+    if (FAILED(hr)) {
+      RTC_LOG(LS_WARNING) << "Failed to close frame pool: " << hr;
+    }
+  }
+}
+
+bool WgcCaptureSession::MayContainCursor() const {
+  RTC_DCHECK_RUN_ON(&sequence_checker_);
+  if (!session_) {
+    return false;
+  }
+  // IsCursorCaptureEnabled was introduced in IGraphicsCaptureSession2.
+  // Default to true (cursor captured) if the interface is not available.
+  ComPtr<ABI::Windows::Graphics::Capture::IGraphicsCaptureSession2> session2;
+  HRESULT hr = session_->QueryInterface(
+      ABI::Windows::Graphics::Capture::IID_IGraphicsCaptureSession2, &session2);
+  if (FAILED(hr)) {
+    return true;
+  }
+  boolean cursor_enabled = true;
+  session2->get_IsCursorCaptureEnabled(&cursor_enabled);
+  return cursor_enabled;
 }
 
 HRESULT WgcCaptureSession::StartCapture(const DesktopCaptureOptions& options) {
@@ -166,8 +257,29 @@ HRESULT WgcCaptureSession::StartCapture(const DesktopCaptureOptions& options) {
     return hr;
   }
 
-  hr = frame_pool_statics->Create(direct3d_device_.Get(), kPixelFormat,
-                                  kNumBuffers, size_, &frame_pool_);
+  // Cast to FramePoolStatics2 so we can use CreateFreeThreaded and avoid the
+  // need to have a DispatcherQueue. Sometimes, the time to obtain the first
+  // frame ever in a stream can take longer. To avoid timeouts,
+  // CreateFreeThreaded is needed so that the frame processing done by WGC can
+  // happen on a different thread while the main thread is waiting for it.
+  ComPtr<WGC::IDirect3D11CaptureFramePoolStatics2> frame_pool_statics2;
+  hr = frame_pool_statics->QueryInterface(IID_PPV_ARGS(&frame_pool_statics2));
+  if (FAILED(hr)) {
+    RecordStartCaptureResult(StartCaptureResult::kFramePoolCastFailed);
+    return hr;
+  }
+
+  allow_zero_hertz_ = options.allow_wgc_zero_hertz();
+  // Texture mode requires Windows 11 24H2+ where WGC natively skips static
+  // frames, since we cannot perform CPU-side frame comparison on GPU textures.
+  allow_using_texture_ =
+      options.allow_wgc_using_texture() && DoesWgcSkipStaticFrames();
+  RTC_LOG(LS_INFO) << "WGC capture session is outputing "
+                   << (allow_using_texture_ ? "GPU texture" : "CPU memory")
+                   << ".";
+
+  hr = frame_pool_statics2->CreateFreeThreaded(
+      direct3d_device_.Get(), kPixelFormat, num_buffers(), size_, &frame_pool_);
   if (FAILED(hr)) {
     RecordStartCaptureResult(StartCaptureResult::kCreateFramePoolFailed);
     return hr;
@@ -179,7 +291,11 @@ HRESULT WgcCaptureSession::StartCapture(const DesktopCaptureOptions& options) {
     return hr;
   }
 
-  if (!options.prefer_cursor_embedded()) {
+  // We cannot do cursor composition on texture for now, so we need to enable
+  // cursor embedding when texture is allowed.
+  const bool embed_cursor =
+      options.prefer_cursor_embedded() || allow_using_texture_;
+  if (!embed_cursor) {
     ComPtr<ABI::Windows::Graphics::Capture::IGraphicsCaptureSession2> session2;
     if (SUCCEEDED(session_->QueryInterface(
             ABI::Windows::Graphics::Capture::IID_IGraphicsCaptureSession2,
@@ -197,10 +313,20 @@ HRESULT WgcCaptureSession::StartCapture(const DesktopCaptureOptions& options) {
   if (SUCCEEDED(session_->QueryInterface(
           ABI::Windows::Graphics::Capture::IID_IGraphicsCaptureSession3,
           &session3))) {
-    session3->put_IsBorderRequired(false);
+    session3->put_IsBorderRequired(options.wgc_require_border());
   }
 
-  allow_zero_hertz_ = options.allow_wgc_zero_hertz();
+  // Windows 11 24H2 (10.0.26100.0) added
+  // `IGraphicsCaptureSession6::put_IncludeSecondaryWindows()`. See
+  // `wgc_include_secondary_windows()` in
+  // /modules/desktop_capture/desktop_capture_options.h for more details.
+  ComPtr<ABI::Windows::Graphics::Capture::IGraphicsCaptureSession6> session6;
+  if (SUCCEEDED(session_->QueryInterface(
+          ABI::Windows::Graphics::Capture::IID_IGraphicsCaptureSession6,
+          &session6))) {
+    session6->put_IncludeSecondaryWindows(
+        options.wgc_include_secondary_windows());
+  }
 
   hr = session_->StartCapture();
   if (FAILED(hr)) {
@@ -215,7 +341,58 @@ HRESULT WgcCaptureSession::StartCapture(const DesktopCaptureOptions& options) {
   return hr;
 }
 
+bool WgcCaptureSession::WaitForFirstFrame() {
+  RTC_CHECK(!has_first_frame_arrived_);
+
+  ComPtr<WGC::IDirect3D11CaptureFrame> capture_frame = nullptr;
+  // Flush the `frame_pool_` buffers so that we can receive the most recent
+  // frames.
+  for (int i = 0; i < num_buffers(); ++i) {
+    HRESULT hr = frame_pool_->TryGetNextFrame(&capture_frame);
+    if (FAILED(hr)) {
+      RTC_LOG(LS_ERROR) << "TryGetNextFrame failed: " << hr;
+      RecordWaitForFirstFrameResult(
+          WaitForFirstFrameResult::kTryGetNextFrameFailed);
+      return false;
+    }
+  }
+
+  if (FAILED(AddFrameArrivedEventHandler())) {
+    RecordWaitForFirstFrameResult(
+        WaitForFirstFrameResult::kAddFrameArrivedCallbackFailed);
+    return false;
+  }
+
+  RTC_CHECK(has_first_frame_arrived_event_);
+  int64_t first_frame_event_wait_start = TimeMillis();
+  // Only start the frame polling once the first frame becomes available.
+  if (!has_first_frame_arrived_event_->Wait(
+          TimeDelta::Millis(kFirstFrameTimeoutMs))) {
+    RecordGetFirstFrameTime(kFirstFrameTimeoutMs);
+    RecordWaitForFirstFrameResult(WaitForFirstFrameResult::kWaitingTimedOut);
+    RTC_LOG(LS_ERROR) << "Timed out after waiting " << kFirstFrameTimeoutMs
+                      << " ms for the first frame.";
+    return false;
+  }
+
+  RecordGetFirstFrameTime(TimeMillis() - first_frame_event_wait_start);
+  RecordWaitForFirstFrameResult(WaitForFirstFrameResult::kSuccess);
+  has_first_frame_arrived_ = true;
+  RemoveFrameArrivedEventHandler();
+  return true;
+}
+
 void WgcCaptureSession::EnsureFrame() {
+  // We need to wait for the first frame because it might take some extra time
+  // for the `frame_pool_` to be populated and capture may fail because of too
+  // many `kFrameDropped` errors.
+  if (!has_first_frame_arrived_) {
+    if (!WaitForFirstFrame()) {
+      RecordGetFrameResult(GetFrameResult::kWaitForFirstFrameFailed);
+      return;
+    }
+  }
+
   // Try to process the captured frame and copy it to the `queue_`.
   HRESULT hr = ProcessFrame();
   if (SUCCEEDED(hr)) {
@@ -225,7 +402,7 @@ void WgcCaptureSession::EnsureFrame() {
 
   // We failed to process the frame, but we do have a frame so just return that.
   if (queue_.current_frame()) {
-    RTC_LOG(LS_ERROR) << "ProcessFrame failed, using existing frame: " << hr;
+    RTC_LOG(LS_VERBOSE) << "ProcessFrame failed, using existing frame: " << hr;
     return;
   }
 
@@ -247,7 +424,7 @@ void WgcCaptureSession::EnsureFrame() {
   int sleep_count = 0;
   while (!queue_.current_frame() && sleep_count < max_sleep_count) {
     sleep_count++;
-    webrtc::SleepMs(sleep_time_ms);
+    Thread::SleepMs(sleep_time_ms);
     hr = ProcessFrame();
     if (FAILED(hr)) {
       RTC_DLOG(LS_WARNING) << "ProcessFrame failed during startup: " << hr;
@@ -261,12 +438,26 @@ bool WgcCaptureSession::GetFrame(std::unique_ptr<DesktopFrame>* output_frame,
                                  bool source_should_be_capturable) {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
 
+  if (item_closed_) {
+    RTC_LOG(LS_ERROR) << "The target source has been closed.";
+    RecordGetFrameResult(GetFrameResult::kItemClosed);
+    return false;
+  }
+
   // Try to process the captured frame and wait some if needed. Avoid trying
   // if we know that the source will not be capturable. This can happen e.g.
   // when captured window is minimized and if EnsureFrame() was called in this
   // state a large amount of kFrameDropped errors would be logged.
-  if (source_should_be_capturable)
+  if (source_should_be_capturable) {
     EnsureFrame();
+  } else {
+    // If the source is not capturable, we must reset `has_first_frame_arrived_`
+    // so that the next time the source becomes capturable we can wait for the
+    // first frame again.
+    if (has_first_frame_arrived_) {
+      has_first_frame_arrived_ = false;
+    }
+  }
 
   // Return a NULL frame and false as `result` if we still don't have a valid
   // frame. This will lead to a DesktopCapturer::Result::ERROR_PERMANENT being
@@ -296,6 +487,9 @@ HRESULT WgcCaptureSession::CreateMappedTexture(
     UINT width,
     UINT height) {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
+  if (allow_using_texture_) {
+    return S_OK;
+  }
 
   D3D11_TEXTURE2D_DESC src_desc;
   src_texture->GetDesc(&src_desc);
@@ -315,12 +509,6 @@ HRESULT WgcCaptureSession::CreateMappedTexture(
 
 HRESULT WgcCaptureSession::ProcessFrame() {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
-
-  if (item_closed_) {
-    RTC_LOG(LS_ERROR) << "The target source has been closed.";
-    RecordGetFrameResult(GetFrameResult::kItemClosed);
-    return E_ABORT;
-  }
 
   RTC_DCHECK(is_capture_started_);
 
@@ -376,14 +564,6 @@ HRESULT WgcCaptureSession::ProcessFrame() {
     return hr;
   }
 
-  if (!mapped_texture_) {
-    hr = CreateMappedTexture(texture_2D);
-    if (FAILED(hr)) {
-      RecordGetFrameResult(GetFrameResult::kCreateMappedTextureFailed);
-      return hr;
-    }
-  }
-
   // We need to copy `texture_2D` into `mapped_texture_` as the latter has the
   // D3D11_CPU_ACCESS_READ flag set, which lets us access the image data.
   // Otherwise it would only be readable by the GPU.
@@ -400,19 +580,36 @@ HRESULT WgcCaptureSession::ProcessFrame() {
   // If the size changed, we must resize `mapped_texture_` and `frame_pool_` to
   // fit the new size. This must be done before `CopySubresourceRegion` so that
   // the textures are the same size.
-  if (SizeHasChanged(new_size, size_)) {
+  const bool needs_resize = SizeHasChanged(new_size, size_);
+
+  if (!mapped_texture_ || needs_resize) {
     hr = CreateMappedTexture(texture_2D, new_size.Width, new_size.Height);
     if (FAILED(hr)) {
-      RecordGetFrameResult(GetFrameResult::kResizeMappedTextureFailed);
+      RecordGetFrameResult(GetFrameResult::kCreateMappedTextureFailed);
       return hr;
     }
+  }
 
+  if (needs_resize) {
     hr = frame_pool_->Recreate(direct3d_device_.Get(), kPixelFormat,
-                               kNumBuffers, new_size);
+                               num_buffers(), new_size);
     if (FAILED(hr)) {
       RecordGetFrameResult(GetFrameResult::kRecreateFramePoolFailed);
+      // On failure, `frame_pool_` remains at `size_`. Reset `mapped_texture_`
+      // because `mapped_texture_` and `frame_pool_` are now at inconsistent
+      // sizes. Clearing it forces a consistent recreation on the next frame.
+      // Note that it's not sufficient to simply leave `mapped_texture_` at it's
+      // current size, because if the window were to be resized back to `size_`,
+      // then we would erroneously think we don't need to re-create the texture.
+      mapped_texture_.Reset();
       return hr;
     }
+  }
+
+  if (allow_using_texture_) {
+    ComPtr<IUnknown> prevent_release;
+    capture_frame.As(&prevent_release);
+    return ProcessTexture(texture_2D, std::move(prevent_release));
   }
 
   // If the size has changed since the last capture, we must be sure to use
@@ -458,12 +655,48 @@ HRESULT WgcCaptureSession::ProcessFrame() {
   DesktopFrame* current_frame = queue_.current_frame();
   DesktopFrame* previous_frame = queue_.previous_frame();
 
+  if (is_window_source_) {
+    // If the captured window moves to another screen, the HMONITOR associated
+    // with the captured window will change. Therefore, we need to get the value
+    // of HMONITOR per frame.
+    monitor_ = ::MonitorFromWindow(reinterpret_cast<HWND>(source_id_),
+                                   /*dwFlags=*/MONITOR_DEFAULTTONEAREST);
+  } else {
+    if (!monitor_.has_value()) {
+      HMONITOR monitor;
+      if (!GetHmonitorFromDeviceIndex(source_id_, &monitor)) {
+        RTC_LOG(LS_ERROR) << "Failed to get HMONITOR from device index.";
+        d3d_context->Unmap(mapped_texture_.Get(), 0);
+        return E_FAIL;
+      }
+      monitor_ = monitor;
+    }
+  }
+
+  // Captures the device scale factor of the monitor where the frame is captured
+  // from. This value is the same as the scale from windows settings. Valid
+  // values are some distinct numbers in the range of [1,5], for example,
+  // 1, 1.5, 2.5, etc.
+  DEVICE_SCALE_FACTOR device_scale_factor = DEVICE_SCALE_FACTOR_INVALID;
+  HRESULT scale_factor_hr =
+      GetScaleFactorForMonitor(monitor_.value(), &device_scale_factor);
+  RTC_LOG_IF(LS_ERROR, FAILED(scale_factor_hr))
+      << "Failed to get scale factor for monitor: " << scale_factor_hr;
+  if (device_scale_factor != DEVICE_SCALE_FACTOR_INVALID) {
+    current_frame->set_device_scale_factor(
+        static_cast<float>(device_scale_factor) / 100.0f);
+  }
+
   // Will be set to true while copying the frame data to the `current_frame` if
   // we can already determine that the content of the new frame differs from the
   // previous. The idea is to get a low-complexity indication of if the content
   // is static or not without performing a full/deep memory comparison when
   // updating the damaged region.
-  bool frame_content_has_changed = false;
+  // `DoesWgcSkipStaticFrames()`: `TryGetNextFrame()` returns a frame
+  // successfully only if there is a region that has changed. This means that
+  // we can skip the full memory comparison if the running OS is Windows 11
+  // 24H2 or later.
+  bool frame_content_has_changed = DoesWgcSkipStaticFrames();
 
   // Check if the queue contains two frames whose content can be compared.
   const bool frame_content_can_be_compared = FrameContentCanBeCompared();
@@ -483,7 +716,7 @@ HRESULT WgcCaptureSession::ProcessFrame() {
   const int width_in_bytes =
       current_frame->size().width() * DesktopFrame::kBytesPerPixel;
   RTC_DCHECK_GE(current_frame->stride(), width_in_bytes);
-  RTC_DCHECK_GE(map_info.RowPitch, width_in_bytes);
+  RTC_CHECK_GE(map_info.RowPitch, width_in_bytes);
   const int middle_pixel_offset =
       (image_width / 2) * DesktopFrame::kBytesPerPixel;
   for (int i = 0; i < image_height; i++) {
@@ -535,12 +768,76 @@ HRESULT WgcCaptureSession::ProcessFrame() {
         // Mark resized frames as damaged.
         damage_region_.SetRect(DesktopRect::MakeSize(current_frame->size()));
       }
+    } else {
+      // Mark a `damage_region_` even if there is no previous frame. This
+      // condition does not create any increased overhead but is useful while
+      // using FullScreenWindowDetector, where it would create a new
+      // WgcCaptureSession(with no previous frame) for the slide show window but
+      // the DesktopCaptureDevice instance might have already received frames
+      // from the editor window's WgcCaptureSession which would have activated
+      // the zero-hertz mode.
+      damage_region_.SetRect(DesktopRect::MakeSize(current_frame->size()));
     }
   }
 
   size_ = new_size;
   RecordGetFrameResult(GetFrameResult::kSuccess);
   return hr;
+}
+
+HRESULT WgcCaptureSession::ProcessTexture(ComPtr<ID3D11Texture2D> texture,
+                                          ComPtr<IUnknown> capture_frame) {
+  RTC_DCHECK_RUN_ON(&sequence_checker_);
+
+  D3D11_TEXTURE2D_DESC desc;
+  texture->GetDesc(&desc);
+  DesktopSize size(desc.Width, desc.Height);
+
+  std::unique_ptr<DesktopFrame> texture_frame = DXGIDesktopFrame::Create(
+      size, std::move(texture), std::move(capture_frame));
+  if (!texture_frame) {
+    return E_FAIL;
+  }
+
+  if (queue_.current_frame() && queue_.current_frame()->IsShared()) {
+    RTC_LOG(LS_VERBOSE) << "Overwriting texture frame that is still shared.";
+  }
+
+  // Update the monitor and scale factor information for the new frame.
+  if (is_window_source_) {
+    monitor_ = ::MonitorFromWindow(reinterpret_cast<HWND>(source_id_),
+                                   MONITOR_DEFAULTTONEAREST);
+  } else if (!monitor_.has_value()) {
+    HMONITOR monitor;
+    if (GetHmonitorFromDeviceIndex(source_id_, &monitor)) {
+      monitor_ = monitor;
+    }
+  }
+
+  if (monitor_.has_value()) {
+    DEVICE_SCALE_FACTOR device_scale_factor = DEVICE_SCALE_FACTOR_INVALID;
+    HRESULT hr =
+        GetScaleFactorForMonitor(monitor_.value(), &device_scale_factor);
+    if (SUCCEEDED(hr) && device_scale_factor != DEVICE_SCALE_FACTOR_INVALID) {
+      texture_frame->set_device_scale_factor(
+          static_cast<float>(device_scale_factor) / 100.0f);
+    }
+  }
+
+  queue_.ReplaceCurrentFrame(
+      SharedDesktopFrame::Wrap(std::move(texture_frame)));
+
+  // We use ProcessTexture() only when WGC supports skipping static frames
+  // (Windows 11 24H2+), so we can directly mark the whole frame as damaged
+  // without doing any content comparison.
+  damage_region_.SetRect(DesktopRect::MakeSize(size));
+
+  // Sync the session size with the captured texture size.
+  size_.Width = size.width();
+  size_.Height = size.height();
+
+  RecordGetFrameResult(GetFrameResult::kSuccess);
+  return S_OK;
 }
 
 HRESULT WgcCaptureSession::OnItemClosed(WGC::IGraphicsCaptureItem* sender,
@@ -550,7 +847,7 @@ HRESULT WgcCaptureSession::OnItemClosed(WGC::IGraphicsCaptureItem* sender,
   RTC_LOG(LS_INFO) << "Capture target has been closed.";
   item_closed_ = true;
 
-  RemoveEventHandler();
+  RemoveItemClosedEventHandler();
 
   // Do not attempt to free resources in the OnItemClosed handler, as this
   // causes a race where we try to delete the item that is calling us. Removing
@@ -560,14 +857,53 @@ HRESULT WgcCaptureSession::OnItemClosed(WGC::IGraphicsCaptureItem* sender,
   return S_OK;
 }
 
-void WgcCaptureSession::RemoveEventHandler() {
+void WgcCaptureSession::RemoveEventHandlers() {
+  RemoveItemClosedEventHandler();
+  if (frame_pool_) {
+    RemoveFrameArrivedEventHandler();
+  }
+}
+
+void WgcCaptureSession::RemoveItemClosedEventHandler() {
   HRESULT hr;
   if (item_ && item_closed_token_) {
     hr = item_->remove_Closed(*item_closed_token_);
     item_closed_token_.reset();
-    if (FAILED(hr))
+    if (FAILED(hr)) {
       RTC_LOG(LS_WARNING) << "Failed to remove Closed event handler: " << hr;
+    }
   }
+}
+
+void WgcCaptureSession::RemoveFrameArrivedEventHandler() {
+  RTC_DCHECK(frame_pool_);
+  if (frame_arrived_token_) {
+    HRESULT hr = frame_pool_->remove_FrameArrived(*frame_arrived_token_);
+    frame_arrived_token_.reset();
+    has_first_frame_arrived_event_ = nullptr;
+    if (FAILED(hr)) {
+      RTC_LOG(LS_WARNING) << "Failed to remove FrameArrived event handler: "
+                          << hr;
+    }
+  }
+}
+
+HRESULT WgcCaptureSession::AddFrameArrivedEventHandler() {
+  RTC_DCHECK(frame_pool_);
+  HRESULT hr = E_FAIL;
+  frame_arrived_token_ = std::make_unique<EventRegistrationToken>();
+  has_first_frame_arrived_event_ = make_ref_counted<RefCountedEvent>(
+      /*manual_reset=*/true, /*initially_signaled=*/false);
+  auto frame_arrived_handler = Microsoft::WRL::Make<AgileFrameArrivedHandler>(
+      has_first_frame_arrived_event_);
+  hr = frame_pool_->add_FrameArrived(frame_arrived_handler.Get(),
+                                     frame_arrived_token_.get());
+  if (FAILED(hr)) {
+    RTC_LOG(LS_WARNING) << "Failed to add FrameArrived event handler: " << hr;
+    frame_arrived_token_.reset();
+    has_first_frame_arrived_event_ = nullptr;
+  }
+  return hr;
 }
 
 bool WgcCaptureSession::FrameContentCanBeCompared() {

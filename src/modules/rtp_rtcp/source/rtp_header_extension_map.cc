@@ -10,12 +10,18 @@
 
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 
+#include <iterator>
+#include <span>
+
 #include "absl/strings/string_view.h"
+#include "api/rtp_header_extension_id.h"
+#include "api/rtp_parameters.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/corruption_detection_extension.h"
 #include "modules/rtp_rtcp/source/rtp_dependency_descriptor_extension.h"
 #include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor_extension.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_video_layers_allocation_extension.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 
@@ -34,7 +40,7 @@ constexpr ExtensionInfo CreateExtensionInfo() {
 
 constexpr ExtensionInfo kExtensions[] = {
     CreateExtensionInfo<TransmissionOffset>(),
-    CreateExtensionInfo<AudioLevel>(),
+    CreateExtensionInfo<AudioLevelExtension>(),
     CreateExtensionInfo<CsrcAudioLevel>(),
     CreateExtensionInfo<AbsoluteSendTime>(),
     CreateExtensionInfo<AbsoluteCaptureTimeExtension>(),
@@ -53,18 +59,16 @@ constexpr ExtensionInfo kExtensions[] = {
     CreateExtensionInfo<ColorSpaceExtension>(),
     CreateExtensionInfo<InbandComfortNoiseExtension>(),
     CreateExtensionInfo<VideoFrameTrackingIdExtension>(),
+    CreateExtensionInfo<CorruptionDetectionExtension>(),
 };
 
 // Because of kRtpExtensionNone, NumberOfExtension is 1 bigger than the actual
 // number of known extensions.
-static_assert(arraysize(kExtensions) ==
+static_assert(std::ssize(kExtensions) ==
                   static_cast<int>(kRtpExtensionNumberOfExtensions) - 1,
               "kExtensions expect to list all known extensions");
 
 }  // namespace
-
-constexpr RTPExtensionType RtpHeaderExtensionMap::kInvalidType;
-constexpr int RtpHeaderExtensionMap::kInvalidId;
 
 RtpHeaderExtensionMap::RtpHeaderExtensionMap() : RtpHeaderExtensionMap(false) {}
 
@@ -75,21 +79,21 @@ RtpHeaderExtensionMap::RtpHeaderExtensionMap(bool extmap_allow_mixed)
 }
 
 RtpHeaderExtensionMap::RtpHeaderExtensionMap(
-    rtc::ArrayView<const RtpExtension> extensions)
+    std::span<const RtpExtension> extensions)
     : RtpHeaderExtensionMap(false) {
   for (const RtpExtension& extension : extensions)
     RegisterByUri(extension.id, extension.uri);
 }
 
-void RtpHeaderExtensionMap::Reset(
-    rtc::ArrayView<const RtpExtension> extensions) {
+void RtpHeaderExtensionMap::Reset(std::span<const RtpExtension> extensions) {
   for (auto& id : ids_)
     id = kInvalidId;
   for (const RtpExtension& extension : extensions)
     RegisterByUri(extension.id, extension.uri);
 }
 
-bool RtpHeaderExtensionMap::RegisterByType(int id, RTPExtensionType type) {
+bool RtpHeaderExtensionMap::RegisterByType(RtpHeaderExtensionId id,
+                                           RTPExtensionType type) {
   for (const ExtensionInfo& extension : kExtensions)
     if (type == extension.type)
       return Register(id, extension.type, extension.uri);
@@ -97,18 +101,18 @@ bool RtpHeaderExtensionMap::RegisterByType(int id, RTPExtensionType type) {
   return false;
 }
 
-bool RtpHeaderExtensionMap::RegisterByUri(int id, absl::string_view uri) {
+bool RtpHeaderExtensionMap::RegisterByUri(RtpHeaderExtensionId id,
+                                          absl::string_view uri) {
   for (const ExtensionInfo& extension : kExtensions)
     if (uri == extension.uri)
       return Register(id, extension.type, extension.uri);
   RTC_LOG(LS_WARNING) << "Unknown extension uri:'" << uri << "', id: " << id
-                      << '.';
+                      << ".";
   return false;
 }
 
-RTPExtensionType RtpHeaderExtensionMap::GetType(int id) const {
-  RTC_DCHECK_GE(id, RtpExtension::kMinId);
-  RTC_DCHECK_LE(id, RtpExtension::kMaxId);
+RTPExtensionType RtpHeaderExtensionMap::GetType(RtpHeaderExtensionId id) const {
+  RTC_DCHECK(id.Valid());
   for (int type = kRtpExtensionNone + 1; type < kRtpExtensionNumberOfExtensions;
        ++type) {
     if (ids_[type] == id) {
@@ -127,13 +131,13 @@ void RtpHeaderExtensionMap::Deregister(absl::string_view uri) {
   }
 }
 
-bool RtpHeaderExtensionMap::Register(int id,
+bool RtpHeaderExtensionMap::Register(RtpHeaderExtensionId id,
                                      RTPExtensionType type,
                                      absl::string_view uri) {
   RTC_DCHECK_GT(type, kRtpExtensionNone);
   RTC_DCHECK_LT(type, kRtpExtensionNumberOfExtensions);
 
-  if (id < RtpExtension::kMinId || id > RtpExtension::kMaxId) {
+  if (!id.Valid()) {
     RTC_LOG(LS_WARNING) << "Failed to register extension uri:'" << uri
                         << "' with invalid id:" << id << ".";
     return false;
@@ -161,8 +165,7 @@ bool RtpHeaderExtensionMap::Register(int id,
     return false;
   }
 
-  // There is a run-time check above id fits into uint8_t.
-  ids_[type] = static_cast<uint8_t>(id);
+  ids_[type] = id;
   return true;
 }
 

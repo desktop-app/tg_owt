@@ -10,12 +10,12 @@
 
 #include "common_audio/smoothing_filter.h"
 
-#include <math.h>
-
 #include <cmath>
+#include <cstdint>
+#include <optional>
 
+#include "api/units/timestamp.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/time_utils.h"
 
 namespace webrtc {
 
@@ -33,14 +33,13 @@ SmoothingFilterImpl::SmoothingFilterImpl(int init_time_ms)
       init_const_(init_time_ms_ == 0
                       ? 0.0f
                       : init_time_ms_ -
-                            powf(init_time_ms_, 1.0f - 1.0f / init_time_ms_)) {
-  UpdateAlpha(init_time_ms_);
-}
+                            powf(init_time_ms_, 1.0f - 1.0f / init_time_ms_)),
+      alpha_(init_time_ms == 0 ? 0.0f : std::exp(-1.0f / init_time_ms)) {}
 
 SmoothingFilterImpl::~SmoothingFilterImpl() = default;
 
-void SmoothingFilterImpl::AddSample(float sample) {
-  const int64_t now_ms = rtc::TimeMillis();
+void SmoothingFilterImpl::AddSample(float sample, Timestamp now) {
+  const int64_t now_ms = now.ms();
 
   if (!init_end_time_ms_) {
     // This is equivalent to assuming the filter has been receiving the same
@@ -55,25 +54,13 @@ void SmoothingFilterImpl::AddSample(float sample) {
   last_sample_ = sample;
 }
 
-absl::optional<float> SmoothingFilterImpl::GetAverage() {
+std::optional<float> SmoothingFilterImpl::GetAverage(Timestamp now) {
   if (!init_end_time_ms_) {
     // `init_end_time_ms_` undefined since we have not received any sample.
-    return absl::nullopt;
+    return std::nullopt;
   }
-  ExtrapolateLastSample(rtc::TimeMillis());
+  ExtrapolateLastSample(now.ms());
   return state_;
-}
-
-bool SmoothingFilterImpl::SetTimeConstantMs(int time_constant_ms) {
-  if (!init_end_time_ms_ || last_state_time_ms_ < *init_end_time_ms_) {
-    return false;
-  }
-  UpdateAlpha(time_constant_ms);
-  return true;
-}
-
-void SmoothingFilterImpl::UpdateAlpha(int time_constant_ms) {
-  alpha_ = time_constant_ms == 0 ? 0.0f : std::exp(-1.0f / time_constant_ms);
 }
 
 void SmoothingFilterImpl::ExtrapolateLastSample(int64_t time_ms) {

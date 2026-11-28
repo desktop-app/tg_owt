@@ -24,7 +24,7 @@
 @end
 
 @implementation RTC_OBJC_TYPE (RTCMTLNSVideoView) {
-  id<RTCMTLRenderer> _renderer;
+  id<RTC_OBJC_TYPE(RTCMTLRenderer)> _renderer;
 }
 
 @synthesize delegate = _delegate;
@@ -58,12 +58,13 @@
   if ([[self class] isMetalAvailable]) {
     _metalView = [[MTKView alloc] initWithFrame:self.bounds];
     [self addSubview:_metalView];
-    _metalView.layerContentsPlacement = NSViewLayerContentsPlacementScaleProportionallyToFit;
+    _metalView.layerContentsPlacement =
+        NSViewLayerContentsPlacementScaleProportionallyToFit;
     _metalView.translatesAutoresizingMaskIntoConstraints = NO;
     _metalView.framebufferOnly = YES;
     _metalView.delegate = self;
 
-    _renderer = [[RTCMTLI420Renderer alloc] init];
+    _renderer = [[RTC_OBJC_TYPE(RTCMTLI420Renderer) alloc] init];
     if (![(RTCMTLI420Renderer *)_renderer addRenderingDestination:_metalView]) {
       _renderer = nil;
     };

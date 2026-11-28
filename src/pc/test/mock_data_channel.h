@@ -11,21 +11,27 @@
 #ifndef PC_TEST_MOCK_DATA_CHANNEL_H_
 #define PC_TEST_MOCK_DATA_CHANNEL_H_
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
+#include "api/task_queue/pending_task_safety_flag.h"
 #include "pc/sctp_data_channel.h"
+#include "rtc_base/thread.h"
+#include "rtc_base/weak_ptr.h"
 #include "test/gmock.h"
 
 namespace webrtc {
 
 class MockSctpDataChannel : public SctpDataChannel {
  public:
-  MockSctpDataChannel(
-      rtc::WeakPtr<SctpDataChannelControllerInterface> controller,
-      int id,
-      DataState state)
+  MockSctpDataChannel(WeakPtr<SctpDataChannelControllerInterface> controller,
+                      int internal_id,
+                      int id,
+                      DataState state)
       : MockSctpDataChannel(std::move(controller),
+                            internal_id,
                             id,
                             "MockSctpDataChannel",
                             state,
@@ -35,7 +41,8 @@ class MockSctpDataChannel : public SctpDataChannel {
                             0,
                             0) {}
   MockSctpDataChannel(
-      rtc::WeakPtr<SctpDataChannelControllerInterface> controller,
+      WeakPtr<SctpDataChannelControllerInterface> controller,
+      int internal_id,
       int id,
       const std::string& label,
       DataState state,
@@ -45,12 +52,15 @@ class MockSctpDataChannel : public SctpDataChannel {
       uint32_t messages_received,
       uint64_t bytes_received,
       const InternalDataChannelInit& config = InternalDataChannelInit(),
-      rtc::Thread* signaling_thread = rtc::Thread::Current(),
-      rtc::Thread* network_thread = rtc::Thread::Current())
+      Thread* signaling_thread = Thread::Current(),
+      Thread* network_thread = Thread::Current())
       : SctpDataChannel(config,
                         std::move(controller),
+                        internal_id,
                         label,
                         false,
+                        std::nullopt,
+                        PendingTaskSafetyFlag::Create(),
                         signaling_thread,
                         network_thread) {
     EXPECT_CALL(*this, id()).WillRepeatedly(::testing::Return(id));

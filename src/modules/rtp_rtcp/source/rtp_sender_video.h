@@ -11,43 +11,49 @@
 #ifndef MODULES_RTP_RTCP_SOURCE_RTP_SENDER_VIDEO_H_
 #define MODULES_RTP_RTCP_SOURCE_RTP_SENDER_VIDEO_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
+#include <span>
 #include <vector>
 
-#include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "api/field_trials_view.h"
 #include "api/frame_transformer_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/sequence_checker.h"
-#include "api/task_queue/task_queue_base.h"
+#include "api/sframe/sframe_types.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/transport/rtp/dependency_descriptor.h"
+#include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "api/video/color_space.h"
+#include "api/video/encoded_image.h"
 #include "api/video/video_codec_type.h"
-#include "api/video/video_frame_type.h"
 #include "api/video/video_layers_allocation.h"
+#include "api/video/video_rotation.h"
+#include "api/video/video_timing.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/absolute_capture_time_sender.h"
 #include "modules/rtp_rtcp/source/active_decode_targets_helper.h"
-#include "modules/rtp_rtcp/source/rtp_rtcp_config.h"
+#include "modules/rtp_rtcp/source/rtp_format.h"
 #include "modules/rtp_rtcp/source/rtp_sender.h"
 #include "modules/rtp_rtcp/source/rtp_sender_video_frame_transformer_delegate.h"
 #include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "modules/rtp_rtcp/source/video_fec_generator.h"
+#include "modules/sframe/sframe_encryption_config.h"
 #include "rtc_base/bitrate_tracker.h"
 #include "rtc_base/frequency_tracker.h"
 #include "rtc_base/one_time_event.h"
 #include "rtc_base/race_checker.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
 class FrameEncryptorInterface;
-class RtpPacketizer;
 class RtpPacketToSend;
 
 // kConditionallyRetransmitHigherLayers allows retransmission of video frames
@@ -77,20 +83,24 @@ class RTPSenderVideo : public RTPVideoFrameSenderInterface {
     RTPSender* rtp_sender = nullptr;
     // Some FEC data is duplicated here in preparation of moving FEC to
     // the egress stage.
-    absl::optional<VideoFecGenerator::FecType> fec_type;
+    std::optional<VideoFecGenerator::FecType> fec_type;
     size_t fec_overhead_bytes = 0;  // Per packet max FEC overhead.
     FrameEncryptorInterface* frame_encryptor = nullptr;
     bool require_frame_encryption = false;
     bool enable_retransmit_all_layers = false;
-    absl::optional<int> red_payload_type;
+    std::optional<int> red_payload_type;
     const FieldTrialsView* field_trials = nullptr;
-    rtc::scoped_refptr<FrameTransformerInterface> frame_transformer;
+    scoped_refptr<FrameTransformerInterface> frame_transformer;
     TaskQueueFactory* task_queue_factory = nullptr;
+    bool raw_packetization = false;
+    // Whether Sframe end-to-end encryption is required on this stream.
+    bool sframe_required_by_negotiation = false;
+    std::optional<SframeEncryptionConfig> sframe_encryption_config;
   };
 
   explicit RTPSenderVideo(const Config& config);
 
-  virtual ~RTPSenderVideo();
+  ~RTPSenderVideo() override;
 
   // `capture_time` and `clock::CurrentTime` should be using the same epoch.
   // `expected_retransmission_time.IsFinite()` -> retransmission allowed.
@@ -98,21 +108,32 @@ class RTPSenderVideo : public RTPVideoFrameSenderInterface {
   // video encoder, excluding any additional overhead.
   // Calls to this method are assumed to be externally serialized.
   bool SendVideo(int payload_type,
-                 absl::optional<VideoCodecType> codec_type,
+                 VideoCodecType codec_type,
                  uint32_t rtp_timestamp,
                  Timestamp capture_time,
-                 rtc::ArrayView<const uint8_t> payload,
+                 std::span<const uint8_t> payload,
                  size_t encoder_output_size,
                  RTPVideoHeader video_header,
                  TimeDelta expected_retransmission_time,
                  std::vector<uint32_t> csrcs) override;
 
+  bool SendVideoFrame(int payload_type,
+                      VideoCodecType codec_type,
+                      RtpTimestampInfo rtp_timestamp_info,
+                      Timestamp capture_time,
+                      std::span<const uint8_t> payload,
+                      size_t encoder_output_size,
+                      RTPVideoHeader video_header,
+                      TimeDelta expected_retransmission_time,
+                      std::vector<uint32_t> csrcs) override;
+
   bool SendEncodedImage(int payload_type,
-                        absl::optional<VideoCodecType> codec_type,
+                        VideoCodecType codec_type,
                         uint32_t rtp_timestamp,
                         const EncodedImage& encoded_image,
                         RTPVideoHeader video_header,
-                        TimeDelta expected_retransmission_time);
+                        TimeDelta expected_retransmission_time,
+                        const std::vector<uint32_t>& csrcs = {});
 
   // Configures video structures produced by encoder to send using the
   // dependency descriptor rtp header extension. Next call to SendVideo should
@@ -176,6 +197,15 @@ class RTPSenderVideo : public RTPVideoFrameSenderInterface {
                               RtpPacketToSend* packet) const
       RTC_EXCLUSIVE_LOCKS_REQUIRED(send_checker_);
 
+  // Called when the dependency descriptor isn't attached to `packet`, a packet
+  // of the frame described by `video_header`. Disables the dependency
+  // descriptor if it couldn't be attached to a key frame. Returns false if the
+  // frame should be dropped because the dependency descriptor can't describe
+  // it.
+  bool HandleMissingDependencyDescriptor(const RTPVideoHeader& video_header,
+                                         const RtpPacketToSend& packet)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(send_checker_);
+
   size_t FecPacketOverhead() const RTC_EXCLUSIVE_LOCKS_REQUIRED(send_checker_);
 
   void LogAndSendToNetwork(
@@ -183,6 +213,15 @@ class RTPSenderVideo : public RTPVideoFrameSenderInterface {
       size_t encoder_output_size);
 
   bool red_enabled() const { return red_payload_type_.has_value(); }
+
+  RtpPacketizer::PacketizationFormat GetPacketizationFormat(
+      VideoCodecType codec_type) const;
+
+  // Returns whether an Sframe encryptor is configured.
+  bool IsSframeEncryptionSupported() const;
+
+  // Returns whether negotiation requires Sframe and `mode` is configured.
+  bool IsSframeModeActive(SframeMode mode) const;
 
   bool UpdateConditionalRetransmit(uint8_t temporal_id,
                                    TimeDelta expected_retransmission_time)
@@ -196,35 +235,35 @@ class RTPSenderVideo : public RTPVideoFrameSenderInterface {
 
   // These members should only be accessed from within SendVideo() to avoid
   // potential race conditions.
-  rtc::RaceChecker send_checker_;
+  RaceChecker send_checker_;
   int32_t retransmission_settings_ RTC_GUARDED_BY(send_checker_);
   VideoRotation last_rotation_ RTC_GUARDED_BY(send_checker_);
-  absl::optional<ColorSpace> last_color_space_ RTC_GUARDED_BY(send_checker_);
+  std::optional<ColorSpace> last_color_space_ RTC_GUARDED_BY(send_checker_);
   bool transmit_color_space_next_frame_ RTC_GUARDED_BY(send_checker_);
   std::unique_ptr<FrameDependencyStructure> video_structure_
       RTC_GUARDED_BY(send_checker_);
-  absl::optional<VideoLayersAllocation> allocation_
+  std::optional<VideoLayersAllocation> allocation_
       RTC_GUARDED_BY(send_checker_);
   // Flag indicating if we should send `allocation_`.
   SendVideoLayersAllocation send_allocation_ RTC_GUARDED_BY(send_checker_);
-  absl::optional<VideoLayersAllocation> last_full_sent_allocation_
+  std::optional<VideoLayersAllocation> last_full_sent_allocation_
       RTC_GUARDED_BY(send_checker_);
 
   // Current target playout delay.
-  absl::optional<VideoPlayoutDelay> current_playout_delay_
+  std::optional<VideoPlayoutDelay> current_playout_delay_
       RTC_GUARDED_BY(send_checker_);
   // Flag indicating if we need to send `current_playout_delay_` in order
   // to guarantee it gets delivered.
   bool playout_delay_pending_;
   // Set by the field trial WebRTC-ForceSendPlayoutDelay to override the playout
   // delay of outgoing video frames.
-  const absl::optional<VideoPlayoutDelay> forced_playout_delay_;
+  const std::optional<VideoPlayoutDelay> forced_playout_delay_;
 
   // Should never be held when calling out of this class.
   Mutex mutex_;
 
-  const absl::optional<int> red_payload_type_;
-  absl::optional<VideoFecGenerator::FecType> fec_type_;
+  const std::optional<int> red_payload_type_;
+  std::optional<VideoFecGenerator::FecType> fec_type_;
   const size_t fec_overhead_bytes_;  // Per packet max FEC overhead.
 
   mutable Mutex stats_mutex_;
@@ -234,6 +273,12 @@ class RTPSenderVideo : public RTPVideoFrameSenderInterface {
       RTC_GUARDED_BY(stats_mutex_);
 
   OneTimeEvent first_frame_sent_;
+  Timestamp last_fail_packetize_log_ RTC_GUARDED_BY(send_checker_) =
+      Timestamp::MinusInfinity();
+  Timestamp last_undescribable_frame_log_ RTC_GUARDED_BY(send_checker_) =
+      Timestamp::MinusInfinity();
+  Timestamp last_chain_diff_log_ RTC_GUARDED_BY(send_checker_) =
+      Timestamp::MinusInfinity();
 
   // E2EE Custom Video Frame Encryptor (optional)
   FrameEncryptorInterface* const frame_encryptor_ = nullptr;
@@ -241,8 +286,12 @@ class RTPSenderVideo : public RTPVideoFrameSenderInterface {
   // initialized frame_encryptor_ before being sent out of the network.
   // Otherwise these payloads will be dropped.
   const bool require_frame_encryption_;
+  const bool sframe_required_by_negotiation_;
+  const std::optional<SframeEncryptionConfig> sframe_encryption_config_;
   // Set to true if the generic descriptor should be authenticated.
   const bool generic_descriptor_auth_experiment_;
+
+  const bool raw_packetization_;
 
   AbsoluteCaptureTimeSender absolute_capture_time_sender_
       RTC_GUARDED_BY(send_checker_);
@@ -250,7 +299,7 @@ class RTPSenderVideo : public RTPVideoFrameSenderInterface {
   // targets bitmask should be attached to the dependency descriptor.
   ActiveDecodeTargetsHelper active_decode_targets_tracker_;
 
-  const rtc::scoped_refptr<RTPSenderVideoFrameTransformerDelegate>
+  const scoped_refptr<RTPSenderVideoFrameTransformerDelegate>
       frame_transformer_delegate_;
 };
 

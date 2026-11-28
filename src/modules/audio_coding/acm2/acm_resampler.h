@@ -14,25 +14,35 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <array>
+
+#include "api/audio/audio_frame.h"
 #include "common_audio/resampler/include/push_resampler.h"
 
 namespace webrtc {
 namespace acm2 {
 
-class ACMResampler {
+// Helper class to perform resampling if needed, meant to be used after
+// receiving the audio_frame from NetEq. Provides reasonably glitch free
+// transitions between different output sample rates from NetEq.
+class ResamplerHelper {
  public:
-  ACMResampler();
-  ~ACMResampler();
+  ResamplerHelper();
 
-  int Resample10Msec(const int16_t* in_audio,
-                     int in_freq_hz,
-                     int out_freq_hz,
-                     size_t num_audio_channels,
-                     size_t out_capacity_samples,
-                     int16_t* out_audio);
+  // Resamples audio_frame if it is not already in desired_sample_rate_hz.
+  // A muted frame that follows a muted frame stays muted: its resampled
+  // output would be silent. A muted frame that follows audio is resampled
+  // and comes out unmuted, since the output still holds the tail of that
+  // audio.
+  bool MaybeResample(int desired_sample_rate_hz, AudioFrame* audio_frame);
 
  private:
   PushResampler<int16_t> resampler_;
+  bool resampled_last_output_frame_ = true;
+  // Whether the last frame that MaybeResample() accepted was muted. The
+  // resampler starts out silent.
+  bool last_frame_muted_ = true;
+  std::array<int16_t, AudioFrame::kMaxDataSizeSamples> last_audio_buffer_;
 };
 
 }  // namespace acm2

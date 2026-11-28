@@ -11,15 +11,15 @@
 #ifndef MODULES_RTP_RTCP_INCLUDE_RECEIVE_STATISTICS_H_
 #define MODULES_RTP_RTCP_INCLUDE_RECEIVE_STATISTICS_H_
 
-#include <map>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "call/rtp_packet_sink_interface.h"
-#include "modules/rtp_rtcp/include/rtcp_statistics.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 
 namespace webrtc {
 
@@ -41,7 +41,7 @@ class StreamStatistician {
   virtual RtpReceiveStats GetStats() const = 0;
 
   // Returns average over the stream life time.
-  virtual absl::optional<int> GetFractionLostInPercent() const = 0;
+  virtual std::optional<int> GetFractionLostInPercent() const = 0;
 
   // TODO(bugs.webrtc.org/10679): Delete, migrate users to the above GetStats
   // method (and extend RtpReceiveStats if needed).
@@ -51,8 +51,7 @@ class StreamStatistician {
   virtual uint32_t BitrateReceived() const = 0;
 };
 
-class ReceiveStatistics : public ReceiveStatisticsProvider,
-                          public RtpPacketSinkInterface {
+class ReceiveStatistics : public ReceiveStatisticsProvider {
  public:
   ~ReceiveStatistics() override = default;
 
@@ -63,13 +62,10 @@ class ReceiveStatistics : public ReceiveStatisticsProvider,
   static std::unique_ptr<ReceiveStatistics> CreateThreadCompatible(
       Clock* clock);
 
+  virtual void OnRtpPacket(const RtpPacketReceived& packet) = 0;
+
   // Returns a pointer to the statistician of an ssrc.
   virtual StreamStatistician* GetStatistician(uint32_t ssrc) const = 0;
-
-  // TODO(bugs.webrtc.org/10669): Deprecated, delete as soon as downstream
-  // projects are updated. This method sets the max reordering threshold of all
-  // current and future streams.
-  virtual void SetMaxReorderingThreshold(int max_reordering_threshold) = 0;
 
   // Sets the max reordering threshold in number of packets.
   virtual void SetMaxReorderingThreshold(uint32_t ssrc,

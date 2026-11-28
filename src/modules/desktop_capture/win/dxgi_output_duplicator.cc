@@ -12,12 +12,20 @@
 
 #include <dxgi.h>
 #include <dxgiformat.h>
-#include <string.h>
 #include <unknwn.h>
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <optional>
 
+#include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_frame_rotation.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/desktop_region.h"
+#include "modules/desktop_capture/shared_desktop_frame.h"
+#include "modules/desktop_capture/win/d3d_device.h"
 #include "modules/desktop_capture/win/desktop_capture_utils.h"
 #include "modules/desktop_capture/win/dxgi_texture_mapping.h"
 #include "modules/desktop_capture/win/dxgi_texture_staging.h"
@@ -67,8 +75,9 @@ DxgiOutputDuplicator::DxgiOutputDuplicator(const D3dDevice& device,
                                            const DXGI_OUTPUT_DESC& desc)
     : device_(device),
       output_(output),
-      device_name_(rtc::ToUtf8(desc.DeviceName)),
-      desktop_rect_(RECTToDesktopRect(desc.DesktopCoordinates)) {
+      device_name_(ToUtf8(desc.DeviceName)),
+      desktop_rect_(RECTToDesktopRect(desc.DesktopCoordinates)),
+      monitor_(desc.Monitor) {
   RTC_DCHECK(output_);
   RTC_DCHECK(!desktop_rect_.is_empty());
   RTC_DCHECK_GT(desktop_rect_.width(), 0);
@@ -220,7 +229,11 @@ bool DxgiOutputDuplicator::Duplicate(Context* context,
     // triggers screen flickering?
 
     const DesktopFrame& source = texture_->AsDesktopFrame();
-    // A resolution change can deliver a new size before controller reinitialization.
+    // During a resolution transition, DXGI might deliver a frame with the new
+    // size before the controller detects the change and reinitializes.
+    // `unrotated_size_` is cached at initialization and only updated when
+    // this object is recreated. We abort capture on mismatch to force
+    // reinitialization by the |DxgiDuplicatorController|.
     if (!source.size().equals(unrotated_size_)) {
       RTC_LOG(LS_WARNING) << "Captured frame size " << source.size().width()
                         << "x" << source.size().height()
@@ -425,6 +438,17 @@ int64_t DxgiOutputDuplicator::num_frames_captured() const {
   RTC_DCHECK_EQ(!!last_frame_, num_frames_captured_ > 0);
 #endif
   return num_frames_captured_;
+}
+
+std::optional<float> DxgiOutputDuplicator::device_scale_factor() const {
+  DEVICE_SCALE_FACTOR device_scale_factor = DEVICE_SCALE_FACTOR_INVALID;
+  HRESULT hr = GetScaleFactorForMonitor(monitor_, &device_scale_factor);
+  if (FAILED(hr)) {
+    RTC_LOG(LS_ERROR) << "Failed to get scale factor for monitor: " << hr;
+    return std::nullopt;
+  }
+  RTC_DCHECK(device_scale_factor != DEVICE_SCALE_FACTOR_INVALID);
+  return static_cast<float>(device_scale_factor) / 100.0f;
 }
 
 void DxgiOutputDuplicator::TranslateRect(const DesktopVector& position) {

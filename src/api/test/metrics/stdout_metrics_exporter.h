@@ -11,7 +11,9 @@
 #ifndef API_TEST_METRICS_STDOUT_METRICS_EXPORTER_H_
 #define API_TEST_METRICS_STDOUT_METRICS_EXPORTER_H_
 
-#include "api/array_view.h"
+#include <cstdio>
+#include <span>
+
 #include "api/test/metrics/metric.h"
 #include "api/test/metrics/metrics_exporter.h"
 
@@ -21,13 +23,14 @@ namespace test {
 // Exports all collected metrics to stdout.
 class StdoutMetricsExporter : public MetricsExporter {
  public:
-  StdoutMetricsExporter();
+  // Exports metrics to `output`, which must outlive the exporter.
+  explicit StdoutMetricsExporter(FILE* output = stdout);
   ~StdoutMetricsExporter() override = default;
 
   StdoutMetricsExporter(const StdoutMetricsExporter&) = delete;
   StdoutMetricsExporter& operator=(const StdoutMetricsExporter&) = delete;
 
-  bool Export(rtc::ArrayView<const Metric> metrics) override;
+  bool Export(std::span<const Metric> metrics) override;
 
  private:
   void PrintMetric(const Metric& metric);

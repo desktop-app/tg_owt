@@ -12,23 +12,27 @@
 #define MODULES_AUDIO_PROCESSING_AEC3_RESIDUAL_ECHO_ESTIMATOR_H_
 
 #include <array>
-#include <memory>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 
-#include "absl/types/optional.h"
 #include "api/audio/echo_canceller3_config.h"
+#include "api/audio/neural_residual_echo_estimator.h"
+#include "api/environment/environment.h"
 #include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/aec3/aec_state.h"
 #include "modules/audio_processing/aec3/render_buffer.h"
 #include "modules/audio_processing/aec3/reverb_model.h"
-#include "modules/audio_processing/aec3/spectrum_buffer.h"
-#include "rtc_base/checks.h"
 
 namespace webrtc {
 
 class ResidualEchoEstimator {
  public:
-  ResidualEchoEstimator(const EchoCanceller3Config& config,
-                        size_t num_render_channels);
+  ResidualEchoEstimator(
+      const Environment& env,
+      const EchoCanceller3Config& config,
+      size_t num_render_channels,
+      NeuralResidualEchoEstimator* neural_residual_echo_estimator);
   ~ResidualEchoEstimator();
 
   ResidualEchoEstimator(const ResidualEchoEstimator&) = delete;
@@ -37,14 +41,32 @@ class ResidualEchoEstimator {
   void Estimate(
       const AecState& aec_state,
       const RenderBuffer& render_buffer,
-      rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>> S2_linear,
-      rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>> Y2,
+      std::span<const std::array<float, kFftLengthBy2>> capture,
+      std::span<const std::array<float, kFftLengthBy2>> linear_aec_output,
+      std::span<const std::array<float, kFftLengthBy2Plus1>> S2_linear,
+      std::span<const std::array<float, kFftLengthBy2Plus1>> Y2,
+      std::span<const std::array<float, kFftLengthBy2Plus1>> E2,
       bool dominant_nearend,
-      rtc::ArrayView<std::array<float, kFftLengthBy2Plus1>> R2,
-      rtc::ArrayView<std::array<float, kFftLengthBy2Plus1>> R2_unbounded);
+      std::span<std::array<float, kFftLengthBy2Plus1>> R2,
+      std::span<std::array<float, kFftLengthBy2Plus1>> R2_unbounded);
+
+  // Returns true if output from neural residual echo estimation is actively
+  // used.
+  bool IsMlReeActive() const { return ml_ree_state_ == MlReeState::kActive; }
 
  private:
   enum class ReverbType { kLinear, kNonLinear };
+
+  // State of neural residual echo estimation.
+  enum class MlReeState {
+    // Neural estimator is either not present or not initialized.
+    // Once we leave this state, we never return to it.
+    kUninitialized,
+    // Neural estimator is initialized but not used.
+    kInitialized,
+    // Neural estimator is initialized and actively used for estimation.
+    kActive
+  };
 
   // Resets the state.
   void Reset();
@@ -61,8 +83,7 @@ class ResidualEchoEstimator {
 
   // Adds the estimated unmodelled echo power to the residual echo power
   // estimate.
-  void AddReverb(
-      rtc::ArrayView<std::array<float, kFftLengthBy2Plus1>> R2) const;
+  void AddReverb(std::span<std::array<float, kFftLengthBy2Plus1>> R2) const;
 
   // Gets the echo path gain to apply.
   float GetEchoPathGain(const AecState& aec_state,
@@ -78,6 +99,10 @@ class ResidualEchoEstimator {
   std::array<float, kFftLengthBy2Plus1> X2_noise_floor_;
   std::array<int, kFftLengthBy2Plus1> X2_noise_floor_counter_;
   ReverbModel echo_reverb_;
+  NeuralResidualEchoEstimator* neural_residual_echo_estimator_;
+  MlReeState ml_ree_state_ = MlReeState::kUninitialized;
+  bool has_logged_neural_echo_estimator_status_ = false;
+  int64_t linear_mode_blocks_until_neural_estimator_init_ = 0;
 };
 
 }  // namespace webrtc

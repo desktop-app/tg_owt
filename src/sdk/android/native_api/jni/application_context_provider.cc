@@ -9,6 +9,8 @@
  */
 #include "sdk/android/native_api/jni/application_context_provider.h"
 
+#include <jni.h>
+
 #include "sdk/android/generated_native_api_jni/ApplicationContextProvider_jni.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
 
@@ -20,3 +22,5 @@ ScopedJavaLocalRef<jobject> GetAppContext(JNIEnv* jni) {
 }
 
 }  // namespace webrtc
+
+DEFINE_JNI(ApplicationContextProvider)

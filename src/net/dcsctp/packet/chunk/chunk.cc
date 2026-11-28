@@ -10,12 +10,10 @@
 #include "net/dcsctp/packet/chunk/chunk.h"
 
 #include <cstdint>
-#include <memory>
-#include <utility>
+#include <optional>
+#include <span>
+#include <string>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
-#include "net/dcsctp/common/math.h"
 #include "net/dcsctp/packet/chunk/abort_chunk.h"
 #include "net/dcsctp/packet/chunk/cookie_ack_chunk.h"
 #include "net/dcsctp/packet/chunk/cookie_echo_chunk.h"
@@ -33,16 +31,16 @@
 #include "net/dcsctp/packet/chunk/shutdown_ack_chunk.h"
 #include "net/dcsctp/packet/chunk/shutdown_chunk.h"
 #include "net/dcsctp/packet/chunk/shutdown_complete_chunk.h"
-#include "net/dcsctp/packet/tlv_trait.h"
+#include "rtc_base/strings/string_builder.h"
 
 namespace dcsctp {
 
 template <class Chunk>
 bool ParseAndPrint(uint8_t chunk_type,
-                   rtc::ArrayView<const uint8_t> data,
-                   rtc::StringBuilder& sb) {
+                   std::span<const uint8_t> data,
+                   webrtc::StringBuilder& sb) {
   if (chunk_type == Chunk::kType) {
-    absl::optional<Chunk> c = Chunk::Parse(data);
+    std::optional<Chunk> c = Chunk::Parse(data);
     if (c.has_value()) {
       sb << c->ToString();
     } else {
@@ -53,8 +51,8 @@ bool ParseAndPrint(uint8_t chunk_type,
   return false;
 }
 
-std::string DebugConvertChunkToString(rtc::ArrayView<const uint8_t> data) {
-  rtc::StringBuilder sb;
+std::string DebugConvertChunkToString(std::span<const uint8_t> data) {
+  webrtc::StringBuilder sb;
 
   if (data.empty()) {
     sb << "Failed to parse chunk due to empty data";

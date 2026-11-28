@@ -8,16 +8,21 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "api/environment/environment.h"
 #include "api/environment/environment_factory.h"
+#include "api/video/video_codec_type.h"
 #include "api/video_codecs/sdp_video_format.h"
+#include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_decoder.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder.h"
 #include "api/video_codecs/video_encoder_factory.h"
+#include "rtc_base/checks.h"
 #if defined(WEBRTC_ANDROID)
 #include "modules/video_coding/codecs/test/android_codec_factory_helper.h"
 #elif defined(WEBRTC_IOS)
@@ -34,8 +39,6 @@ namespace {
 
 using ::testing::NotNull;
 
-const VideoEncoder::Capabilities kCapabilities(false);
-
 int32_t InitEncoder(VideoCodecType codec_type, VideoEncoder* encoder) {
   VideoCodec codec;
   CodecSettings(codec_type, &codec);
@@ -44,7 +47,7 @@ int32_t InitEncoder(VideoCodecType codec_type, VideoEncoder* encoder) {
   codec.maxFramerate = 30;
   RTC_CHECK(encoder);
   return encoder->InitEncode(
-      &codec, VideoEncoder::Settings(kCapabilities, 1 /* number_of_cores */,
+      &codec, VideoEncoder::Settings(1 /* number_of_cores */,
                                      1200 /* max_payload_size */));
 }
 
@@ -79,7 +82,7 @@ class VideoEncoderDecoderInstantiationTest
 #endif
   }
 
-  ~VideoEncoderDecoderInstantiationTest() {
+  ~VideoEncoderDecoderInstantiationTest() override {
     for (auto& encoder : encoders_) {
       encoder->Release();
     }
@@ -123,7 +126,7 @@ INSTANTIATE_TEST_SUITE_P(MultipleEncodersDecoders,
 TEST_P(VideoEncoderDecoderInstantiationTest, DISABLED_InstantiateVp8Codecs) {
   for (int i = 0; i < num_encoders_; ++i) {
     std::unique_ptr<VideoEncoder> encoder =
-        encoder_factory_->CreateVideoEncoder(vp8_format_);
+        encoder_factory_->Create(env_, vp8_format_);
     EXPECT_EQ(0, InitEncoder(kVideoCodecVP8, encoder.get()));
     encoders_.emplace_back(std::move(encoder));
   }
@@ -141,7 +144,7 @@ TEST_P(VideoEncoderDecoderInstantiationTest,
        DISABLED_InstantiateH264CBPCodecs) {
   for (int i = 0; i < num_encoders_; ++i) {
     std::unique_ptr<VideoEncoder> encoder =
-        encoder_factory_->CreateVideoEncoder(h264cbp_format_);
+        encoder_factory_->Create(env_, h264cbp_format_);
     EXPECT_EQ(0, InitEncoder(kVideoCodecH264, encoder.get()));
     encoders_.emplace_back(std::move(encoder));
   }

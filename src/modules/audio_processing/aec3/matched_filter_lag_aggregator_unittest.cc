@@ -10,14 +10,16 @@
 
 #include "modules/audio_processing/aec3/matched_filter_lag_aggregator.h"
 
-#include <sstream>
-#include <string>
+#include <algorithm>
+#include <cstddef>
+#include <optional>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/audio/echo_canceller3_config.h"
-#include "modules/audio_processing/aec3/aec3_common.h"
+#include "modules/audio_processing/aec3/delay_estimate.h"
+#include "modules/audio_processing/aec3/matched_filter.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
+#include "rtc_base/checks.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -36,7 +38,7 @@ TEST(MatchedFilterLagAggregator,
   MatchedFilterLagAggregator aggregator(&data_dumper, /*max_filter_lag=*/100,
                                         config.delay);
 
-  absl::optional<DelayEstimate> aggregated_lag;
+  std::optional<DelayEstimate> aggregated_lag;
   for (size_t k = 0; k < kNumLagsBeforeDetection; ++k) {
     aggregated_lag = aggregator.Aggregate(
         MatchedFilter::LagEstimate(/*lag=*/10, /*pre_echo_lag=*/10));
@@ -66,7 +68,7 @@ TEST(MatchedFilterLagAggregator,
   MatchedFilterLagAggregator aggregator(&data_dumper, /*max_filter_lag=*/kLag,
                                         config.delay);
   for (size_t k = 0; k < kNumLagsBeforeDetection * 10; ++k) {
-    absl::optional<DelayEstimate> aggregated_lag = aggregator.Aggregate(
+    std::optional<DelayEstimate> aggregated_lag = aggregator.Aggregate(
         MatchedFilter::LagEstimate(/*lag=*/kLag, /*pre_echo_lag=*/kLag));
     EXPECT_FALSE(aggregated_lag);
     EXPECT_EQ(kLag, aggregated_lag->delay);
@@ -84,7 +86,7 @@ TEST(MatchedFilterLagAggregator, DISABLED_PersistentAggregatedLag) {
   std::vector<MatchedFilter::LagEstimate> lag_estimates(1);
   MatchedFilterLagAggregator aggregator(&data_dumper, std::max(kLag1, kLag2),
                                         config.delay);
-  absl::optional<DelayEstimate> aggregated_lag;
+  std::optional<DelayEstimate> aggregated_lag;
   for (size_t k = 0; k < kNumLagsBeforeDetection; ++k) {
     aggregated_lag = aggregator.Aggregate(
         MatchedFilter::LagEstimate(/*lag=*/kLag1, /*pre_echo_lag=*/kLag1));

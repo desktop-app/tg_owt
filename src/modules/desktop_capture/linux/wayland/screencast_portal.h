@@ -12,15 +12,21 @@
 #define MODULES_DESKTOP_CAPTURE_LINUX_WAYLAND_SCREENCAST_PORTAL_H_
 
 #include <gio/gio.h>
+#include <glib-object.h>
+#include <glib.h>
 
+#include <cstdint>
 #include <string>
 
+#include "api/scoped_refptr.h"
 #include "modules/desktop_capture/desktop_capture_types.h"
 #include "modules/desktop_capture/linux/wayland/screen_capture_portal_interface.h"
 #include "modules/portal/pipewire_utils.h"
+#include "modules/portal/portal_guard.h"
 #include "modules/portal/portal_request_response.h"
-#include "modules/portal/xdg_desktop_portal_utils.h"
+#include "modules/portal/screencast_persist_mode.h"
 #include "modules/portal/xdg_session_details.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -52,20 +58,7 @@ class RTC_EXPORT ScreenCastPortal
     kMetadata = 0b100
   };
 
-  // Values are set based on persist mode property in
-  // xdg-desktop-portal/screencast
-  // https://github.com/flatpak/xdg-desktop-portal/blob/main/data/org.freedesktop.portal.ScreenCast.xml
-  enum class PersistMode : uint32_t {
-    // Do not allow to restore stream
-    kDoNotPersist = 0b00,
-    // The restore token is valid as long as the application is alive. It's
-    // stored in memory and revoked when the application closes its DBus
-    // connection
-    kTransient = 0b01,
-    // The restore token is stored in disk and is valid until the user manually
-    // revokes it
-    kPersistent = 0b10
-  };
+  using PersistMode = xdg_portal::ScreenCastPersistMode;
 
   // Interface that must be implemented by the ScreenCastPortal consumers.
   class PortalNotifier {
@@ -80,18 +73,19 @@ class RTC_EXPORT ScreenCastPortal
     virtual ~PortalNotifier() = default;
   };
 
-  ScreenCastPortal(CaptureType type, PortalNotifier* notifier);
+  ScreenCastPortal(CaptureType type,
+                   PortalNotifier* notifier,
+                   bool prefer_cursor_embedded);
   ScreenCastPortal(CaptureType type,
                    PortalNotifier* notifier,
                    ProxyRequestResponseHandler proxy_request_response_handler,
                    SourcesRequestResponseSignalHandler
                        sources_request_response_signal_handler,
-                   gpointer user_data,
                    // TODO(chromium:1291247): Remove the default option once
                    // downstream has been adjusted.
                    bool prefer_cursor_embedded = false);
 
-  ~ScreenCastPortal();
+  ~ScreenCastPortal() override;
 
   // Initialize ScreenCastPortal with series of DBus calls where we try to
   // obtain all the required information, like PipeWire file descriptor and
@@ -119,6 +113,7 @@ class RTC_EXPORT ScreenCastPortal
 
   // ScreenCast specific methods for stream restoration
   void SetPersistMode(ScreenCastPortal::PersistMode mode);
+  ScreenCastPortal::PersistMode persist_mode() const { return persist_mode_; }
   void SetRestoreToken(const std::string& token);
   std::string RestoreToken() const;
 
@@ -151,7 +146,6 @@ class RTC_EXPORT ScreenCastPortal
 
   ProxyRequestResponseHandler proxy_request_response_handler_;
   SourcesRequestResponseSignalHandler sources_request_response_signal_handler_;
-  gpointer user_data_;
 
   GDBusConnection* connection_ = nullptr;
   GDBusProxy* proxy_ = nullptr;
@@ -164,6 +158,8 @@ class RTC_EXPORT ScreenCastPortal
   guint sources_request_signal_id_ = 0;
   guint start_request_signal_id_ = 0;
   guint session_closed_signal_id_ = 0;
+
+  scoped_refptr<PortalGuard> guard_;
 
   void UnsubscribeSignalHandlers();
   static void OnProxyRequested(GObject* object,

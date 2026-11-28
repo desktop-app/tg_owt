@@ -8,15 +8,46 @@
 
 import("../../webrtc.gni")
 
+rtc_library("force_test_environment") {
+  visibility = webrtc_default_visibility
+  sources = [
+    "force_test_environment.cc",
+    "force_test_environment.h",
+  ]
+}
+
 rtc_source_set("environment") {
   visibility = [ "*" ]
   sources = [ "environment.h" ]
   deps = [
+    "..:field_trials_view",
     "..:refcountedbase",
     "..:scoped_refptr",
     "../../rtc_base/system:rtc_export",
+    "../../system_wrappers",
+    "../rtc_event_log",
+    "../task_queue",
+    "//third_party/abseil-cpp/absl/base:nullability",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/base:nullability" ]
+}
+
+rtc_library("deprecated_global_field_trials") {
+  visibility = [
+    ":environment_factory",
+    "../../sdk:peerconnectionfactory_base_objc",
+    "../../sdk/android:peerconnection_jni",
+  ]
+  allow_poison = [ "environment_construction" ]
+  sources = [
+    "deprecated_global_field_trials.cc",
+    "deprecated_global_field_trials.h",
+  ]
+  deps = [
+    "..:field_trials_registry",
+    "../../rtc_base:checks",
+    "../../rtc_base:logging",
+    "//third_party/abseil-cpp/absl/strings:string_view",
+  ]
 }
 
 rtc_library("environment_factory") {
@@ -27,7 +58,10 @@ rtc_library("environment_factory") {
     "environment_factory.h",
   ]
   deps = [
+    ":deprecated_global_field_trials",
     ":environment",
+    ":force_test_environment",
+    "..:field_trials_view",
     "..:make_ref_counted",
     "..:refcountedbase",
     "..:scoped_refptr",
@@ -35,29 +69,28 @@ rtc_library("environment_factory") {
     "../../rtc_base/system:rtc_export",
     "../../system_wrappers",
     "../rtc_event_log",
+    "../task_queue",
     "../task_queue:default_task_queue_factory",
-    "../transport:field_trial_based_config",
+    "//third_party/abseil-cpp/absl/base:nullability",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/base:nullability" ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("environment_unittests") {
-    testonly = true
+  rtc_cc_test("environment_unittest") {
     sources = [ "environment_unittest.cc" ]
     deps = [
       ":environment",
       ":environment_factory",
+      ":force_test_environment",
       "..:field_trials_view",
       "../../system_wrappers",
+      "../../test:create_test_environment",
       "../../test:test_support",
       "../rtc_event_log",
       "../task_queue",
       "../units:timestamp",
-    ]
-    absl_deps = [
       "//third_party/abseil-cpp/absl/functional:any_invocable",
-      "//third_party/abseil-cpp/absl/types:optional",
+      "//third_party/abseil-cpp/absl/strings:string_view",
     ]
   }
 }

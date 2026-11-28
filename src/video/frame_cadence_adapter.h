@@ -11,17 +11,18 @@
 #ifndef VIDEO_FRAME_CADENCE_ADAPTER_H_
 #define VIDEO_FRAME_CADENCE_ADAPTER_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
 
-#include "absl/base/attributes.h"
 #include "api/field_trials_view.h"
 #include "api/metronome/metronome.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
-#include "rtc_base/synchronization/mutex.h"
-#include "rtc_base/thread_annotations.h"
 #include "system_wrappers/include/clock.h"
 
 namespace webrtc {
@@ -30,8 +31,7 @@ namespace webrtc {
 // With the exception of the constructor and the methods overridden in
 // VideoSinkInterface, the rest of the interface to this class (including dtor)
 // needs to happen on the queue passed in Create.
-class FrameCadenceAdapterInterface
-    : public rtc::VideoSinkInterface<VideoFrame> {
+class FrameCadenceAdapterInterface : public VideoSinkInterface<VideoFrame> {
  public:
   // Averaging window spanning 90 frames at default 30fps, matching old media
   // optimization module defaults.
@@ -93,15 +93,11 @@ class FrameCadenceAdapterInterface
   // zero-hertz operation. If absl:::nullopt is passed, the cadence adapter will
   // switch to passthrough mode.
   virtual void SetZeroHertzModeEnabled(
-      absl::optional<ZeroHertzModeParams> params) = 0;
+      std::optional<ZeroHertzModeParams> params) = 0;
 
   // Returns the input framerate. This is measured by RateStatistics when
   // zero-hertz mode is off, and returns the max framerate in zero-hertz mode.
-  virtual absl::optional<uint32_t> GetInputFrameRateFps() = 0;
-
-  // Updates frame rate. This is done unconditionally irrespective of adapter
-  // mode.
-  virtual void UpdateFrameRate() = 0;
+  virtual std::optional<uint32_t> GetInputFrameRateFps() = 0;
 
   // Updates quality convergence status for an enabled spatial layer.
   // Convergence means QP has dropped to a low-enough level to warrant ceasing
@@ -116,7 +112,7 @@ class FrameCadenceAdapterInterface
   // The new `max_frame_rate` will only affect the cadence of Callback::OnFrame
   // for non-idle (non converged) repeated frames.
   virtual void UpdateVideoSourceRestrictions(
-      absl::optional<double> max_frame_rate) = 0;
+      std::optional<double> max_frame_rate) = 0;
 
   // Conditionally requests a refresh frame via
   // Callback::RequestRefreshFrame.

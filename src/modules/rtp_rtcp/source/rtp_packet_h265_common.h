@@ -10,14 +10,16 @@
 #ifndef MODULES_RTP_RTCP_SOURCE_RTP_PACKET_H265_COMMON_H_
 #define MODULES_RTP_RTCP_SOURCE_RTP_PACKET_H265_COMMON_H_
 
-#include <string>
-#include <vector>
+#include <cstddef>
+#include <cstdint>
 
 namespace webrtc {
 // The payload header consists of the same
 // fields (F, Type, LayerId and TID) as the NAL unit header. Refer to
 // section 4.4 in RFC 7798.
 constexpr size_t kH265PayloadHeaderSizeBytes = 2;
+constexpr uint8_t kH265MaxLayerId = 127;
+constexpr uint8_t kH265MaxTemporalId = 7;
 // Unlike H.264, H.265 NAL header is 2-bytes.
 constexpr size_t kH265NalHeaderSizeBytes = 2;
 // H.265's FU is constructed of 2-byte payload header, 1-byte FU header and FU

@@ -8,21 +8,35 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <list>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "absl/algorithm/container.h"
+#include "modules/include/module_fec_types.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
 #include "modules/rtp_rtcp/source/fec_test_helper.h"
 #include "modules/rtp_rtcp/source/flexfec_03_header_reader_writer.h"
 #include "modules/rtp_rtcp/source/forward_error_correction.h"
+#include "modules/rtp_rtcp/source/forward_error_correction_internal.h"
 #include "modules/rtp_rtcp/source/ulpfec_header_reader_writer.h"
+#include "rtc_base/byte_order.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/random.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 
 namespace {
+
+using ::testing::IsEmpty;
+using ::testing::SizeIs;
 
 // Transport header size in bytes. Assume UDP/IPv4 as a reasonable minimum.
 constexpr size_t kTransportOverhead = 28;
@@ -173,7 +187,7 @@ bool RtpFecTest<ForwardErrorCorrectionType>::IsRecoveryComplete() {
 
 class FlexfecForwardErrorCorrection : public ForwardErrorCorrection {
  public:
-  static const uint32_t kFecSsrc = kFlexfecSsrc;
+  static constexpr uint32_t kFecSsrc = kFlexfecSsrc;
 
   FlexfecForwardErrorCorrection()
       : ForwardErrorCorrection(
@@ -184,7 +198,7 @@ class FlexfecForwardErrorCorrection : public ForwardErrorCorrection {
 
   // For FlexFEC we let the FEC packet sequence numbers be independent of
   // the media packet sequence numbers.
-  static uint16_t GetFirstFecSeqNum(uint16_t next_media_seq_num) {
+  static uint16_t GetFirstFecSeqNum(uint16_t /* next_media_seq_num */) {
     Random random(0xbe110);
     return random.Rand<uint16_t>();
   }
@@ -192,7 +206,7 @@ class FlexfecForwardErrorCorrection : public ForwardErrorCorrection {
 
 class UlpfecForwardErrorCorrection : public ForwardErrorCorrection {
  public:
-  static const uint32_t kFecSsrc = kMediaSsrc;
+  static constexpr uint32_t kFecSsrc = kMediaSsrc;
 
   UlpfecForwardErrorCorrection()
       : ForwardErrorCorrection(
@@ -260,22 +274,44 @@ TYPED_TEST(RtpFecTest,
 
 TYPED_TEST(RtpFecTest,
            WillNotProtectMediaPacketsWithOutOfOrderWrappedSequenceNumbers) {
-  for (uint16_t middle_seq_num : {46, 47}) {
-    auto media_packets =
-        this->media_packet_generator_.ConstructMediaPackets(3);
-    ASSERT_EQ(3u, media_packets.size());
-    auto it = media_packets.begin();
-    ByteWriter<uint16_t>::WriteBigEndian((*it++)->data.MutableData() + 2, 0);
-    ByteWriter<uint16_t>::WriteBigEndian(
-        (*it++)->data.MutableData() + 2, middle_seq_num);
-    ByteWriter<uint16_t>::WriteBigEndian((*it++)->data.MutableData() + 2, 20);
+  ForwardErrorCorrection::PacketList media_packets =
+      this->media_packet_generator_.ConstructMediaPackets(3);
+  ASSERT_THAT(media_packets, SizeIs(3));
+  // Set RTP sequence numbers.
+  auto it = media_packets.begin();
+  SetBE16((**(it++)).data.AsMutableSpan().subspan(2), 0);
+  SetBE16((**(it++)).data.AsMutableSpan().subspan(2), 47);
+  // Sequence number = 2^16 + 20 after wrap around become 20.
+  SetBE16((**(it++)).data.AsMutableSpan().subspan(2), 20);
 
-    std::list<ForwardErrorCorrection::Packet*> generated_fec_packets;
-    EXPECT_LT(this->fec_.EncodeFec(media_packets, 127, 3, false,
+  std::list<ForwardErrorCorrection::Packet*> generated_fec_packets;
+  EXPECT_LT(this->fec_.EncodeFec(media_packets, /*protection_factor=*/127,
+                                 /*num_important_packets=*/3,
+                                 /*use_unequal_protection=*/false,
                                  kFecMaskBursty, &generated_fec_packets),
-              0);
-    EXPECT_TRUE(generated_fec_packets.empty());
-  }
+            0);
+  EXPECT_THAT(generated_fec_packets, IsEmpty());
+}
+
+TYPED_TEST(RtpFecTest,
+           WillNotProtectMediaPacketsWithOutOfOrderWrappedSequenceNumbers2) {
+  ForwardErrorCorrection::PacketList media_packets =
+      this->media_packet_generator_.ConstructMediaPackets(3);
+  ASSERT_THAT(media_packets, SizeIs(3));
+  // Set RTP sequence numbers.
+  auto it = media_packets.begin();
+  SetBE16((**(it++)).data.AsMutableSpan().subspan(2), 0);
+  SetBE16((**(it++)).data.AsMutableSpan().subspan(2), 46);
+  // Sequence number = 2^16 + 20 after wrap around become 20.
+  SetBE16((**(it++)).data.AsMutableSpan().subspan(2), 20);
+
+  std::list<ForwardErrorCorrection::Packet*> generated_fec_packets;
+  EXPECT_LT(this->fec_.EncodeFec(media_packets, /*protection_factor=*/127,
+                                 /*num_important_packets=*/3,
+                                 /*use_unequal_protection=*/false,
+                                 kFecMaskBursty, &generated_fec_packets),
+            0);
+  EXPECT_THAT(generated_fec_packets, IsEmpty());
 }
 
 TYPED_TEST(RtpFecTest, FecRecoveryNoLoss) {

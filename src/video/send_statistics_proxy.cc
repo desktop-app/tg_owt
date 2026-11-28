@@ -13,19 +13,50 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <limits>
+#include <map>
+#include <optional>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/match.h"
+#include "api/environment/environment.h"
+#include "api/field_trials_view.h"
+#include "api/units/data_rate.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_adaptation_counters.h"
+#include "api/video/video_adaptation_reason.h"
+#include "api/video/video_bitrate_allocation.h"
 #include "api/video/video_codec_constants.h"
 #include "api/video/video_codec_type.h"
+#include "api/video/video_content_type.h"
+#include "api/video/video_timing.h"
 #include "api/video_codecs/video_codec.h"
+#include "call/rtp_config.h"
+#include "call/video_send_stream.h"
+#include "common_video/frame_counts.h"
+#include "common_video/include/quality_limitation_reason.h"
+#include "modules/rtp_rtcp/include/report_block_data.h"
+#include "modules/rtp_rtcp/include/rtcp_statistics.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/video_coding/codecs/interface/common_constants.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/mod_ops.h"
 #include "rtc_base/strings/string_builder.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/metrics.h"
+#include "video/config/video_encoder_config.h"
+#include "video/stats_counter.h"
+#include "video/video_stream_encoder_observer.h"
 
 namespace webrtc {
 namespace {
@@ -97,77 +128,78 @@ bool IsForcedFallbackPossible(const CodecSpecificInfo* codec_info,
           codec_info->codecSpecific.VP8.temporalIdx == kNoTemporalIdx);
 }
 
-absl::optional<int> GetFallbackMaxPixels(const std::string& group) {
+std::optional<int> GetFallbackMaxPixels(const std::string& group) {
   if (group.empty())
-    return absl::nullopt;
+    return std::nullopt;
 
   int min_pixels;
   int max_pixels;
   int min_bps;
   if (sscanf(group.c_str(), "-%d,%d,%d", &min_pixels, &max_pixels, &min_bps) !=
       3) {
-    return absl::optional<int>();
+    return std::optional<int>();
   }
 
   if (min_pixels <= 0 || max_pixels <= 0 || max_pixels < min_pixels)
-    return absl::optional<int>();
+    return std::optional<int>();
 
-  return absl::optional<int>(max_pixels);
+  return std::optional<int>(max_pixels);
 }
 
-absl::optional<int> GetFallbackMaxPixelsIfFieldTrialEnabled(
-    const webrtc::FieldTrialsView& field_trials) {
+std::optional<int> GetFallbackMaxPixelsIfFieldTrialEnabled(
+    const FieldTrialsView& field_trials) {
   std::string group = field_trials.Lookup(kVp8ForcedFallbackEncoderFieldTrial);
   return (absl::StartsWith(group, "Enabled"))
              ? GetFallbackMaxPixels(group.substr(7))
-             : absl::optional<int>();
+             : std::optional<int>();
 }
 
-absl::optional<int> GetFallbackMaxPixelsIfFieldTrialDisabled(
-    const webrtc::FieldTrialsView& field_trials) {
+std::optional<int> GetFallbackMaxPixelsIfFieldTrialDisabled(
+    const FieldTrialsView& field_trials) {
   std::string group = field_trials.Lookup(kVp8ForcedFallbackEncoderFieldTrial);
   return (absl::StartsWith(group, "Disabled"))
              ? GetFallbackMaxPixels(group.substr(8))
-             : absl::optional<int>();
+             : std::optional<int>();
 }
+
 }  // namespace
 
 SendStatisticsProxy::SendStatisticsProxy(
-    Clock* clock,
+    const Environment& env,
     const VideoSendStream::Config& config,
-    VideoEncoderConfig::ContentType content_type,
-    const FieldTrialsView& field_trials)
-    : clock_(clock),
+    VideoEncoderConfig::ContentType content_type)
+    : env_(env),
       payload_name_(config.rtp.payload_name),
       rtp_config_(config.rtp),
       fallback_max_pixels_(
-          GetFallbackMaxPixelsIfFieldTrialEnabled(field_trials)),
+          GetFallbackMaxPixelsIfFieldTrialEnabled(env_.field_trials())),
       fallback_max_pixels_disabled_(
-          GetFallbackMaxPixelsIfFieldTrialDisabled(field_trials)),
+          GetFallbackMaxPixelsIfFieldTrialDisabled(env_.field_trials())),
       content_type_(content_type),
-      start_ms_(clock->TimeInMilliseconds()),
+      start_(env_.clock().CurrentTime()),
       encode_time_(kEncodeTimeWeigthFactor),
-      quality_limitation_reason_tracker_(clock_),
+      quality_limitation_reason_tracker_(&env_.clock()),
       media_byte_rate_tracker_(kBucketSizeMs, kBucketCount),
       encoded_frame_rate_tracker_(kBucketSizeMs, kBucketCount),
+      dropped_due_to_bandwidth_rate_tracker_(kBucketSizeMs, kBucketCount),
       last_num_spatial_layers_(0),
       last_num_simulcast_streams_(0),
       last_spatial_layer_use_{},
       bw_limited_layers_(false),
       internal_encoder_scaler_(false),
-      uma_container_(
-          new UmaSamplesContainer(GetUmaPrefix(content_type_), stats_, clock)) {
-}
+      uma_container_(new UmaSamplesContainer(GetUmaPrefix(content_type_),
+                                             stats_,
+                                             &env_.clock())) {}
 
 SendStatisticsProxy::~SendStatisticsProxy() {
   MutexLock lock(&mutex_);
   uma_container_->UpdateHistograms(rtp_config_, stats_);
 
-  int64_t elapsed_sec = (clock_->TimeInMilliseconds() - start_ms_) / 1000;
+  TimeDelta elapsed = env_.clock().CurrentTime() - start_;
   RTC_HISTOGRAM_COUNTS_100000("WebRTC.Video.SendStreamLifetimeInSeconds",
-                              elapsed_sec);
+                              elapsed.seconds());
 
-  if (elapsed_sec >= metrics::kMinRunTimeInSeconds)
+  if (elapsed >= metrics::kMinRunTime)
     UpdateCodecTypeHistogram(payload_name_);
 }
 
@@ -259,6 +291,70 @@ void SendStatisticsProxy::UmaSamplesContainer::RemoveOld(int64_t now_ms) {
   }
 }
 
+void SendStatisticsProxy::UmaSamplesContainer::LogPsnrValues(
+    const PsnrCounters& psnr_counters,
+    std::optional<int> spatial_id) {
+  constexpr int kPsnrScalingFactor = 10;
+  constexpr int kPsnrMin = 1;
+  constexpr int kPsnrMax = 1000;
+  constexpr int kPsnrBucketCount = 1000;
+
+  if (spatial_id.has_value()) {
+    RTC_CHECK_GE(*spatial_id, 0);
+    RTC_CHECK_LT(*spatial_id, kMaxSpatialLayers);
+  }
+
+  StringBuilder ssb;
+  ssb << uma_prefix_ << "Psnr";
+  if (spatial_id.has_value()) {
+    ssb << ".S" << *spatial_id;
+  }
+  ssb << ".X";
+  std::string uma_name = ssb.Release();
+
+  std::optional<float> psnr_y =
+      psnr_counters.psnr_y.Avg(kMinRequiredPsnrSamples);
+  if (psnr_y.has_value()) {
+    uma_name.back() = 'Y';
+    metrics::Histogram* histogram = metrics::HistogramFactoryGetCountsLinear(
+        uma_name, kPsnrMin, kPsnrMax, kPsnrBucketCount);
+    if (histogram) {
+      metrics::HistogramAdd(histogram, psnr_y.value() * kPsnrScalingFactor);
+    } else {
+      RTC_LOG(LS_WARNING) << "Failed to create histogram for " << uma_name
+                          << ". psnr_y = " << psnr_y.value();
+    }
+  }
+
+  std::optional<float> psnr_u =
+      psnr_counters.psnr_u.Avg(kMinRequiredPsnrSamples);
+  if (psnr_u.has_value()) {
+    uma_name.back() = 'U';
+    metrics::Histogram* histogram = metrics::HistogramFactoryGetCountsLinear(
+        uma_name, kPsnrMin, kPsnrMax, kPsnrBucketCount);
+    if (histogram) {
+      metrics::HistogramAdd(histogram, psnr_u.value() * kPsnrScalingFactor);
+    } else {
+      RTC_LOG(LS_WARNING) << "Failed to create histogram for " << uma_name
+                          << ". psnr_u = " << psnr_u.value();
+    }
+  }
+
+  std::optional<float> psnr_v =
+      psnr_counters.psnr_v.Avg(kMinRequiredPsnrSamples);
+  if (psnr_v.has_value()) {
+    uma_name.back() = 'V';
+    metrics::Histogram* histogram = metrics::HistogramFactoryGetCountsLinear(
+        uma_name, kPsnrMin, kPsnrMax, kPsnrBucketCount);
+    if (histogram) {
+      metrics::HistogramAdd(histogram, psnr_v.value() * kPsnrScalingFactor);
+    } else {
+      RTC_LOG(LS_WARNING) << "Failed to create histogram for " << uma_name
+                          << ". psnr_v = " << psnr_v.value();
+    }
+  }
+}
+
 bool SendStatisticsProxy::UmaSamplesContainer::InsertEncodedFrame(
     const EncodedImage& encoded_frame,
     int simulcast_idx) {
@@ -305,8 +401,7 @@ void SendStatisticsProxy::UmaSamplesContainer::UpdateHistograms(
   RTC_DCHECK(uma_prefix_ == kRealtimePrefix || uma_prefix_ == kScreenPrefix);
   const int kIndex = uma_prefix_ == kScreenPrefix ? 1 : 0;
   const int kMinRequiredPeriodicSamples = 6;
-  char log_stream_buf[8 * 1024];
-  rtc::SimpleStringBuilder log_stream(log_stream_buf);
+  StringBuilder log_stream;
   int in_width = input_width_counter_.Avg(kMinRequiredMetricsSamples);
   int in_height = input_height_counter_.Avg(kMinRequiredMetricsSamples);
   if (in_width != -1) {
@@ -484,32 +579,58 @@ void SendStatisticsProxy::UmaSamplesContainer::UpdateHistograms(
             << "QP stats not recorded for H264 spatial idx " << spatial_idx;
       }
     }
+    int qp_av1 = it.second.av1.Avg(kMinRequiredMetricsSamples);
+    if (qp_av1 != -1) {
+      int spatial_idx = it.first;
+      if (spatial_idx == -1) {
+        RTC_HISTOGRAMS_COUNTS_500(kIndex, uma_prefix_ + "Encoded.Qp.Av1",
+                                  qp_av1);
+      } else if (spatial_idx == 0) {
+        RTC_HISTOGRAMS_COUNTS_500(kIndex, uma_prefix_ + "Encoded.Qp.Av1.S0",
+                                  qp_av1);
+      } else if (spatial_idx == 1) {
+        RTC_HISTOGRAMS_COUNTS_500(kIndex, uma_prefix_ + "Encoded.Qp.Av1.S1",
+                                  qp_av1);
+      } else if (spatial_idx == 2) {
+        RTC_HISTOGRAMS_COUNTS_500(kIndex, uma_prefix_ + "Encoded.Qp.Av1.S2",
+                                  qp_av1);
+      } else {
+        RTC_LOG(LS_WARNING)
+            << "QP stats not recorded for AV1 spatial idx " << spatial_idx;
+      }
+    }
     int qp_h265 = it.second.h265.Avg(kMinRequiredMetricsSamples);
     if (qp_h265 != -1) {
       int spatial_idx = it.first;
       if (spatial_idx == -1) {
         RTC_HISTOGRAMS_COUNTS_200(kIndex, uma_prefix_ + "Encoded.Qp.H265",
-                                    qp_h265);
+                                  qp_h265);
       } else if (spatial_idx == 0) {
         RTC_HISTOGRAMS_COUNTS_200(kIndex, uma_prefix_ + "Encoded.Qp.H265.S0",
-                                    qp_h265);
+                                  qp_h265);
       } else if (spatial_idx == 1) {
         RTC_HISTOGRAMS_COUNTS_200(kIndex, uma_prefix_ + "Encoded.Qp.H265.S1",
-                                    qp_h265);
+                                  qp_h265);
       } else if (spatial_idx == 2) {
         RTC_HISTOGRAMS_COUNTS_200(kIndex, uma_prefix_ + "Encoded.Qp.H265.S2",
-                                    qp_h265);
+                                  qp_h265);
       } else {
         RTC_LOG(LS_WARNING)
-              << "QP stats not recorded for H265 spatial idx " << spatial_idx;
+            << "QP stats not recorded for H265 spatial idx " << spatial_idx;
       }
     }
+  }
+
+  for (const auto& [spatial_idx, psnr_counter] : psnr_counters_) {
+    LogPsnrValues(psnr_counter, spatial_idx == -1
+                                    ? std::nullopt
+                                    : std::optional<int>(spatial_idx));
   }
 
   if (first_rtp_stats_time_ms_ != -1) {
     quality_adapt_timer_.Stop(clock_->TimeInMilliseconds());
     int64_t elapsed_sec = quality_adapt_timer_.total_ms / 1000;
-    if (elapsed_sec >= metrics::kMinRunTimeInSeconds) {
+    if (elapsed_sec >= metrics::kMinRunTime.seconds()) {
       int quality_changes = current_stats.number_of_quality_adapt_changes -
                             start_stats_.number_of_quality_adapt_changes;
       // Only base stats on changes during a call, discard initial changes.
@@ -523,7 +644,7 @@ void SendStatisticsProxy::UmaSamplesContainer::UpdateHistograms(
     }
     cpu_adapt_timer_.Stop(clock_->TimeInMilliseconds());
     elapsed_sec = cpu_adapt_timer_.total_ms / 1000;
-    if (elapsed_sec >= metrics::kMinRunTimeInSeconds) {
+    if (elapsed_sec >= metrics::kMinRunTime.seconds()) {
       int cpu_changes = current_stats.number_of_cpu_adapt_changes -
                         start_stats_.number_of_cpu_adapt_changes;
       RTC_HISTOGRAMS_COUNTS_100(kIndex,
@@ -535,7 +656,7 @@ void SendStatisticsProxy::UmaSamplesContainer::UpdateHistograms(
   if (first_rtcp_stats_time_ms_ != -1) {
     int64_t elapsed_sec =
         (clock_->TimeInMilliseconds() - first_rtcp_stats_time_ms_) / 1000;
-    if (elapsed_sec >= metrics::kMinRunTimeInSeconds) {
+    if (elapsed_sec >= metrics::kMinRunTime.seconds()) {
       int fraction_lost = report_block_stats_.FractionLostInPercent();
       if (fraction_lost != -1) {
         RTC_HISTOGRAMS_PERCENTAGE(
@@ -585,14 +706,14 @@ void SendStatisticsProxy::UmaSamplesContainer::UpdateHistograms(
   if (first_rtp_stats_time_ms_ != -1) {
     int64_t elapsed_sec =
         (clock_->TimeInMilliseconds() - first_rtp_stats_time_ms_) / 1000;
-    if (elapsed_sec >= metrics::kMinRunTimeInSeconds) {
+    if (elapsed_sec >= metrics::kMinRunTime.seconds()) {
       RTC_HISTOGRAMS_COUNTS_100(kIndex, uma_prefix_ + "NumberOfPauseEvents",
                                 target_rate_updates_.pause_resume_events);
       log_stream << uma_prefix_ << "NumberOfPauseEvents "
                  << target_rate_updates_.pause_resume_events << "\n";
 
       int paused_time_percent =
-          paused_time_counter_.Percent(metrics::kMinRunTimeInSeconds * 1000);
+          paused_time_counter_.Percent(metrics::kMinRunTime.seconds() * 1000);
       if (paused_time_percent != -1) {
         RTC_HISTOGRAMS_PERCENTAGE(kIndex, uma_prefix_ + "PausedTimeInPercent",
                                   paused_time_percent);
@@ -604,10 +725,11 @@ void SendStatisticsProxy::UmaSamplesContainer::UpdateHistograms(
 
   if (fallback_info_.is_possible) {
     // Double interval since there is some time before fallback may occur.
-    const int kMinRunTimeMs = 2 * metrics::kMinRunTimeInSeconds * 1000;
+    const TimeDelta kMinRunTime = 2 * metrics::kMinRunTime;
     int64_t elapsed_ms = fallback_info_.elapsed_ms;
-    int fallback_time_percent = fallback_active_counter_.Percent(kMinRunTimeMs);
-    if (fallback_time_percent != -1 && elapsed_ms >= kMinRunTimeMs) {
+    int fallback_time_percent =
+        fallback_active_counter_.Percent(kMinRunTime.ms());
+    if (fallback_time_percent != -1 && elapsed_ms >= kMinRunTime.ms()) {
       RTC_HISTOGRAMS_PERCENTAGE(
           kIndex, uma_prefix_ + "Encoder.ForcedSwFallbackTimeInPercent.Vp8",
           fallback_time_percent);
@@ -709,7 +831,7 @@ void SendStatisticsProxy::OnEncoderReconfigured(
   if (content_type_ != config.content_type) {
     uma_container_->UpdateHistograms(rtp_config_, stats_);
     uma_container_.reset(new UmaSamplesContainer(
-        GetUmaPrefix(config.content_type), stats_, clock_));
+        GetUmaPrefix(config.content_type), stats_, &env_.clock()));
     content_type_ = config.content_type;
   }
   uma_container_->encoded_frames_.clear();
@@ -722,7 +844,6 @@ void SendStatisticsProxy::OnEncodedFrameTimeMeasured(int encode_time_ms,
                                                      int encode_usage_percent) {
   RTC_DCHECK_GE(encode_time_ms, 0);
   MutexLock lock(&mutex_);
-  uma_container_->encode_time_counter_.Add(encode_time_ms);
   encode_time_.Apply(1.0f, encode_time_ms);
   stats_.avg_encode_time_ms = std::round(encode_time_.filtered());
   stats_.total_encode_time_ms += encode_time_ms;
@@ -730,7 +851,7 @@ void SendStatisticsProxy::OnEncodedFrameTimeMeasured(int encode_time_ms,
 }
 
 void SendStatisticsProxy::OnSuspendChange(bool is_suspended) {
-  int64_t now_ms = clock_->TimeInMilliseconds();
+  int64_t now_ms = env_.clock().TimeInMilliseconds();
   MutexLock lock(&mutex_);
   stats_.suspended = is_suspended;
   if (is_suspended) {
@@ -768,29 +889,36 @@ void SendStatisticsProxy::OnSuspendChange(bool is_suspended) {
 
 VideoSendStream::Stats SendStatisticsProxy::GetStats() {
   MutexLock lock(&mutex_);
-  PurgeOldStats();
-  stats_.input_frame_rate =
-      uma_container_->input_frame_rate_tracker_.ComputeRate();
+  Timestamp now = env_.clock().CurrentTime();
+  PurgeOldStats(now);
+  stats_.input_frame_rate = uma_container_->input_frame_rate_tracker_.Rate(now);
   stats_.frames = uma_container_->input_frame_rate_tracker_.TotalSampleCount();
   stats_.content_type =
       content_type_ == VideoEncoderConfig::ContentType::kRealtimeVideo
           ? VideoContentType::UNSPECIFIED
           : VideoContentType::SCREENSHARE;
-  stats_.encode_frame_rate = round(encoded_frame_rate_tracker_.ComputeRate());
-  stats_.media_bitrate_bps = media_byte_rate_tracker_.ComputeRate() * 8;
+  stats_.encode_frame_rate = round(encoded_frame_rate_tracker_.Rate(now));
+  stats_.media_bitrate_bps = media_byte_rate_tracker_.Rate(now) * 8;
   stats_.quality_limitation_durations_ms =
       quality_limitation_reason_tracker_.DurationsMs();
 
   for (auto& [ssrc, substream] : stats_.substreams) {
     if (auto it = trackers_.find(ssrc); it != trackers_.end()) {
-      substream.encode_frame_rate = it->second.encoded_frame_rate.ComputeRate();
+      substream.encode_frame_rate = it->second.encoded_frame_rate.Rate(now);
     }
   }
   return stats_;
 }
 
-void SendStatisticsProxy::PurgeOldStats() {
-  Timestamp now = clock_->CurrentTime();
+void SendStatisticsProxy::SetStats(const VideoSendStream::Stats& stats) {
+  MutexLock lock(&mutex_);
+  stats_ = stats;
+  quality_limitation_reason_tracker_.SetReason(stats.quality_limitation_reason);
+  quality_limitation_reason_tracker_.SetDurationMs(
+      stats.quality_limitation_durations_ms);
+}
+
+void SendStatisticsProxy::PurgeOldStats(Timestamp now) {
   for (auto& [ssrc, substream] : stats_.substreams) {
     if (now - trackers_[ssrc].resolution_update >= kStatsTimeout) {
       substream.width = 0;
@@ -857,7 +985,7 @@ void SendStatisticsProxy::OnSetEncoderTargetRate(uint32_t bitrate_bps) {
   if (uma_container_->target_rate_updates_.last_ms == -1 && bitrate_bps == 0)
     return;  // Start on first non-zero bitrate, may initially be zero.
 
-  int64_t now = clock_->TimeInMilliseconds();
+  int64_t now = env_.clock().TimeInMilliseconds();
   if (uma_container_->target_rate_updates_.last_ms != -1) {
     bool was_paused = stats_.target_media_bitrate_bps == 0;
     int64_t diff_ms = now - uma_container_->target_rate_updates_.last_ms;
@@ -893,7 +1021,7 @@ void SendStatisticsProxy::UpdateEncoderFallbackStats(
 
   FallbackEncoderInfo* fallback_info = &uma_container_->fallback_info_;
 
-  const int64_t now_ms = clock_->TimeInMilliseconds();
+  const int64_t now_ms = env_.clock().TimeInMilliseconds();
   bool is_active = fallback_info->is_active;
   if (encoder_changed_) {
     // Implementation changed.
@@ -961,19 +1089,8 @@ void SendStatisticsProxy::OnSendEncodedImage(
     const CodecSpecificInfo* codec_info) {
   int simulcast_idx = encoded_image.SimulcastIndex().value_or(0);
   MutexLock lock(&mutex_);
+  Timestamp now = env_.clock().CurrentTime();
   ++stats_.frames_encoded;
-  // The current encode frame rate is based on previously encoded frames.
-  double encode_frame_rate = encoded_frame_rate_tracker_.ComputeRate();
-  // We assume that less than 1 FPS is not a trustworthy estimate - perhaps we
-  // just started encoding for the first time or after a pause. Assuming frame
-  // rate is at least 1 FPS is conservative to avoid too large increments.
-  if (encode_frame_rate < 1.0)
-    encode_frame_rate = 1.0;
-  double target_frame_size_bytes =
-      stats_.target_media_bitrate_bps / (8.0 * encode_frame_rate);
-  // `stats_.target_media_bitrate_bps` is set in
-  // SendStatisticsProxy::OnSetEncoderTargetRate.
-  stats_.total_encoded_bytes_target += round(target_frame_size_bytes);
   if (codec_info) {
     UpdateEncoderFallbackStats(
         codec_info, encoded_image._encodedWidth * encoded_image._encodedHeight,
@@ -995,10 +1112,12 @@ void SendStatisticsProxy::OnSendEncodedImage(
   Trackers& track = trackers_[ssrc];
 
   stats->frames_encoded++;
-  stats->total_encode_time_ms += encoded_image.timing_.encode_finish_ms -
-                                 encoded_image.timing_.encode_start_ms;
+  int64_t encode_time_ms = encoded_image.timing_.encode_finish_ms -
+                           encoded_image.timing_.encode_start_ms;
+  stats->total_encode_time_ms += encode_time_ms;
+  uma_container_->encode_time_counter_.Add(encode_time_ms);
   stats->scalability_mode =
-      codec_info ? codec_info->scalability_mode : absl::nullopt;
+      codec_info ? codec_info->scalability_mode : std::nullopt;
   // Report resolution of the top spatial layer.
   bool is_top_spatial_layer =
       codec_info == nullptr || codec_info->end_of_picture;
@@ -1006,11 +1125,10 @@ void SendStatisticsProxy::OnSendEncodedImage(
   if (!stats->width || !stats->height || is_top_spatial_layer) {
     stats->width = encoded_image._encodedWidth;
     stats->height = encoded_image._encodedHeight;
-    track.resolution_update = clock_->CurrentTime();
+    track.resolution_update = now;
   }
 
-  uma_container_->key_frame_counter_.Add(encoded_image._frameType ==
-                                         VideoFrameType::kVideoFrameKey);
+  uma_container_->key_frame_counter_.Add(encoded_image.IsKey());
 
   if (encoded_image.qp_ != -1) {
     if (!stats->qp_sum)
@@ -1032,8 +1150,28 @@ void SendStatisticsProxy::OnSendEncodedImage(
       } else if (codec_info->codecType == kVideoCodecH264) {
         int spatial_idx = (rtp_config_.ssrcs.size() == 1) ? -1 : simulcast_idx;
         uma_container_->qp_counters_[spatial_idx].h264.Add(encoded_image.qp_);
+      } else if (codec_info->codecType == kVideoCodecAV1) {
+        int stream_idx = encoded_image.SpatialIndex().value_or(
+            encoded_image.SimulcastIndex().value_or(-1));
+        uma_container_->qp_counters_[stream_idx].av1.Add(encoded_image.qp_);
+      } else if (codec_info->codecType == kVideoCodecH265) {
+        int spatial_idx = (rtp_config_.ssrcs.size() == 1) ? -1 : simulcast_idx;
+        uma_container_->qp_counters_[spatial_idx].h265.Add(encoded_image.qp_);
       }
     }
+  }
+
+  std::optional<EncodedImage::Psnr> psnr = encoded_image.psnr();
+  if (psnr.has_value()) {
+    stats->psnr_sum.y += psnr->y;
+    stats->psnr_sum.u += psnr->u;
+    stats->psnr_sum.v += psnr->v;
+    stats->psnr_measurements += 1;
+
+    int spatial_idx = (rtp_config_.ssrcs.size() == 1) ? -1 : simulcast_idx;
+    uma_container_->psnr_counters_[spatial_idx].psnr_y.Add(psnr->y);
+    uma_container_->psnr_counters_[spatial_idx].psnr_u.Add(psnr->u);
+    uma_container_->psnr_counters_[spatial_idx].psnr_v.Add(psnr->v);
   }
 
   // If any of the simulcast streams have a huge frame, it should be counted
@@ -1048,19 +1186,19 @@ void SendStatisticsProxy::OnSendEncodedImage(
     }
   }
 
-  media_byte_rate_tracker_.AddSamples(encoded_image.size());
+  media_byte_rate_tracker_.Update(encoded_image.size(), now);
 
   if (uma_container_->InsertEncodedFrame(encoded_image, simulcast_idx)) {
     // First frame seen with this timestamp, track overall fps.
-    encoded_frame_rate_tracker_.AddSamples(1);
+    encoded_frame_rate_tracker_.Update(1, now);
   }
   // is_top_spatial_layer pertains only to SVC, will always be true for
   // simulcast.
   if (is_top_spatial_layer) {
-    track.encoded_frame_rate.AddSamples(1);
+    track.encoded_frame_rate.Update(1, now);
   }
 
-  absl::optional<int> downscales =
+  std::optional<int> downscales =
       adaptation_limitations_.MaskedQualityCounts().resolution_adaptations;
   stats_.bw_limited_resolution |=
       (downscales.has_value() && downscales.value() > 0);
@@ -1070,36 +1208,40 @@ void SendStatisticsProxy::OnSendEncodedImage(
     if (downscales.value() > 0)
       uma_container_->quality_downscales_counter_.Add(downscales.value());
   }
+  UpdateAdaptationStats();
 }
 
 void SendStatisticsProxy::OnEncoderImplementationChanged(
     EncoderImplementation implementation) {
   MutexLock lock(&mutex_);
-  encoder_changed_ =
-      EncoderChangeEvent{stats_.encoder_implementation_name.value_or("unknown"),
-                         implementation.name};
+  encoder_changed_ = EncoderChangeEvent{
+      .previous_encoder_implementation =
+          stats_.encoder_implementation_name.value_or("unknown"),
+      .new_encoder_implementation = implementation.name};
   stats_.encoder_implementation_name = implementation.name;
   stats_.power_efficient_encoder = implementation.is_hardware_accelerated;
   // Clear cached scalability mode values, they may no longer be accurate.
   for (auto& pair : stats_.substreams) {
     VideoSendStream::StreamStats& stream_stats = pair.second;
-    stream_stats.scalability_mode = absl::nullopt;
+    stream_stats.scalability_mode = std::nullopt;
   }
 }
 
 int SendStatisticsProxy::GetInputFrameRate() const {
   MutexLock lock(&mutex_);
-  return round(uma_container_->input_frame_rate_tracker_.ComputeRate());
+  return round(uma_container_->input_frame_rate_tracker_.Rate(
+      env_.clock().CurrentTime()));
 }
 
 int SendStatisticsProxy::GetSendFrameRate() const {
   MutexLock lock(&mutex_);
-  return round(encoded_frame_rate_tracker_.ComputeRate());
+  return round(encoded_frame_rate_tracker_.Rate(env_.clock().CurrentTime()));
 }
 
 void SendStatisticsProxy::OnIncomingFrame(int width, int height) {
   MutexLock lock(&mutex_);
-  uma_container_->input_frame_rate_tracker_.AddSamples(1);
+  Timestamp now = env_.clock().CurrentTime();
+  uma_container_->input_frame_rate_tracker_.Update(1, now);
   uma_container_->input_fps_counter_.Add(1);
   uma_container_->input_width_counter_.Add(width);
   uma_container_->input_height_counter_.Add(height);
@@ -1111,12 +1253,13 @@ void SendStatisticsProxy::OnIncomingFrame(int width, int height) {
   if (encoded_frame_rate_tracker_.TotalSampleCount() == 0) {
     // Set start time now instead of when first key frame is encoded to avoid a
     // too high initial estimate.
-    encoded_frame_rate_tracker_.AddSamples(0);
+    encoded_frame_rate_tracker_.Update(0, now);
   }
 }
 
 void SendStatisticsProxy::OnFrameDropped(DropReason reason) {
   MutexLock lock(&mutex_);
+  Timestamp now = env_.clock().CurrentTime();
   switch (reason) {
     case DropReason::kSource:
       ++stats_.frames_dropped_by_capturer;
@@ -1129,14 +1272,17 @@ void SendStatisticsProxy::OnFrameDropped(DropReason reason) {
       break;
     case DropReason::kEncoder:
       ++stats_.frames_dropped_by_encoder;
+      dropped_due_to_bandwidth_rate_tracker_.Update(1, now);
       break;
     case DropReason::kMediaOptimization:
       ++stats_.frames_dropped_by_rate_limiter;
+      dropped_due_to_bandwidth_rate_tracker_.Update(1, now);
       break;
     case DropReason::kCongestionWindow:
       ++stats_.frames_dropped_by_congestion_window;
       break;
   }
+  UpdateAdaptationStats();
 }
 
 void SendStatisticsProxy::ClearAdaptationStats() {
@@ -1183,6 +1329,7 @@ void SendStatisticsProxy::OnAdaptationChanged(
 }
 
 void SendStatisticsProxy::UpdateAdaptationStats() {
+  Timestamp now = env_.clock().CurrentTime();
   auto cpu_counts = adaptation_limitations_.MaskedCpuCounts();
   auto quality_counts = adaptation_limitations_.MaskedQualityCounts();
 
@@ -1191,6 +1338,16 @@ void SendStatisticsProxy::UpdateAdaptationStats() {
   bool is_bandwidth_limited = quality_counts.resolution_adaptations > 0 ||
                               quality_counts.num_framerate_reductions > 0 ||
                               bw_limited_layers_ || internal_encoder_scaler_;
+  if (last_num_simulcast_streams_ == 1 && !is_bandwidth_limited) {
+    constexpr double kIsBandwidthLimitedFrameDropThreshold = 0.2;
+    double encode_fps = encoded_frame_rate_tracker_.Rate(now);
+    double drop_fps = dropped_due_to_bandwidth_rate_tracker_.Rate(now);
+    double total_fps = encode_fps + drop_fps;
+    if (total_fps > 0.0) {
+      is_bandwidth_limited = drop_fps / (encode_fps + drop_fps) >=
+                             kIsBandwidthLimitedFrameDropThreshold;
+    }
+  }
   if (is_bandwidth_limited) {
     // We may be both CPU limited and bandwidth limited at the same time but
     // there is no way to express this in standardized stats. Heuristically,
@@ -1239,27 +1396,49 @@ void SendStatisticsProxy::OnBitrateAllocationUpdated(
     const VideoCodec& codec,
     const VideoBitrateAllocation& allocation) {
   int num_spatial_layers = 0;
-  for (int i = 0; i < kMaxSpatialLayers; i++) {
+  for (size_t i = 0; i < kMaxSpatialLayers; i++) {
     if (codec.spatialLayers[i].active) {
       num_spatial_layers++;
     }
   }
   int num_simulcast_streams = 0;
-  for (int i = 0; i < kMaxSimulcastStreams; i++) {
+  for (size_t i = 0; i < kMaxSimulcastStreams; i++) {
     if (codec.simulcastStream[i].active) {
       num_simulcast_streams++;
     }
   }
 
   std::array<bool, kMaxSpatialLayers> spatial_layers;
-  for (int i = 0; i < kMaxSpatialLayers; i++) {
+  for (size_t i = 0; i < kMaxSpatialLayers; i++) {
     spatial_layers[i] = (allocation.GetSpatialLayerSum(i) > 0);
   }
 
   MutexLock lock(&mutex_);
 
   bw_limited_layers_ = allocation.is_bw_limited();
-  UpdateAdaptationStats();
+
+  // Store target bitrates per substream stats. Without simulcast, all spatial
+  // layers are sent on the first SSRC.
+  const bool single_stream = codec.numberOfSimulcastStreams <= 1;
+  for (auto& [ssrc, substream] : stats_.substreams) {
+    std::optional<size_t> encoding_index;
+    for (size_t i = 0; i < rtp_config_.ssrcs.size(); ++i) {
+      if (rtp_config_.ssrcs[i] == ssrc) {
+        encoding_index = i;
+        break;
+      }
+    }
+    if (!encoding_index.has_value() || (single_stream && *encoding_index > 0)) {
+      substream.target_bitrate = std::nullopt;
+      continue;
+    }
+    substream.target_bitrate = DataRate::BitsPerSec(
+        single_stream ? allocation.get_sum_bps()
+                      : allocation.GetSpatialLayerSum(*encoding_index));
+    if (substream.target_bitrate == DataRate::Zero()) {
+      substream.target_bitrate = std::nullopt;
+    }
+  }
 
   if (spatial_layers != last_spatial_layer_use_) {
     // If the number of spatial layers has changed, the resolution change is
@@ -1273,6 +1452,7 @@ void SendStatisticsProxy::OnBitrateAllocationUpdated(
   }
   last_num_spatial_layers_ = num_spatial_layers;
   last_num_simulcast_streams_ = num_simulcast_streams;
+  UpdateAdaptationStats();
 }
 
 // Informes observer if an internal encoder scaler has reduced video
@@ -1291,8 +1471,8 @@ void SendStatisticsProxy::OnInitialQualityResolutionAdaptDown() {
 }
 
 void SendStatisticsProxy::TryUpdateInitialQualityResolutionAdaptUp(
-    absl::optional<int> old_quality_downscales,
-    absl::optional<int> updated_quality_downscales) {
+    std::optional<int> old_quality_downscales,
+    std::optional<int> updated_quality_downscales) {
   if (uma_container_->initial_quality_changes_.down == 0)
     return;
 
@@ -1313,10 +1493,10 @@ void SendStatisticsProxy::SetAdaptTimer(const MaskedAdaptationCounts& counts,
   if (counts.resolution_adaptations || counts.num_framerate_reductions) {
     // Adaptation enabled.
     if (!stats_.suspended)
-      timer->Start(clock_->TimeInMilliseconds());
+      timer->Start(env_.clock().TimeInMilliseconds());
     return;
   }
-  timer->Stop(clock_->TimeInMilliseconds());
+  timer->Stop(env_.clock().TimeInMilliseconds());
 }
 
 void SendStatisticsProxy::RtcpPacketTypesCounterUpdated(
@@ -1329,7 +1509,8 @@ void SendStatisticsProxy::RtcpPacketTypesCounterUpdated(
 
   stats->rtcp_packet_type_counts = packet_counter;
   if (uma_container_->first_rtcp_stats_time_ms_ == -1)
-    uma_container_->first_rtcp_stats_time_ms_ = clock_->TimeInMilliseconds();
+    uma_container_->first_rtcp_stats_time_ms_ =
+        env_.clock().TimeInMilliseconds();
 }
 
 void SendStatisticsProxy::OnReportBlockDataUpdated(
@@ -1348,6 +1529,13 @@ void SendStatisticsProxy::OnReportBlockDataUpdated(
   stats->report_block_data = std::move(report_block);
 }
 
+StreamDataCounters SendStatisticsProxy::GetDataCounters(uint32_t ssrc) const {
+  MutexLock lock(&mutex_);
+  auto it = stats_.substreams.find(ssrc);
+  return it != stats_.substreams.end() ? it->second.rtp_stats
+                                       : StreamDataCounters();
+}
+
 void SendStatisticsProxy::DataCountersUpdated(
     const StreamDataCounters& counters,
     uint32_t ssrc) {
@@ -1355,15 +1543,9 @@ void SendStatisticsProxy::DataCountersUpdated(
   VideoSendStream::StreamStats* stats = GetStatsEntry(ssrc);
   RTC_DCHECK(stats) << "DataCountersUpdated reported for unknown ssrc " << ssrc;
 
-  if (stats->type == VideoSendStream::StreamStats::StreamType::kFlexfec) {
-    // The same counters are reported for both the media ssrc and flexfec ssrc.
-    // Bitrate stats are summed for all SSRCs. Use fec stats from media update.
-    return;
-  }
-
   stats->rtp_stats = counters;
   if (uma_container_->first_rtp_stats_time_ms_ == -1) {
-    int64_t now_ms = clock_->TimeInMilliseconds();
+    int64_t now_ms = env_.clock().TimeInMilliseconds();
     uma_container_->first_rtp_stats_time_ms_ = now_ms;
     uma_container_->cpu_adapt_timer_.Restart(now_ms);
     uma_container_->quality_adapt_timer_.Restart(now_ms);
@@ -1445,7 +1627,7 @@ void SendStatisticsProxy::Trackers::AddSendDelay(Timestamp now,
 }
 
 void SendStatisticsProxy::OnSendPacket(uint32_t ssrc, Timestamp capture_time) {
-  Timestamp now = clock_->CurrentTime();
+  Timestamp now = env_.clock().CurrentTime();
 
   MutexLock lock(&mutex_);
   VideoSendStream::StreamStats* stats = GetStatsEntry(ssrc);
@@ -1522,6 +1704,18 @@ int SendStatisticsProxy::BoolSampleCounter::Fraction(
   if (num_samples < min_required_samples || num_samples == 0)
     return -1;
   return static_cast<int>((sum * multiplier / num_samples) + 0.5f);
+}
+
+void SendStatisticsProxy::FloatSampleCounter::Add(float sample) {
+  sum_ += sample;
+  ++num_samples_;
+}
+
+std::optional<float> SendStatisticsProxy::FloatSampleCounter::Avg(
+    int64_t min_required_samples) const {
+  if (num_samples_ < min_required_samples || num_samples_ == 0)
+    return std::nullopt;
+  return static_cast<float>(sum_ / num_samples_);
 }
 
 SendStatisticsProxy::MaskedAdaptationCounts

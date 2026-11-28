@@ -10,22 +10,18 @@
 
 #include "pc/local_audio_source.h"
 
-using webrtc::MediaSourceInterface;
+#include "api/audio_options.h"
+#include "api/make_ref_counted.h"
+#include "api/scoped_refptr.h"
 
 namespace webrtc {
 
-rtc::scoped_refptr<LocalAudioSource> LocalAudioSource::Create(
-    const cricket::AudioOptions* audio_options) {
-  auto source = rtc::make_ref_counted<LocalAudioSource>();
-  source->Initialize(audio_options);
-  return source;
+scoped_refptr<LocalAudioSource> LocalAudioSource::Create(
+    const AudioOptions* audio_options) {
+  return make_ref_counted<LocalAudioSource>(audio_options);
 }
 
-void LocalAudioSource::Initialize(const cricket::AudioOptions* audio_options) {
-  if (!audio_options)
-    return;
-
-  options_ = *audio_options;
-}
+LocalAudioSource::LocalAudioSource(const AudioOptions* audio_options)
+    : options_(audio_options ? *audio_options : AudioOptions()) {}
 
 }  // namespace webrtc

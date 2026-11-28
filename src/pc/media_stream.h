@@ -15,6 +15,7 @@
 
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "api/media_stream_interface.h"
 #include "api/notifier.h"
 #include "api/scoped_refptr.h"
@@ -23,31 +24,31 @@ namespace webrtc {
 
 class MediaStream : public Notifier<MediaStreamInterface> {
  public:
-  static rtc::scoped_refptr<MediaStream> Create(const std::string& id);
+  static scoped_refptr<MediaStream> Create(absl::string_view id);
 
   std::string id() const override { return id_; }
 
-  bool AddTrack(rtc::scoped_refptr<AudioTrackInterface> track) override;
-  bool AddTrack(rtc::scoped_refptr<VideoTrackInterface> track) override;
-  bool RemoveTrack(rtc::scoped_refptr<AudioTrackInterface> track) override;
-  bool RemoveTrack(rtc::scoped_refptr<VideoTrackInterface> track) override;
-  rtc::scoped_refptr<AudioTrackInterface> FindAudioTrack(
+  bool AddTrack(scoped_refptr<AudioTrackInterface> track) override;
+  bool AddTrack(scoped_refptr<VideoTrackInterface> track) override;
+  bool RemoveTrack(scoped_refptr<AudioTrackInterface> track) override;
+  bool RemoveTrack(scoped_refptr<VideoTrackInterface> track) override;
+  scoped_refptr<AudioTrackInterface> FindAudioTrack(
       const std::string& track_id) override;
-  rtc::scoped_refptr<VideoTrackInterface> FindVideoTrack(
+  scoped_refptr<VideoTrackInterface> FindVideoTrack(
       const std::string& track_id) override;
 
   AudioTrackVector GetAudioTracks() override { return audio_tracks_; }
   VideoTrackVector GetVideoTracks() override { return video_tracks_; }
 
  protected:
-  explicit MediaStream(const std::string& id);
+  explicit MediaStream(absl::string_view id);
 
  private:
   template <typename TrackVector, typename Track>
-  bool AddTrack(TrackVector* Tracks, rtc::scoped_refptr<Track> track);
+  bool AddTrack(TrackVector* Tracks, scoped_refptr<Track> track);
   template <typename TrackVector>
   bool RemoveTrack(TrackVector* Tracks,
-                   rtc::scoped_refptr<MediaStreamTrackInterface> track);
+                   scoped_refptr<MediaStreamTrackInterface> track);
 
   const std::string id_;
   AudioTrackVector audio_tracks_;

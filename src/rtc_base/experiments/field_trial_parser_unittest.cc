@@ -9,12 +9,14 @@
  */
 #include "rtc_base/experiments/field_trial_parser.h"
 
+#include <optional>
+#include <string>
+
 #include "absl/strings/string_view.h"
-#include "rtc_base/experiments/field_trial_list.h"
-#include "rtc_base/gunit.h"
-#include "system_wrappers/include/field_trial.h"
-#include "test/field_trial.h"
-#include "test/gmock.h"
+#include "api/field_trials.h"
+#include "api/field_trials_view.h"
+#include "test/create_test_field_trials.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 namespace {
@@ -30,12 +32,8 @@ struct DummyExperiment {
   FieldTrialParameter<std::string> hash =
       FieldTrialParameter<std::string>("h", "a80");
 
-  DummyExperiment()
-      : DummyExperiment([] {
-          field_trial::FieldTrialsAllowedInScopeForTesting k{
-              {kDummyExperiment}};
-          return field_trial::FindFullName(kDummyExperiment);
-        }()) {}
+  explicit DummyExperiment(const FieldTrialsView& field_trials)
+      : DummyExperiment(field_trials.Lookup(kDummyExperiment)) {}
 
   explicit DummyExperiment(absl::string_view field_trial) {
     ParseFieldTrial({&enabled, &factor, &retries, &size, &ping, &hash},
@@ -60,12 +58,14 @@ TEST(FieldTrialParserTest, ParsesValidParameters) {
   EXPECT_EQ(exp.ping.Get(), true);
   EXPECT_EQ(exp.hash.Get(), "x7c");
 }
+
 TEST(FieldTrialParserTest, InitializesFromFieldTrial) {
-  test::ScopedFieldTrials field_trials(
+  FieldTrials field_trials = CreateTestFieldTrials(
       "WebRTC-OtherExperiment/Disabled/"
       "WebRTC-DummyExperiment/Enabled,f:-1.7,r:2,s:10,p:1,h:x7c/"
       "WebRTC-AnotherExperiment/Enabled,f:-3.1,otherstuff:beef/");
-  DummyExperiment exp;
+  field_trials.RegisterKeysForTesting({kDummyExperiment});
+  DummyExperiment exp(field_trials);
   EXPECT_TRUE(exp.enabled.Get());
   EXPECT_EQ(exp.factor.Get(), -1.7);
   EXPECT_EQ(exp.retries.Get(), 2);
@@ -73,6 +73,7 @@ TEST(FieldTrialParserTest, InitializesFromFieldTrial) {
   EXPECT_EQ(exp.ping.Get(), true);
   EXPECT_EQ(exp.hash.Get(), "x7c");
 }
+
 TEST(FieldTrialParserTest, UsesDefaults) {
   DummyExperiment exp("");
   EXPECT_FALSE(exp.enabled.Get());
@@ -116,8 +117,8 @@ TEST(FieldTrialParserTest, IgnoresInvalid) {
   EXPECT_EQ(exp.hash.Get(), "a80");
 }
 TEST(FieldTrialParserTest, IgnoresOutOfRange) {
-  FieldTrialConstrained<double> low("low", 10, absl::nullopt, 100);
-  FieldTrialConstrained<double> high("high", 10, 5, absl::nullopt);
+  FieldTrialConstrained<double> low("low", 10, std::nullopt, 100);
+  FieldTrialConstrained<double> high("high", 10, 5, std::nullopt);
   ParseFieldTrial({&low, &high}, "low:1000,high:0");
   EXPECT_EQ(low.Get(), 10);
   EXPECT_EQ(high.Get(), 10);
@@ -141,7 +142,7 @@ TEST(FieldTrialParserTest, ReadsValuesFromFieldWithoutKey) {
   EXPECT_EQ(req.Get(), 30);
 }
 TEST(FieldTrialParserTest, ParsesOptionalParameters) {
-  FieldTrialOptional<int> max_count("c", absl::nullopt);
+  FieldTrialOptional<int> max_count("c", std::nullopt);
   ParseFieldTrial({&max_count}, "");
   EXPECT_FALSE(max_count.GetOptional().has_value());
   ParseFieldTrial({&max_count}, "c:10");
@@ -153,7 +154,7 @@ TEST(FieldTrialParserTest, ParsesOptionalParameters) {
   ParseFieldTrial({&max_count}, "c:");
   EXPECT_EQ(max_count.GetOptional().value(), 20);
 
-  FieldTrialOptional<unsigned> max_size("c", absl::nullopt);
+  FieldTrialOptional<unsigned> max_size("c", std::nullopt);
   ParseFieldTrial({&max_size}, "");
   EXPECT_FALSE(max_size.GetOptional().has_value());
   ParseFieldTrial({&max_size}, "c:10");

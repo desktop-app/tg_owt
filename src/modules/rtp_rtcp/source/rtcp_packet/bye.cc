@@ -10,10 +10,11 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
 
-#include <string.h>
-
 #include <cstdint>
+#include <cstring>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
@@ -23,7 +24,6 @@
 
 namespace webrtc {
 namespace rtcp {
-constexpr uint8_t Bye::kPacketType;
 // Bye packet (BYE) (RFC 3550).
 //
 //        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1

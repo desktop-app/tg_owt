@@ -10,21 +10,23 @@
 
 #include "api/video/encoded_frame.h"
 
-#include "absl/types/optional.h"
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+
+#include "api/units/timestamp.h"
+#include "api/video/video_codec_type.h"
 #include "modules/rtp_rtcp/source/rtp_video_header.h"
+#include "modules/video_coding/codecs/interface/common_constants.h"
+#include "modules/video_coding/codecs/vp8/include/vp8_globals.h"
+#include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
 
 namespace webrtc {
 
-absl::optional<Timestamp> EncodedFrame::ReceivedTimestamp() const {
-  return ReceivedTime() >= 0
-             ? absl::make_optional(Timestamp::Millis(ReceivedTime()))
-             : absl::nullopt;
-}
-
-absl::optional<Timestamp> EncodedFrame::RenderTimestamp() const {
+std::optional<Timestamp> EncodedFrame::RenderTimestamp() const {
   return RenderTimeMs() >= 0
-             ? absl::make_optional(Timestamp::Millis(RenderTimeMs()))
-             : absl::nullopt;
+             ? std::make_optional(Timestamp::Millis(RenderTimeMs()))
+             : std::nullopt;
 }
 
 bool EncodedFrame::delayed_by_retransmission() const {
@@ -36,7 +38,7 @@ void EncodedFrame::CopyCodecSpecific(const RTPVideoHeader* header) {
     switch (header->codec) {
       case kVideoCodecVP8: {
         const auto& vp8_header =
-            absl::get<RTPVideoHeaderVP8>(header->video_type_header);
+            std::get<RTPVideoHeaderVP8>(header->video_type_header);
         if (_codecSpecificInfo.codecType != kVideoCodecVP8) {
           // This is the first packet for this frame.
           _codecSpecificInfo.codecSpecific.VP8.temporalIdx = 0;
@@ -58,7 +60,7 @@ void EncodedFrame::CopyCodecSpecific(const RTPVideoHeader* header) {
       }
       case kVideoCodecVP9: {
         const auto& vp9_header =
-            absl::get<RTPVideoHeaderVP9>(header->video_type_header);
+            std::get<RTPVideoHeaderVP9>(header->video_type_header);
         if (_codecSpecificInfo.codecType != kVideoCodecVP9) {
           // This is the first packet for this frame.
           _codecSpecificInfo.codecSpecific.VP9.temporal_idx = 0;
@@ -115,12 +117,12 @@ void EncodedFrame::CopyCodecSpecific(const RTPVideoHeader* header) {
         _codecSpecificInfo.codecType = kVideoCodecH264;
         break;
       }
-      case kVideoCodecH265: {
-        _codecSpecificInfo.codecType = kVideoCodecH265;
-        break;
-      }
       case kVideoCodecAV1: {
         _codecSpecificInfo.codecType = kVideoCodecAV1;
+        break;
+      }
+      case kVideoCodecH265: {
+        _codecSpecificInfo.codecType = kVideoCodecH265;
         break;
       }
       default: {

@@ -10,9 +10,9 @@
 
 #include "rtc_base/experiments/alr_experiment.h"
 
-#include <inttypes.h>
-#include <stdio.h>
-
+#include <cinttypes>
+#include <cstdio>
+#include <optional>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -34,11 +34,11 @@ bool AlrExperimentSettings::MaxOneFieldTrialEnabled(
          key_value_config.Lookup(kScreenshareProbingBweExperimentName).empty();
 }
 
-absl::optional<AlrExperimentSettings>
+std::optional<AlrExperimentSettings>
 AlrExperimentSettings::CreateFromFieldTrial(
     const FieldTrialsView& key_value_config,
     absl::string_view experiment_name) {
-  absl::optional<AlrExperimentSettings> ret;
+  std::optional<AlrExperimentSettings> ret;
   std::string group_name = key_value_config.Lookup(experiment_name);
 
   const std::string kIgnoredSuffix = "_Dogfood";

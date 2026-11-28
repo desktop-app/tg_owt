@@ -10,26 +10,31 @@
 
 #include "rtc_base/event.h"
 
+#include <time.h>
+
+#include <cstdlib>
+#include <optional>
+
+#include "api/units/time_delta.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/synchronization/yield_policy.h"
+#include "rtc_base/system/warn_current_thread_is_deadlocked.h"
+
 #if defined(WEBRTC_WIN)
 #include <windows.h>
 #elif defined(WEBRTC_POSIX)
-#include <errno.h>
 #include <pthread.h>
+
+#include <cerrno>
+#ifdef WEBRTC_MAC
 #include <sys/time.h>
-#include <time.h>
+#endif
+#include <ctime>
 #else
 #error "Must define either WEBRTC_WIN or WEBRTC_POSIX."
 #endif
 
-#include "absl/types/optional.h"
-#include "rtc_base/checks.h"
-#include "rtc_base/synchronization/yield_policy.h"
-#include "rtc_base/system/warn_current_thread_is_deadlocked.h"
-#include "rtc_base/time_utils.h"
-
-namespace rtc {
-
-using ::webrtc::TimeDelta;
+namespace webrtc {
 
 Event::Event() : Event(false, false) {}
 
@@ -56,10 +61,9 @@ void Event::Reset() {
 
 bool Event::Wait(TimeDelta give_up_after, TimeDelta /*warn_after*/) {
   ScopedYieldPolicy::YieldExecution();
-  const DWORD ms =
-      give_up_after.IsPlusInfinity()
-          ? INFINITE
-          : give_up_after.RoundUpTo(webrtc::TimeDelta::Millis(1)).ms();
+  const DWORD ms = give_up_after.IsPlusInfinity()
+                       ? INFINITE
+                       : give_up_after.RoundUpTo(TimeDelta::Millis(1)).ms();
   return (WaitForSingleObject(event_handle_, ms) == WAIT_OBJECT_0);
 }
 
@@ -114,7 +118,7 @@ void Event::Reset() {
 
 namespace {
 
-timespec GetTimespec(TimeDelta duration_from_now) {
+timespec GetTimespec(TimeDelta from_now) {
   timespec ts;
 
   // Get the current time.
@@ -124,20 +128,15 @@ timespec GetTimespec(TimeDelta duration_from_now) {
   timeval tv;
   gettimeofday(&tv, nullptr);
   ts.tv_sec = tv.tv_sec;
-  ts.tv_nsec = tv.tv_usec * kNumNanosecsPerMicrosec;
+  ts.tv_nsec = TimeDelta::Micros(tv.tv_usec).ns();
 #endif
 
-  // Add the specified number of milliseconds to it.
-  int64_t microsecs_from_now = duration_from_now.us();
-  ts.tv_sec += microsecs_from_now / kNumMicrosecsPerSec;
-  ts.tv_nsec +=
-      (microsecs_from_now % kNumMicrosecsPerSec) * kNumNanosecsPerMicrosec;
-
-  // Normalize.
-  if (ts.tv_nsec >= kNumNanosecsPerSec) {
-    ts.tv_sec++;
-    ts.tv_nsec -= kNumNanosecsPerSec;
-  }
+  // Add the specified number of nanoseconds to it.
+  // Use integer division to transfer full seconds to `tv_sec`.
+  // `ns` has type either std::ldiv_t or std::lldiv_t.
+  auto ns = std::div(ts.tv_nsec + from_now.ns(), TimeDelta::Seconds(1).ns());
+  ts.tv_sec += ns.quot;
+  ts.tv_nsec = ns.rem;
 
   return ts;
 }
@@ -148,27 +147,26 @@ bool Event::Wait(TimeDelta give_up_after, TimeDelta warn_after) {
   // Instant when we'll log a warning message (because we've been waiting so
   // long it might be a bug), but not yet give up waiting. nullopt if we
   // shouldn't log a warning.
-  const absl::optional<timespec> warn_ts =
-      warn_after >= give_up_after
-          ? absl::nullopt
-          : absl::make_optional(GetTimespec(warn_after));
+  const std::optional<timespec> warn_ts =
+      warn_after >= give_up_after ? std::nullopt
+                                  : std::make_optional(GetTimespec(warn_after));
 
   // Instant when we'll stop waiting and return an error. nullopt if we should
   // never give up.
-  const absl::optional<timespec> give_up_ts =
+  const std::optional<timespec> give_up_ts =
       give_up_after.IsPlusInfinity()
-          ? absl::nullopt
-          : absl::make_optional(GetTimespec(give_up_after));
+          ? std::nullopt
+          : std::make_optional(GetTimespec(give_up_after));
 
   ScopedYieldPolicy::YieldExecution();
   pthread_mutex_lock(&event_mutex_);
 
   // Wait for `event_cond_` to trigger and `event_status_` to be set, with the
   // given timeout (or without a timeout if none is given).
-  const auto wait = [&](const absl::optional<timespec> timeout_ts) {
+  const auto wait = [&](const std::optional<timespec> timeout_ts) {
     int error = 0;
     while (!event_status_ && error == 0) {
-      if (timeout_ts == absl::nullopt) {
+      if (timeout_ts == std::nullopt) {
         error = pthread_cond_wait(&event_cond_, &event_mutex_);
       } else {
 #if USE_PTHREAD_COND_TIMEDWAIT_MONOTONIC_NP
@@ -184,12 +182,12 @@ bool Event::Wait(TimeDelta give_up_after, TimeDelta warn_after) {
   };
 
   int error;
-  if (warn_ts == absl::nullopt) {
+  if (warn_ts == std::nullopt) {
     error = wait(give_up_ts);
   } else {
     error = wait(warn_ts);
     if (error == ETIMEDOUT) {
-      webrtc::WarnThatTheCurrentThreadIsProbablyDeadlocked();
+      WarnThatTheCurrentThreadIsProbablyDeadlocked();
       error = wait(give_up_ts);
     }
   }
@@ -207,4 +205,4 @@ bool Event::Wait(TimeDelta give_up_after, TimeDelta warn_after) {
 
 #endif
 
-}  // namespace rtc
+}  // namespace webrtc

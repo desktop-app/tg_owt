@@ -23,10 +23,12 @@
   return [self initWithNativeParameters:nativeExtension];
 }
 
-- (instancetype)initWithNativeParameters:(const webrtc::RtpExtension &)nativeParameters {
-  if (self = [super init]) {
+- (instancetype)initWithNativeParameters:
+    (const webrtc::RtpExtension &)nativeParameters {
+  self = [super init];
+  if (self) {
     _uri = [NSString stringForStdString:nativeParameters.uri];
-    _id = nativeParameters.id;
+    _id = nativeParameters.id.value();
     _encrypted = nativeParameters.encrypt;
   }
   return self;
@@ -35,7 +37,7 @@
 - (webrtc::RtpExtension)nativeParameters {
   webrtc::RtpExtension extension;
   extension.uri = [NSString stdStringForString:_uri];
-  extension.id = _id;
+  extension.id = webrtc::RtpHeaderExtensionId(_id);
   extension.encrypt = _encrypted;
   return extension;
 }

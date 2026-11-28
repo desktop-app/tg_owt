@@ -11,29 +11,33 @@
 #ifndef MODULES_VIDEO_CODING_UTILITY_QP_PARSER_H_
 #define MODULES_VIDEO_CODING_UTILITY_QP_PARSER_H_
 
-#include "absl/types/optional.h"
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+
 #include "api/video/video_codec_constants.h"
 #include "api/video/video_codec_type.h"
 #include "common_video/h264/h264_bitstream_parser.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
+
 #ifdef RTC_ENABLE_H265
 #include "common_video/h265/h265_bitstream_parser.h"
 #endif
-#include "rtc_base/synchronization/mutex.h"
 
 namespace webrtc {
 class QpParser {
  public:
-  absl::optional<uint32_t> Parse(VideoCodecType codec_type,
-                                 size_t spatial_idx,
-                                 const uint8_t* frame_data,
-                                 size_t frame_size);
+  std::optional<uint32_t> Parse(VideoCodecType codec_type,
+                                size_t spatial_idx,
+                                const uint8_t* frame_data,
+                                size_t frame_size);
 
  private:
   // A thread safe wrapper for H264 bitstream parser.
   class H264QpParser {
    public:
-    absl::optional<uint32_t> Parse(const uint8_t* frame_data,
-                                   size_t frame_size);
+    std::optional<uint32_t> Parse(const uint8_t* frame_data, size_t frame_size);
 
    private:
     Mutex mutex_;
@@ -46,8 +50,7 @@ class QpParser {
   // A thread safe wrapper for H.265 bitstream parser.
   class H265QpParser {
    public:
-    absl::optional<uint32_t> Parse(const uint8_t* frame_data,
-                                   size_t frame_size);
+    std::optional<uint32_t> Parse(const uint8_t* frame_data, size_t frame_size);
 
    private:
     Mutex mutex_;

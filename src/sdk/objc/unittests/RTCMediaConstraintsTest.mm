@@ -11,9 +11,9 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
-#include <memory>
+#include "test/gtest.h"
 
-#include "rtc_base/gunit.h"
+#include <memory>
 
 #import "api/peerconnection/RTCMediaConstraints+Private.h"
 #import "api/peerconnection/RTCMediaConstraints.h"
@@ -25,24 +25,28 @@
 @implementation RTCMediaConstraintsTests
 
 - (void)testMediaConstraints {
-  NSDictionary *mandatory = @{@"key1": @"value1", @"key2": @"value2"};
-  NSDictionary *optional = @{@"key3": @"value3", @"key4": @"value4"};
+  NSDictionary *mandatory = @{@"key1" : @"value1", @"key2" : @"value2"};
+  NSDictionary *optional = @{@"key3" : @"value3", @"key4" : @"value4"};
 
   RTC_OBJC_TYPE(RTCMediaConstraints) *constraints =
-      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc] initWithMandatoryConstraints:mandatory
-                                                           optionalConstraints:optional];
+      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc]
+          initWithMandatoryConstraints:mandatory
+                   optionalConstraints:optional];
   std::unique_ptr<webrtc::MediaConstraints> nativeConstraints =
       [constraints nativeConstraints];
 
-  webrtc::MediaConstraints::Constraints nativeMandatory = nativeConstraints->GetMandatory();
+  webrtc::MediaConstraints::Constraints nativeMandatory =
+      nativeConstraints->GetMandatory();
   [self expectConstraints:mandatory inNativeConstraints:nativeMandatory];
 
-  webrtc::MediaConstraints::Constraints nativeOptional = nativeConstraints->GetOptional();
+  webrtc::MediaConstraints::Constraints nativeOptional =
+      nativeConstraints->GetOptional();
   [self expectConstraints:optional inNativeConstraints:nativeOptional];
 }
 
 - (void)expectConstraints:(NSDictionary *)constraints
-      inNativeConstraints:(webrtc::MediaConstraints::Constraints)nativeConstraints {
+      inNativeConstraints:
+          (webrtc::MediaConstraints::Constraints)nativeConstraints {
   EXPECT_EQ(constraints.count, nativeConstraints.size());
 
   for (NSString *key in constraints) {

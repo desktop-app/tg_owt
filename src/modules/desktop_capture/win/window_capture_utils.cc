@@ -12,11 +12,17 @@
 
 // Just for the DWMWINDOWATTRIBUTE enums (DWMWA_CLOAKED).
 #include <dwmapi.h>
+#include <shobjidl.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <cwchar>
 
+#include "modules/desktop_capture/desktop_capture_types.h"
+#include "modules/desktop_capture/desktop_capturer.h"
+#include "modules/desktop_capture/desktop_geometry.h"
 #include "modules/desktop_capture/win/scoped_gdi_object.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/string_utils.h"
@@ -104,7 +110,7 @@ BOOL CALLBACK GetWindowListHandler(HWND hwnd, LPARAM param) {
     WCHAR window_title[kTitleLength] = L"";
     if (GetWindowTextLength(hwnd) != 0 &&
         GetWindowTextW(hwnd, window_title, kTitleLength) > 0) {
-      window.title = rtc::ToUtf8(window_title);
+      window.title = ToUtf8(window_title);
     }
   }
 
@@ -179,10 +185,16 @@ bool GetCroppedWindowRect(HWND window,
   // As of Windows8, transparent resize borders are added by the OS at
   // left/bottom/right sides of a resizeable window. If the cropped window
   // doesn't remove these borders, the background will be exposed a bit.
-  if (rtc::rtc_win::GetVersion() >= rtc::rtc_win::Version::VERSION_WIN8 ||
-      is_maximized) {
+  if (rtc_win::GetVersion() >= rtc_win::Version::VERSION_WIN8 || is_maximized) {
     // Only apply this cropping to windows with a resize border (otherwise,
     // it'd clip the edges of captured pop-up windows without this border).
+    RECT rect;
+    DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &rect,
+                          sizeof(RECT));
+    // it's means that the window edge is not transparent
+    if (original_rect && rect.left == original_rect->left()) {
+      return true;
+    }
     LONG style = GetWindowLong(window, GWL_STYLE);
     if (style & WS_THICKFRAME || style & DS_MODALFRAME) {
       int width = GetSystemMetrics(SM_CXSIZEFRAME);
@@ -233,7 +245,7 @@ bool GetWindowContentRect(HWND window, DesktopRect* result) {
     result->Extend(shrink, 0, shrink, 0);
     // Usually this should not happen, just in case we have received a strange
     // window, which has only left and right borders.
-    if (result->height() + shrink * 2 > 0) {
+    if (result->height() > shrink * 2) {
       result->Extend(0, shrink, 0, shrink);
     }
     RTC_DCHECK(!result->is_empty());
@@ -312,7 +324,7 @@ WindowCaptureHelperWin::WindowCaptureHelperWin() {
             GetProcAddress(dwmapi_library_, "DwmGetWindowAttribute"));
   }
 
-  if (rtc::rtc_win::GetVersion() >= rtc::rtc_win::Version::VERSION_WIN10) {
+  if (rtc_win::GetVersion() >= rtc_win::Version::VERSION_WIN10) {
     if (FAILED(::CoCreateInstance(__uuidof(VirtualDesktopManager), nullptr,
                                   CLSCTX_ALL,
                                   IID_PPV_ARGS(&virtual_desktop_manager_)))) {
@@ -464,7 +476,7 @@ bool WindowCaptureHelperWin::EnumerateCapturableWindows(
     flags |= GetWindowListFlags::kIgnoreCurrentProcessWindows;
   }
 
-  if (!webrtc::GetWindowList(flags, results, ex_style_filters)) {
+  if (!GetWindowList(flags, results, ex_style_filters)) {
     return false;
   }
 

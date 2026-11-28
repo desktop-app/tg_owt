@@ -10,18 +10,27 @@
 
 #include "video/frame_dumping_encoder.h"
 
+#include <cstdint>
 #include <map>
+#include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
-#include "api/sequence_checker.h"
-#include "api/video/video_codec_type.h"
+#include "api/environment/environment.h"
+#include "api/fec_controller_override.h"
+#include "api/field_trials_view.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_frame_type.h"
+#include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_encoder.h"
 #include "modules/video_coding/utility/ivf_file_writer.h"
 #include "rtc_base/strings/string_builder.h"
-#include "rtc_base/system/file_wrapper.h"
-#include "rtc_base/time_utils.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 namespace {
@@ -35,7 +44,7 @@ class FrameDumpingEncoder : public VideoEncoder, public EncodedImageCallback {
                       int64_t origin_time_micros,
                       std::string output_directory)
       : wrapped_(std::move(wrapped)),
-        output_directory_(output_directory),
+        output_directory_(std::move(output_directory)),
         origin_time_micros_(origin_time_micros) {}
 
   ~FrameDumpingEncoder() override {
@@ -66,13 +75,16 @@ class FrameDumpingEncoder : public VideoEncoder, public EncodedImageCallback {
   void SetRates(const RateControlParameters& parameters) override {
     wrapped_->SetRates(parameters);
   }
+  void SetComplexity(
+      std::span<const VideoCodecComplexity> complexity_by_spatial_layer,
+      ComplexityControlMode complexity_control_mode) override {
+    wrapped_->SetComplexity(complexity_by_spatial_layer,
+                            complexity_control_mode);
+  }
   void OnPacketLossRateUpdate(float packet_loss_rate) override {
     wrapped_->OnPacketLossRateUpdate(packet_loss_rate);
   }
   void OnRttUpdate(int64_t rtt_ms) override { wrapped_->OnRttUpdate(rtt_ms); }
-  void OnLossNotification(const LossNotification& loss_notification) override {
-    wrapped_->OnLossNotification(loss_notification);
-  }
   EncoderInfo GetEncoderInfo() const override {
     return wrapped_->GetEncoderInfo();
   }
@@ -87,18 +99,20 @@ class FrameDumpingEncoder : public VideoEncoder, public EncodedImageCallback {
     }
     return callback_->OnEncodedImage(encoded_image, codec_specific_info);
   }
-  void OnDroppedFrame(DropReason reason) override {
-    callback_->OnDroppedFrame(reason);
+  void OnFrameDropped(uint32_t rtp_timestamp,
+                      int spatial_id,
+                      bool is_end_of_temporal_unit) override {
+    callback_->OnFrameDropped(rtp_timestamp, spatial_id,
+                              is_end_of_temporal_unit);
   }
 
  private:
   std::string FilenameFromSimulcastIndex(int index)
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
-    char filename_buffer[1024];
-    rtc::SimpleStringBuilder builder(filename_buffer);
-    builder << output_directory_ << "/webrtc_encoded_frames"
-            << "." << origin_time_micros_ << "." << index << ".ivf";
-    return builder.str();
+    StringBuilder builder;
+    builder << output_directory_ << "/webrtc_encoded_frames" << "."
+            << origin_time_micros_ << "." << index << ".ivf";
+    return builder.Release();
   }
 
   IvfFileWriter& GetFileWriterForSimulcastIndex(int index)
@@ -107,9 +121,8 @@ class FrameDumpingEncoder : public VideoEncoder, public EncodedImageCallback {
     if (it != writers_by_simulcast_index_.end()) {
       return *it->second;
     }
-    auto writer = IvfFileWriter::Wrap(
-        FileWrapper::OpenWriteOnly(FilenameFromSimulcastIndex(index)),
-        /*byte_limit=*/100'000'000);
+    auto writer = IvfFileWriter::Wrap(FilenameFromSimulcastIndex(index),
+                                      /*byte_limit=*/100'000'000);
     auto* writer_ptr = writer.get();
     writers_by_simulcast_index_.insert(
         std::make_pair(index, std::move(writer)));
@@ -129,16 +142,16 @@ class FrameDumpingEncoder : public VideoEncoder, public EncodedImageCallback {
 }  // namespace
 
 std::unique_ptr<VideoEncoder> MaybeCreateFrameDumpingEncoderWrapper(
-    std::unique_ptr<VideoEncoder> encoder,
-    const FieldTrialsView& field_trials) {
+    const Environment& env,
+    std::unique_ptr<VideoEncoder> encoder) {
   auto output_directory =
-      field_trials.Lookup(kEncoderDataDumpDirectoryFieldTrial);
+      env.field_trials().Lookup(kEncoderDataDumpDirectoryFieldTrial);
   if (output_directory.empty() || !encoder) {
     return encoder;
   }
   absl::c_replace(output_directory, ';', '/');
   return std::make_unique<FrameDumpingEncoder>(
-      std::move(encoder), rtc::TimeMicros(), output_directory);
+      std::move(encoder), env.clock().TimeInMicroseconds(), output_directory);
 }
 
 }  // namespace webrtc

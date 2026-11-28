@@ -11,11 +11,14 @@
 #ifndef MODULES_AUDIO_PROCESSING_TEST_DEBUG_DUMP_REPLAYER_H_
 #define MODULES_AUDIO_PROCESSING_TEST_DEBUG_DUMP_REPLAYER_H_
 
+#include <cstdio>
 #include <memory>
+#include <optional>
 
 #include "absl/strings/string_view.h"
+#include "api/audio/audio_processing.h"
+#include "api/scoped_refptr.h"
 #include "common_audio/channel_buffer.h"
-#include "modules/audio_processing/include/audio_processing.h"
 
 // Generated at build-time by the protobuf compiler.
 #include "modules/audio_processing/debug.pb.h"
@@ -32,7 +35,7 @@ class DebugDumpReplayer {
   bool SetDumpFile(absl::string_view filename);
 
   // Return next event.
-  absl::optional<audioproc::Event> GetNextEvent() const;
+  std::optional<audioproc::Event> GetNextEvent() const;
 
   // Run the next event. Returns true if succeeded.
   bool RunNextEvent();
@@ -58,7 +61,7 @@ class DebugDumpReplayer {
   std::unique_ptr<ChannelBuffer<float>> reverse_;
   std::unique_ptr<ChannelBuffer<float>> output_;
 
-  rtc::scoped_refptr<AudioProcessing> apm_;
+  scoped_refptr<AudioProcessing> apm_;
 
   FILE* debug_file_;
 

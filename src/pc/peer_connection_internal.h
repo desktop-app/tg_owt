@@ -13,24 +13,50 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
+#include "absl/functional/any_invocable.h"
+#include "absl/strings/string_view.h"
+#include "api/audio/audio_device.h"
+#include "api/candidate.h"
+#include "api/crypto/crypto_options.h"
+#include "api/data_channel_interface.h"
+#include "api/environment/environment.h"
+#include "api/field_trials_view.h"
+#include "api/jsep.h"
+#include "api/media_stream_interface.h"
+#include "api/media_types.h"
 #include "api/peer_connection_interface.h"
+#include "api/rtc_error.h"
+#include "api/rtp_transceiver_interface.h"
+#include "api/scoped_refptr.h"
+#include "api/sctp_transport_interface.h"
 #include "call/call.h"
-#include "modules/audio_device/include/audio_device.h"
+#include "call/payload_type_picker.h"
+#include "p2p/base/port.h"
+#include "p2p/base/port_allocator.h"
+#include "pc/data_channel_utils.h"
 #include "pc/jsep_transport_controller.h"
 #include "pc/peer_connection_message_handler.h"
 #include "pc/rtp_transceiver.h"
 #include "pc/rtp_transmission_manager.h"
-#include "pc/sctp_data_channel.h"
+#include "pc/session_description.h"
+#include "pc/transport_stats.h"
+#include "pc/usage_pattern.h"
+#include "rtc_base/containers/flat_map.h"
+#include "rtc_base/rtc_certificate.h"
+#include "rtc_base/ssl_certificate.h"
+#include "rtc_base/ssl_stream_adapter.h"
+#include "rtc_base/thread.h"
 
 namespace webrtc {
 
 class DataChannelController;
 class LegacyStatsCollector;
+class PeerConnectionTracerInterface;
 
 // This interface defines the functions that are needed for
 // SdpOfferAnswerHandler to access PeerConnection internal state.
@@ -47,7 +73,7 @@ class PeerConnectionSdpMethods {
   // bundling, returns false.
   virtual bool NeedsIceRestart(const std::string& content_name) const = 0;
 
-  virtual absl::optional<std::string> sctp_mid() const = 0;
+  virtual std::optional<std::string> sctp_mid() const = 0;
 
   // Functions below this comment are known to only be accessed
   // from SdpOfferAnswerHandler.
@@ -65,18 +91,19 @@ class PeerConnectionSdpMethods {
   virtual bool dtls_enabled() const = 0;
   virtual const PeerConnectionFactoryInterface::Options* options() const = 0;
 
-  // Returns the CryptoOptions for this PeerConnection. This will always
-  // return the RTCConfiguration.crypto_options if set and will only default
-  // back to the PeerConnectionFactory settings if nothing was set.
+  // Returns the CryptoOptions for this PeerConnection.
   virtual CryptoOptions GetCryptoOptions() = 0;
   virtual JsepTransportController* transport_controller_s() = 0;
   virtual JsepTransportController* transport_controller_n() = 0;
   virtual DataChannelController* data_channel_controller() = 0;
-  virtual cricket::PortAllocator* port_allocator() = 0;
+  virtual PortAllocator* port_allocator() = 0;
   virtual LegacyStatsCollector* legacy_stats() = 0;
-  // Returns the observer. Will crash on CHECK if the observer is removed.
-  virtual PeerConnectionObserver* Observer() const = 0;
-  virtual absl::optional<rtc::SSLRole> GetSctpSslRole_n() = 0;
+  virtual PeerConnectionTracerInterface* tracer() = 0;
+  virtual const PeerConnectionTracerInterface* tracer() const = 0;
+  // Run lambda on the PeerConnectionObserver. Will crash on CHECK if the
+  // observer is removed.
+  virtual void RunWithObserver(
+      absl::AnyInvocable<void(webrtc::PeerConnectionObserver*) &&>) = 0;
   virtual PeerConnectionInterface::IceConnectionState
   ice_connection_state_internal() = 0;
   virtual void SetIceConnectionState(
@@ -91,26 +118,25 @@ class PeerConnectionSdpMethods {
   // sufficient time has passed.
   virtual bool IsUnifiedPlan() const = 0;
   virtual bool ValidateBundleSettings(
-      const cricket::SessionDescription* desc,
-      const std::map<std::string, const cricket::ContentGroup*>&
+      const SessionDescription* desc,
+      const flat_map<std::string, const ContentGroup*>&
           bundle_groups_by_mid) = 0;
 
   // Internal implementation for AddTransceiver family of methods. If
   // `fire_callback` is set, fires OnRenegotiationNeeded callback if successful.
-  virtual RTCErrorOr<rtc::scoped_refptr<RtpTransceiverInterface>>
-  AddTransceiver(cricket::MediaType media_type,
-                 rtc::scoped_refptr<MediaStreamTrackInterface> track,
-                 const RtpTransceiverInit& init,
-                 bool fire_callback = true) = 0;
-  // Asynchronously calls SctpTransport::Start() on the network thread for
-  // `sctp_mid()` if set. Called as part of setting the local description.
-  virtual void StartSctpTransport(int local_port,
-                                  int remote_port,
-                                  int max_message_size) = 0;
+  virtual RTCErrorOr<scoped_refptr<RtpTransceiverInterface>> AddTransceiver(
+      webrtc::MediaType media_type,
+      scoped_refptr<MediaStreamTrackInterface> track,
+      const RtpTransceiverInit& init,
+      bool fire_callback = true) = 0;
+  // Synchronously calls SctpTransport::Start() on the network thread for
+  // `sctp_mid()` if set. Called as part of pushing down the media descriptions
+  // after a complete offer/answer.
+  virtual RTCError StartSctpTransport(const SctpOptions& options) = 0;
 
   // Asynchronously adds a remote candidate on the network thread.
-  virtual void AddRemoteCandidate(const std::string& mid,
-                                  const cricket::Candidate& candidate) = 0;
+  virtual void AddRemoteCandidate(absl::string_view mid,
+                                  const Candidate& candidate) = 0;
 
   virtual Call* call_ptr() = 0;
   // Returns true if SRTP (either using DTLS-SRTP or SDES) is required by
@@ -124,9 +150,26 @@ class PeerConnectionSdpMethods {
   // Tears down the data channel transport state and clears the `sctp_mid()` and
   // `sctp_transport_name()` properties.
   virtual void DestroyDataChannelTransport(RTCError error) = 0;
+  // TGCALLS SEAM (rollback releases an unnegotiated sctp_mid): clears
+  // `sctp_mid()`, `sctp_transport_name()` and the network-side mid WITHOUT
+  // closing the data channels, so the next offer can carry a fresh data
+  // m-section. Rollback() calls it when the description that set up the data
+  // channel transport is rolled back before any stable description carried
+  // its m-section: the stale mid would otherwise both alias whatever m-section
+  // the peer's offer gives that mid and stop GetOptionsForUnifiedPlanOffer
+  // from adding a data section while CheckIfNegotiationIsNeeded keeps asking
+  // for one - an endless offer/answer loop. Default no-op for fakes.
+  virtual void ResetSctpDataMidAfterRollback() {}
+  virtual const Environment& env() const = 0;
   virtual const FieldTrialsView& trials() const = 0;
 
   virtual void ClearStatsCache() = 0;
+  // Keeps track of assigned payload types and comes up with reasonable
+  // suggestions when new PTs need to be assigned.
+  virtual PayloadTypePicker& payload_type_picker() = 0;
+
+  // Determine whether DTLS-in-STUN is configured.
+  virtual bool CanAttemptDtlsStunPiggybacking() const = 0;
 };
 
 // Functions defined in this class are called by other objects,
@@ -134,14 +177,14 @@ class PeerConnectionSdpMethods {
 class PeerConnectionInternal : public PeerConnectionInterface,
                                public PeerConnectionSdpMethods {
  public:
-  virtual rtc::Thread* network_thread() const = 0;
-  virtual rtc::Thread* worker_thread() const = 0;
+  virtual Thread* network_thread() const = 0;
+  virtual Thread* worker_thread() const = 0;
 
   // Returns true if we were the initial offerer.
   virtual bool initial_offerer() const = 0;
 
   virtual std::vector<
-      rtc::scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>>
+      scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>>
   GetTransceiversInternal() const = 0;
 
   // Call on the network thread to fetch stats for all the data channels.
@@ -150,32 +193,31 @@ class PeerConnectionInternal : public PeerConnectionInterface,
     return {};
   }
 
-  virtual absl::optional<std::string> sctp_transport_name() const = 0;
+  virtual std::optional<std::string> sctp_transport_name() const = 0;
 
-  virtual cricket::CandidateStatsList GetPooledCandidateStats() const = 0;
+  virtual CandidateStatsList GetPooledCandidateStats() const = 0;
 
   // Returns a map from transport name to transport stats for all given
   // transport names.
   // Must be called on the network thread.
-  virtual std::map<std::string, cricket::TransportStats>
-  GetTransportStatsByNames(const std::set<std::string>& transport_names) = 0;
+  virtual std::map<std::string, TransportStats> GetTransportStatsByNames(
+      const std::set<std::string>& transport_names) = 0;
 
   virtual Call::Stats GetCallStats() = 0;
 
-  virtual absl::optional<AudioDeviceModule::Stats> GetAudioDeviceStats() = 0;
+  virtual std::optional<AudioDeviceModule::Stats> GetAudioDeviceStats() = 0;
 
   virtual bool GetLocalCertificate(
       const std::string& transport_name,
-      rtc::scoped_refptr<rtc::RTCCertificate>* certificate) = 0;
-  virtual std::unique_ptr<rtc::SSLCertChain> GetRemoteSSLCertChain(
+      scoped_refptr<RTCCertificate>* certificate) = 0;
+  virtual std::unique_ptr<SSLCertChain> GetRemoteSSLCertChain(
       const std::string& transport_name) = 0;
 
   // Returns true if there was an ICE restart initiated by the remote offer.
   virtual bool IceRestartPending(const std::string& content_name) const = 0;
 
   // Get SSL role for an arbitrary m= section (handles bundling correctly).
-  virtual bool GetSslRole(const std::string& content_name,
-                          rtc::SSLRole* role) = 0;
+  virtual bool GetSslRole(const std::string& content_name, SSLRole* role) = 0;
   // Functions needed by DataChannelController
   virtual void NoteDataAddedEvent() {}
   // Handler for sctp data channel state changes.

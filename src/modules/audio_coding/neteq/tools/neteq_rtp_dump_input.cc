@@ -10,8 +10,18 @@
 
 #include "modules/audio_coding/neteq/tools/neteq_rtp_dump_input.h"
 
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <optional>
+#include <utility>
+
 #include "absl/strings/string_view.h"
+#include "api/rtp_header_extension_id.h"
+#include "modules/audio_coding/neteq/tools/neteq_input.h"
 #include "modules/audio_coding/neteq/tools/rtp_file_source.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 
 namespace webrtc {
 namespace test {
@@ -22,20 +32,21 @@ class NetEqRtpDumpInput : public NetEqInput {
  public:
   NetEqRtpDumpInput(absl::string_view file_name,
                     const std::map<int, RTPExtensionType>& hdr_ext_map,
-                    absl::optional<uint32_t> ssrc_filter)
+                    std::optional<uint32_t> ssrc_filter)
       : source_(RtpFileSource::Create(file_name, ssrc_filter)) {
     for (const auto& ext_pair : hdr_ext_map) {
-      source_->RegisterRtpHeaderExtension(ext_pair.second, ext_pair.first);
+      source_->RegisterRtpHeaderExtension(ext_pair.second,
+                                          RtpHeaderExtensionId(ext_pair.first));
     }
-    LoadNextPacket();
+    packet_ = source_->NextPacket();
   }
 
-  absl::optional<int64_t> NextOutputEventTime() const override {
+  std::optional<int64_t> NextOutputEventTime() const override {
     return next_output_event_ms_;
   }
 
-  absl::optional<SetMinimumDelayInfo> NextSetMinimumDelayInfo() const override {
-    return absl::nullopt;
+  std::optional<SetMinimumDelayInfo> NextSetMinimumDelayInfo() const override {
+    return std::nullopt;
   }
 
   void AdvanceOutputEvent() override {
@@ -43,56 +54,33 @@ class NetEqRtpDumpInput : public NetEqInput {
       *next_output_event_ms_ += kOutputPeriodMs;
     }
     if (!NextPacketTime()) {
-      next_output_event_ms_ = absl::nullopt;
+      next_output_event_ms_ = std::nullopt;
     }
   }
 
   void AdvanceSetMinimumDelay() override {}
 
-  absl::optional<int64_t> NextPacketTime() const override {
-    return packet_ ? absl::optional<int64_t>(
-                         static_cast<int64_t>(packet_->time_ms()))
-                   : absl::nullopt;
+  std::optional<int64_t> NextPacketTime() const override {
+    return packet_ ? std::optional(packet_->arrival_time().ms()) : std::nullopt;
   }
 
-  std::unique_ptr<PacketData> PopPacket() override {
+  std::unique_ptr<RtpPacketReceived> PopPacket() override {
     if (!packet_) {
-      return std::unique_ptr<PacketData>();
+      return nullptr;
     }
-    std::unique_ptr<PacketData> packet_data(new PacketData);
-    packet_data->header = packet_->header();
-    if (packet_->payload_length_bytes() == 0 &&
-        packet_->virtual_payload_length_bytes() > 0) {
-      // This is a header-only "dummy" packet. Set the payload to all zeros,
-      // with length according to the virtual length.
-      packet_data->payload.SetSize(packet_->virtual_payload_length_bytes());
-      std::fill_n(packet_data->payload.data(), packet_data->payload.size(), 0);
-    } else {
-      packet_data->payload.SetData(packet_->payload(),
-                                   packet_->payload_length_bytes());
-    }
-    packet_data->time_ms = packet_->time_ms();
-
-    LoadNextPacket();
-
-    return packet_data;
+    return std::exchange(packet_, source_->NextPacket());
   }
 
-  absl::optional<RTPHeader> NextHeader() const override {
-    return packet_ ? absl::optional<RTPHeader>(packet_->header())
-                   : absl::nullopt;
-  }
+  const RtpPacketReceived* NextPacket() const override { return packet_.get(); }
 
   bool ended() const override { return !next_output_event_ms_; }
 
  private:
-  void LoadNextPacket() { packet_ = source_->NextPacket(); }
-
-  absl::optional<int64_t> next_output_event_ms_ = 0;
+  std::optional<int64_t> next_output_event_ms_ = 0;
   static constexpr int64_t kOutputPeriodMs = 10;
 
   std::unique_ptr<RtpFileSource> source_;
-  std::unique_ptr<Packet> packet_;
+  std::unique_ptr<RtpPacketReceived> packet_;
 };
 
 }  // namespace
@@ -100,7 +88,7 @@ class NetEqRtpDumpInput : public NetEqInput {
 std::unique_ptr<NetEqInput> CreateNetEqRtpDumpInput(
     absl::string_view file_name,
     const std::map<int, RTPExtensionType>& hdr_ext_map,
-    absl::optional<uint32_t> ssrc_filter) {
+    std::optional<uint32_t> ssrc_filter) {
   return std::make_unique<NetEqRtpDumpInput>(file_name, hdr_ext_map,
                                              ssrc_filter);
 }

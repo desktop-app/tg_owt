@@ -10,16 +10,24 @@
 
 #include "modules/audio_device/audio_device_buffer.h"
 
-#include <string.h>
-
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <optional>
 
+#include "api/audio/audio_device_defines.h"
+#include "api/environment/environment.h"
+#include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_factory.h"
+#include "api/units/time_delta.h"
 #include "common_audio/signal_processing/include/signal_processing_library.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/time_utils.h"
+#include "rtc_base/timestamp_aligner.h"
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/metrics.h"
 
@@ -30,22 +38,23 @@ static const char kTimerQueueName[] = "AudioDeviceBufferTimer";
 // Time between two sucessive calls to LogStats().
 static const size_t kTimerIntervalInSeconds = 10;
 static const size_t kTimerIntervalInMilliseconds =
-    kTimerIntervalInSeconds * rtc::kNumMillisecsPerSec;
+    kTimerIntervalInSeconds * kNumMillisecsPerSec;
 // Min time required to qualify an audio session as a "call". If playout or
 // recording has been active for less than this time we will not store any
 // logs or UMA stats but instead consider the call as too short.
 static const size_t kMinValidCallTimeTimeInSeconds = 10;
 static const size_t kMinValidCallTimeTimeInMilliseconds =
-    kMinValidCallTimeTimeInSeconds * rtc::kNumMillisecsPerSec;
+    kMinValidCallTimeTimeInSeconds * kNumMillisecsPerSec;
 #ifdef AUDIO_DEVICE_PLAYS_SINUS_TONE
 static const double k2Pi = 6.28318530717959;
 #endif
 
-AudioDeviceBuffer::AudioDeviceBuffer(TaskQueueFactory* task_queue_factory,
+AudioDeviceBuffer::AudioDeviceBuffer(const Environment& env,
                                      bool create_detached)
-    : task_queue_(task_queue_factory->CreateTaskQueue(
+    : env_(env),
+      task_queue_(env_.task_queue_factory().CreateTaskQueue(
           kTimerQueueName,
-          TaskQueueFactory::Priority::NORMAL)),
+          TaskQueueFactory::Priority::kNormal)),
       audio_transport_cb_(nullptr),
       rec_sample_rate_(0),
       play_sample_rate_(0),
@@ -78,6 +87,17 @@ AudioDeviceBuffer::~AudioDeviceBuffer() {
   RTC_DCHECK(!playing_);
   RTC_DCHECK(!recording_);
   RTC_LOG(LS_INFO) << "AudioDeviceBuffer::~dtor";
+
+  // Delete and and thus stop task queue before deleting other members to avoid
+  // race with running tasks. Even though !playing_ and !recording_ called
+  // StopPeriodicLogging, such stop is asynchronous and may race with the
+  // AudioDeviceBuffer destructor. In particular there might be regular LogStats
+  // that attempts to repost task to the task_queue_.
+  // Thus task_queue_ should be deleted before pointer to it is invalidated.
+  // std::unique_ptr destructor does the same two operations in reverse order as
+  // it doesn't expect member would be used after its destruction has started.
+  task_queue_.get_deleter()(task_queue_.get());
+  task_queue_.release();
 }
 
 int32_t AudioDeviceBuffer::RegisterAudioCallback(
@@ -102,13 +122,13 @@ void AudioDeviceBuffer::StartPlayout() {
   }
   RTC_DLOG(LS_INFO) << __FUNCTION__;
   // Clear members tracking playout stats and do it on the task queue.
-  task_queue_.PostTask([this] { ResetPlayStats(); });
+  task_queue_->PostTask([this] { ResetPlayStats(); });
   // Start a periodic timer based on task queue if not already done by the
   // recording side.
   if (!recording_) {
     StartPeriodicLogging();
   }
-  const int64_t now_time = rtc::TimeMillis();
+  const int64_t now_time = env_.clock().TimeInMilliseconds();
   // Clear members that are only touched on the main (creating) thread.
   play_start_time_ = now_time;
   playing_ = true;
@@ -121,14 +141,14 @@ void AudioDeviceBuffer::StartRecording() {
   }
   RTC_DLOG(LS_INFO) << __FUNCTION__;
   // Clear members tracking recording stats and do it on the task queue.
-  task_queue_.PostTask([this] { ResetRecStats(); });
+  task_queue_->PostTask([this] { ResetRecStats(); });
   // Start a periodic timer based on task queue if not already done by the
   // playout side.
   if (!playing_) {
     StartPeriodicLogging();
   }
   // Clear members that will be touched on the main (creating) thread.
-  rec_start_time_ = rtc::TimeMillis();
+  rec_start_time_ = env_.clock().TimeInMilliseconds();
   recording_ = true;
   // And finally a member which can be modified on the native audio thread.
   // It is safe to do so since we know by design that the owning ADM has not
@@ -148,7 +168,7 @@ void AudioDeviceBuffer::StopPlayout() {
     StopPeriodicLogging();
   }
   RTC_LOG(LS_INFO) << "total playout time: "
-                   << rtc::TimeSince(play_start_time_);
+                   << (env_.clock().TimeInMilliseconds() - play_start_time_);
 }
 
 void AudioDeviceBuffer::StopRecording() {
@@ -172,7 +192,8 @@ void AudioDeviceBuffer::StopRecording() {
   // the fact that `only_silence_recorded_` can be affected during the complete
   // call makes chances of conflicts with potentially one last callback very
   // small.
-  const size_t time_since_start = rtc::TimeSince(rec_start_time_);
+  const size_t time_since_start =
+      env_.clock().TimeInMilliseconds() - rec_start_time_;
   if (time_since_start > kMinValidCallTimeTimeInMilliseconds) {
     const int only_zeros = static_cast<int>(only_silence_recorded_);
     RTC_HISTOGRAM_BOOLEAN("WebRTC.Audio.RecordedOnlyZeros", only_zeros);
@@ -234,13 +255,13 @@ void AudioDeviceBuffer::SetVQEData(int play_delay_ms, int rec_delay_ms) {
 
 int32_t AudioDeviceBuffer::SetRecordedBuffer(const void* audio_buffer,
                                              size_t samples_per_channel) {
-  return SetRecordedBuffer(audio_buffer, samples_per_channel, absl::nullopt);
+  return SetRecordedBuffer(audio_buffer, samples_per_channel, std::nullopt);
 }
 
 int32_t AudioDeviceBuffer::SetRecordedBuffer(
     const void* audio_buffer,
     size_t samples_per_channel,
-    absl::optional<int64_t> capture_timestamp_ns) {
+    std::optional<int64_t> capture_timestamp_ns) {
   // Copy the complete input buffer to the local buffer.
   const size_t old_size = rec_buffer_.size();
   rec_buffer_.SetData(static_cast<const int16_t*>(audio_buffer),
@@ -252,15 +273,14 @@ int32_t AudioDeviceBuffer::SetRecordedBuffer(
   }
 
   if (capture_timestamp_ns) {
-    int64_t align_offsync_estimation_time = rtc::TimeMicros();
-    if (align_offsync_estimation_time -
-            rtc::TimestampAligner::kMinFrameIntervalUs >
+    int64_t align_offsync_estimation_time = env_.clock().TimeInMicroseconds();
+    if (align_offsync_estimation_time - TimestampAligner::kMinFrameIntervalUs >
         align_offsync_estimation_time_) {
       align_offsync_estimation_time_ = align_offsync_estimation_time;
       capture_timestamp_ns_ =
-          rtc::kNumNanosecsPerMicrosec *
+          kNumNanosecsPerMicrosec *
           timestamp_aligner_.TranslateTimestamp(
-              *capture_timestamp_ns / rtc::kNumNanosecsPerMicrosec,
+              *capture_timestamp_ns / kNumNanosecsPerMicrosec,
               align_offsync_estimation_time);
     } else {
       // The Timestamp aligner is designed to prevent timestamps that are too
@@ -270,9 +290,9 @@ int32_t AudioDeviceBuffer::SetRecordedBuffer(
       // the clock offset estimation. This get us timestamps without generating
       // warnings, but could generate two timestamps within a millisecond.
       capture_timestamp_ns_ =
-          rtc::kNumNanosecsPerMicrosec *
+          kNumNanosecsPerMicrosec *
           timestamp_aligner_.TranslateTimestamp(*capture_timestamp_ns /
-                                                rtc::kNumNanosecsPerMicrosec);
+                                                kNumNanosecsPerMicrosec);
     }
   }
   // Derive a new level value twice per second and check if it is non-zero.
@@ -388,16 +408,16 @@ int32_t AudioDeviceBuffer::GetPlayoutData(void* audio_buffer) {
 }
 
 void AudioDeviceBuffer::StartPeriodicLogging() {
-  task_queue_.PostTask([this] { LogStats(AudioDeviceBuffer::LOG_START); });
+  task_queue_->PostTask([this] { LogStats(AudioDeviceBuffer::LOG_START); });
 }
 
 void AudioDeviceBuffer::StopPeriodicLogging() {
-  task_queue_.PostTask([this] { LogStats(AudioDeviceBuffer::LOG_STOP); });
+  task_queue_->PostTask([this] { LogStats(AudioDeviceBuffer::LOG_STOP); });
 }
 
 void AudioDeviceBuffer::LogStats(LogState state) {
-  RTC_DCHECK_RUN_ON(&task_queue_);
-  int64_t now_time = rtc::TimeMillis();
+  RTC_DCHECK_RUN_ON(task_queue_.get());
+  int64_t now_time = env_.clock().TimeInMilliseconds();
 
   if (state == AudioDeviceBuffer::LOG_START) {
     // Reset counters at start. We will not add any logging in this state but
@@ -418,7 +438,7 @@ void AudioDeviceBuffer::LogStats(LogState state) {
   }
 
   int64_t next_callback_time = now_time + kTimerIntervalInMilliseconds;
-  int64_t time_since_last = rtc::TimeDiff(now_time, last_timer_task_time_);
+  int64_t time_since_last = TimeDiff(now_time, last_timer_task_time_);
   last_timer_task_time_ = now_time;
 
   Stats stats;
@@ -493,26 +513,24 @@ void AudioDeviceBuffer::LogStats(LogState state) {
   }
   last_stats_ = stats;
 
-  int64_t time_to_wait_ms = next_callback_time - rtc::TimeMillis();
-  if (time_to_wait_ms <= 0) {
-      time_to_wait_ms = 1;
-  }
+  int64_t time_to_wait_ms = std::max<int64_t>(
+      next_callback_time - env_.clock().TimeInMilliseconds(), 0);
 
   // Keep posting new (delayed) tasks until state is changed to kLogStop.
-  task_queue_.PostDelayedTask(
+  task_queue_->PostDelayedTask(
       [this] { AudioDeviceBuffer::LogStats(AudioDeviceBuffer::LOG_ACTIVE); },
       TimeDelta::Millis(time_to_wait_ms));
 }
 
 void AudioDeviceBuffer::ResetRecStats() {
-  RTC_DCHECK_RUN_ON(&task_queue_);
+  RTC_DCHECK_RUN_ON(task_queue_.get());
   last_stats_.ResetRecStats();
   MutexLock lock(&lock_);
   stats_.ResetRecStats();
 }
 
 void AudioDeviceBuffer::ResetPlayStats() {
-  RTC_DCHECK_RUN_ON(&task_queue_);
+  RTC_DCHECK_RUN_ON(task_queue_.get());
   last_stats_.ResetPlayStats();
   MutexLock lock(&lock_);
   stats_.ResetPlayStats();

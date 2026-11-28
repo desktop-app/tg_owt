@@ -10,22 +10,33 @@
 
 #include "modules/audio_device/include/test_audio_device.h"
 
-#include <algorithm>
-#include <array>
-#include <memory>
-#include <utility>
+#include <stdio.h>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
-#include "api/task_queue/task_queue_factory.h"
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "api/audio/audio_device.h"
+#include "api/audio/audio_device_defines.h"
+#include "api/environment/environment.h"
+#include "api/scoped_refptr.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "common_audio/wav_file.h"
-#include "common_audio/wav_header.h"
-#include "modules/audio_device/include/audio_device_defines.h"
+#include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/logging.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -39,9 +50,9 @@ void RunWavTest(const std::vector<int16_t>& input_samples,
   const ::testing::TestInfo* const test_info =
       ::testing::UnitTest::GetInstance()->current_test_info();
 
-  const std::string output_filename = test::OutputPathWithRandomDirectory() +
-                                      "BoundedWavFileWriterTest_" +
-                                      test_info->name() + ".wav";
+  const std::string output_dir = test::OutputPathWithRandomDirectory();
+  const std::string output_filename =
+      output_dir + "BoundedWavFileWriterTest_" + test_info->name() + ".wav";
 
   static const size_t kSamplesPerFrame = 8;
   static const int kSampleRate = kSamplesPerFrame * 100;
@@ -54,7 +65,7 @@ void RunWavTest(const std::vector<int16_t>& input_samples,
         TestAudioDeviceModule::CreateBoundedWavFileWriter(output_filename, 800);
 
     for (size_t i = 0; i < input_samples.size(); i += kSamplesPerFrame) {
-      EXPECT_TRUE(writer->Render(rtc::ArrayView<const int16_t>(
+      EXPECT_TRUE(writer->Render(std::span<const int16_t>(
           &input_samples[i],
           std::min(kSamplesPerFrame, input_samples.size() - i))));
     }
@@ -70,7 +81,8 @@ void RunWavTest(const std::vector<int16_t>& input_samples,
     EXPECT_EQ(0u, reader.ReadSamples(read_samples.size(), read_samples.data()));
   }
 
-  remove(output_filename.c_str());
+  EXPECT_TRUE(test::RemoveFile(output_filename));
+  EXPECT_TRUE(test::RemoveDir(output_dir));
 }
 
 TEST(BoundedWavFileWriterTest, NoSilence) {
@@ -92,16 +104,20 @@ TEST(BoundedWavFileWriterTest, SomeStartSilence) {
 TEST(BoundedWavFileWriterTest, NegativeStartSilence) {
   static const std::vector<int16_t> kInputSamples = {
       0, -4, -6, 0, 3, 0, 0, 0, 0, 3, -13222, -7, -3525, 5787, -25247, 8};
-  static const std::vector<int16_t> kExpectedSamples(kInputSamples.begin() + 2,
-                                                     kInputSamples.end());
+  // The element at index 4 is below kAmplitudeThreshold and it is at the end
+  // of the first frame so gets speculatively cut off, then restored as 0.
+  static const std::vector<int16_t> kExpectedSamples = {
+      -6, 0, 0, 0, 0, 0, 0, 3, -13222, -7, -3525, 5787, -25247, 8};
   RunWavTest(kInputSamples, kExpectedSamples);
 }
 
 TEST(BoundedWavFileWriterTest, SomeEndSilence) {
   static const std::vector<int16_t> kInputSamples = {
       75, 1234, 243, -1231, -22222, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  // The trailing zeros and the 1 (which has amplitude below
+  // kAmplitudeThreshold) are cut off at the end.
   static const std::vector<int16_t> kExpectedSamples(kInputSamples.begin(),
-                                                     kInputSamples.end() - 9);
+                                                     kInputSamples.end() - 11);
   RunWavTest(kInputSamples, kExpectedSamples);
 }
 
@@ -125,20 +141,22 @@ TEST(BoundedWavFileWriterTest, DoubleSilence) {
 TEST(BoundedWavFileWriterTest, EndSilenceCutoff) {
   static const std::vector<int16_t> kInputSamples = {
       75, 1234, 243, -1231, -22222, 0, 1, 0, 0, 0, 0};
+  // The trailing zeros and the 1 (which has amplitude below
+  // kAmplitudeThreshold) are cut off at the end.
   static const std::vector<int16_t> kExpectedSamples(kInputSamples.begin(),
-                                                     kInputSamples.end() - 4);
+                                                     kInputSamples.end() - 6);
   RunWavTest(kInputSamples, kExpectedSamples);
 }
 
 TEST(WavFileReaderTest, RepeatedTrueWithSingleFrameFileReadTwice) {
   static const std::vector<int16_t> kInputSamples = {75,     1234, 243, -1231,
                                                      -22222, 0,    3,   88};
-  static const rtc::BufferT<int16_t> kExpectedSamples(kInputSamples.data(),
-                                                      kInputSamples.size());
+  static const BufferT<int16_t> kExpectedSamples(kInputSamples.data(),
+                                                 kInputSamples.size());
 
-  const std::string output_filename = test::OutputPathWithRandomDirectory() +
-                                      "WavFileReaderTest_RepeatedTrue_" +
-                                      ".wav";
+  const std::string output_dir = test::OutputPathWithRandomDirectory();
+  const std::string output_filename =
+      output_dir + "WavFileReaderTest_RepeatedTrue_.wav";
 
   static const size_t kSamplesPerFrame = 8;
   static const int kSampleRate = kSamplesPerFrame * 100;
@@ -151,7 +169,7 @@ TEST(WavFileReaderTest, RepeatedTrueWithSingleFrameFileReadTwice) {
         TestAudioDeviceModule::CreateWavFileWriter(output_filename, 800);
 
     for (size_t i = 0; i < kInputSamples.size(); i += kSamplesPerFrame) {
-      EXPECT_TRUE(writer->Render(rtc::ArrayView<const int16_t>(
+      EXPECT_TRUE(writer->Render(std::span<const int16_t>(
           &kInputSamples[i],
           std::min(kSamplesPerFrame, kInputSamples.size() - i))));
     }
@@ -160,14 +178,16 @@ TEST(WavFileReaderTest, RepeatedTrueWithSingleFrameFileReadTwice) {
   {
     std::unique_ptr<TestAudioDeviceModule::Capturer> reader =
         TestAudioDeviceModule::CreateWavFileReader(output_filename, true);
-    rtc::BufferT<int16_t> buffer(kExpectedSamples.size());
+    BufferT<int16_t> buffer =
+        BufferT<int16_t>::CreateWithCapacity(kExpectedSamples.size());
     EXPECT_TRUE(reader->Capture(&buffer));
     EXPECT_EQ(kExpectedSamples, buffer);
     EXPECT_TRUE(reader->Capture(&buffer));
     EXPECT_EQ(kExpectedSamples, buffer);
   }
 
-  remove(output_filename.c_str());
+  EXPECT_TRUE(test::RemoveFile(output_filename));
+  EXPECT_TRUE(test::RemoveDir(output_dir));
 }
 
 void RunRawTestNoRepeat(const std::vector<int16_t>& input_samples,
@@ -175,9 +195,9 @@ void RunRawTestNoRepeat(const std::vector<int16_t>& input_samples,
   const ::testing::TestInfo* const test_info =
       ::testing::UnitTest::GetInstance()->current_test_info();
 
-  const std::string output_filename = test::OutputPathWithRandomDirectory() +
-                                      "RawFileTest_" + test_info->name() +
-                                      ".raw";
+  const std::string output_dir = test::OutputPathWithRandomDirectory();
+  const std::string output_filename =
+      output_dir + "RawFileTest_" + test_info->name() + ".raw";
 
   static const size_t kSamplesPerFrame = 8;
   static const int kSampleRate = kSamplesPerFrame * 100;
@@ -191,7 +211,7 @@ void RunRawTestNoRepeat(const std::vector<int16_t>& input_samples,
             output_filename, /*sampling_frequency_in_hz=*/800);
 
     for (size_t i = 0; i < input_samples.size(); i += kSamplesPerFrame) {
-      EXPECT_TRUE(writer->Render(rtc::ArrayView<const int16_t>(
+      EXPECT_TRUE(writer->Render(std::span<const int16_t>(
           &input_samples[i],
           std::min(kSamplesPerFrame, input_samples.size() - i))));
     }
@@ -202,8 +222,10 @@ void RunRawTestNoRepeat(const std::vector<int16_t>& input_samples,
         TestAudioDeviceModule::CreateRawFileReader(
             output_filename, /*sampling_frequency_in_hz=*/800,
             /*num_channels=*/2, /*repeat=*/false);
-    rtc::BufferT<int16_t> buffer(expected_samples.size());
-    rtc::BufferT<int16_t> expected_buffer(expected_samples.size());
+    BufferT<int16_t> buffer =
+        BufferT<int16_t>::CreateWithCapacity(expected_samples.size());
+    BufferT<int16_t> expected_buffer =
+        BufferT<int16_t>::CreateWithCapacity(expected_samples.size());
     expected_buffer.SetData(expected_samples);
     EXPECT_TRUE(reader->Capture(&buffer));
     EXPECT_EQ(expected_buffer, buffer);
@@ -211,7 +233,8 @@ void RunRawTestNoRepeat(const std::vector<int16_t>& input_samples,
     EXPECT_TRUE(buffer.empty());
   }
 
-  remove(output_filename.c_str());
+  EXPECT_TRUE(test::RemoveFile(output_filename));
+  EXPECT_TRUE(test::RemoveDir(output_dir));
 }
 
 TEST(RawFileWriterTest, NoSilence) {
@@ -275,14 +298,15 @@ TEST(RawFileWriterTest, Repeat) {
   static const std::vector<int16_t> kInputSamples = {
       75,   1234,  243,    -1231, -22222, 0,    3,      88,
       1222, -1213, -13222, -7,    -3525,  5787, -25247, 8};
-  static const rtc::BufferT<int16_t> kExpectedSamples(kInputSamples.data(),
-                                                      kInputSamples.size());
+  static const BufferT<int16_t> kExpectedSamples(kInputSamples.data(),
+                                                 kInputSamples.size());
 
   const ::testing::TestInfo* const test_info =
       ::testing::UnitTest::GetInstance()->current_test_info();
 
-  const std::string output_filename = test::OutputPathWithRandomDirectory() +
-                                      "RawFileTest_" + test_info->name() + "_" +
+  const std::string output_dir = test::OutputPathWithRandomDirectory();
+  const std::string output_filename = output_dir + "RawFileTest_" +
+                                      test_info->name() + "_" +
                                       std::to_string(std::rand()) + ".raw";
 
   static const size_t kSamplesPerFrame = 8;
@@ -297,7 +321,7 @@ TEST(RawFileWriterTest, Repeat) {
             output_filename, /*sampling_frequency_in_hz=*/800);
 
     for (size_t i = 0; i < kInputSamples.size(); i += kSamplesPerFrame) {
-      EXPECT_TRUE(writer->Render(rtc::ArrayView<const int16_t>(
+      EXPECT_TRUE(writer->Render(std::span<const int16_t>(
           &kInputSamples[i],
           std::min(kSamplesPerFrame, kInputSamples.size() - i))));
     }
@@ -308,14 +332,16 @@ TEST(RawFileWriterTest, Repeat) {
         TestAudioDeviceModule::CreateRawFileReader(
             output_filename, /*sampling_frequency_in_hz=*/800,
             /*num_channels=*/2, /*repeat=*/true);
-    rtc::BufferT<int16_t> buffer(kExpectedSamples.size());
+    BufferT<int16_t> buffer =
+        BufferT<int16_t>::CreateWithCapacity(kExpectedSamples.size());
     EXPECT_TRUE(reader->Capture(&buffer));
     EXPECT_EQ(kExpectedSamples, buffer);
     EXPECT_TRUE(reader->Capture(&buffer));
     EXPECT_EQ(kExpectedSamples, buffer);
   }
 
-  remove(output_filename.c_str());
+  EXPECT_TRUE(test::RemoveFile(output_filename));
+  EXPECT_TRUE(test::RemoveDir(output_dir));
 }
 
 TEST(PulsedNoiseCapturerTest, SetMaxAmplitude) {
@@ -323,7 +349,7 @@ TEST(PulsedNoiseCapturerTest, SetMaxAmplitude) {
   std::unique_ptr<TestAudioDeviceModule::PulsedNoiseCapturer> capturer =
       TestAudioDeviceModule::CreatePulsedNoiseCapturer(
           kAmplitude, /*sampling_frequency_in_hz=*/8000);
-  rtc::BufferT<int16_t> recording_buffer;
+  BufferT<int16_t> recording_buffer;
 
   // Verify that the capturer doesn't create entries louder than than
   // kAmplitude. Since the pulse generator alternates between writing
@@ -356,17 +382,17 @@ class TestAudioTransport : public AudioTransport {
   ~TestAudioTransport() override = default;
 
   int32_t RecordedDataIsAvailable(
-      const void* audioSamples,
+      const void* /* audioSamples */,
       size_t samples_per_channel,
       size_t bytes_per_sample,
       size_t number_of_channels,
       uint32_t samples_per_second,
-      uint32_t total_delay_ms,
-      int32_t clock_drift,
-      uint32_t current_mic_level,
-      bool key_pressed,
+      uint32_t /* total_delay_ms */,
+      int32_t /* clock_drift */,
+      uint32_t /* current_mic_level */,
+      bool /* key_pressed */,
       uint32_t& new_mic_level,
-      absl::optional<int64_t> estimated_capture_time_ns) override {
+      std::optional<int64_t> /* estimated_capture_time_ns */) override {
     new_mic_level = 1;
 
     if (mode_ != Mode::kRecording) {
@@ -411,26 +437,13 @@ class TestAudioTransport : public AudioTransport {
     return 0;
   }
 
-  int32_t RecordedDataIsAvailable(const void* audio_samples,
-                                  size_t samples_per_channel,
-                                  size_t bytes_per_sample,
-                                  size_t number_of_channels,
-                                  uint32_t samples_per_second,
-                                  uint32_t total_delay_ms,
-                                  int32_t clockDrift,
-                                  uint32_t current_mic_level,
-                                  bool key_pressed,
-                                  uint32_t& new_mic_level) override {
-    RTC_CHECK(false) << "This methods should be never executed";
-  }
-
-  void PullRenderData(int bits_per_sample,
-                      int sample_rate,
-                      size_t number_of_channels,
-                      size_t number_of_frames,
-                      void* audio_data,
-                      int64_t* elapsed_time_ms,
-                      int64_t* ntp_time_ms) override {
+  void PullRenderData(int /* bits_per_sample */,
+                      int /* sample_rate */,
+                      size_t /* number_of_channels */,
+                      size_t /* number_of_frames */,
+                      void* /* audio_data */,
+                      int64_t* /* elapsed_time_ms */,
+                      int64_t* /* ntp_time_ms */) override {
     RTC_CHECK(false) << "This methods should be never executed";
   }
 
@@ -463,15 +476,16 @@ class TestAudioTransport : public AudioTransport {
 
 TEST(TestAudioDeviceModuleTest, CreatedADMCanRecord) {
   GlobalSimulatedTimeController time_controller(kStartTime);
+  const Environment env = CreateTestEnvironment({.time = &time_controller});
   TestAudioTransport audio_transport(TestAudioTransport::Mode::kRecording);
   std::unique_ptr<TestAudioDeviceModule::PulsedNoiseCapturer> capturer =
       TestAudioDeviceModule::CreatePulsedNoiseCapturer(
           /*max_amplitude=*/1000,
           /*sampling_frequency_in_hz=*/48000, /*num_channels=*/2);
 
-  rtc::scoped_refptr<AudioDeviceModule> adm = TestAudioDeviceModule::Create(
-      time_controller.GetTaskQueueFactory(), std::move(capturer),
-      /*renderer=*/nullptr);
+  scoped_refptr<AudioDeviceModule> adm =
+      TestAudioDeviceModule::Create(env, std::move(capturer),
+                                    /*renderer=*/nullptr);
 
   ASSERT_EQ(adm->RegisterAudioCallback(&audio_transport), 0);
   ASSERT_EQ(adm->Init(), 0);
@@ -495,13 +509,14 @@ TEST(TestAudioDeviceModuleTest, CreatedADMCanRecord) {
 
 TEST(TestAudioDeviceModuleTest, CreatedADMCanPlay) {
   GlobalSimulatedTimeController time_controller(kStartTime);
+  const Environment env = CreateTestEnvironment({.time = &time_controller});
   TestAudioTransport audio_transport(TestAudioTransport::Mode::kPlaying);
   std::unique_ptr<TestAudioDeviceModule::Renderer> renderer =
       TestAudioDeviceModule::CreateDiscardRenderer(
           /*sampling_frequency_in_hz=*/48000, /*num_channels=*/2);
 
-  rtc::scoped_refptr<AudioDeviceModule> adm =
-      TestAudioDeviceModule::Create(time_controller.GetTaskQueueFactory(),
+  scoped_refptr<AudioDeviceModule> adm =
+      TestAudioDeviceModule::Create(env,
                                     /*capturer=*/nullptr, std::move(renderer));
 
   ASSERT_EQ(adm->RegisterAudioCallback(&audio_transport), 0);

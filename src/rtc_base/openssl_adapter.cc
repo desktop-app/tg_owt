@@ -10,23 +10,49 @@
 
 #include "rtc_base/openssl_adapter.h"
 
-#include <errno.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
-
-#include "absl/strings/string_view.h"
-#ifdef OPENSSL_IS_BORINGSSL
-#include <openssl/pool.h>
-#endif
-#include <openssl/rand.h>
+#include <openssl/ssl.h>
 #include <openssl/x509.h>
-#include <string.h>
-#include <time.h>
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <ctime>
 #include <memory>
-#include <span>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
+#include "api/task_queue/pending_task_safety_flag.h"
+#include "api/units/time_delta.h"
+#include "rtc_base/async_socket.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/numerics/safe_conversions.h"
+#include "rtc_base/openssl_session_cache.h"
+#include "rtc_base/openssl_utility.h"
+#include "rtc_base/socket.h"
+#include "rtc_base/socket_address.h"
+#include "rtc_base/ssl_adapter.h"
+#include "rtc_base/ssl_certificate.h"
+#include "rtc_base/ssl_identity.h"
+#include "rtc_base/ssl_stream_adapter.h"
+#include "rtc_base/strings/str_join.h"
+#include "rtc_base/thread.h"
+
+#ifdef OPENSSL_IS_BORINGSSL
+#include <openssl/pool.h>
+
+#include "rtc_base/boringssl_certificate.h"
+#include "rtc_base/boringssl_identity.h"
+#include "rtc_base/openssl.h"
+#else
+#include "rtc_base/openssl_identity.h"
+#endif
 
 // Use CRYPTO_BUFFER APIs if available and we have no dependency on X509
 // objects.
@@ -34,23 +60,6 @@
     defined(WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS)
 #define WEBRTC_USE_CRYPTO_BUFFER_CALLBACK
 #endif
-
-#include "absl/memory/memory.h"
-#include "api/units/time_delta.h"
-#include "rtc_base/checks.h"
-#include "rtc_base/logging.h"
-#include "rtc_base/numerics/safe_conversions.h"
-#include "rtc_base/openssl.h"
-#ifdef OPENSSL_IS_BORINGSSL
-#include "rtc_base/boringssl_identity.h"
-#else
-#include "rtc_base/openssl_identity.h"
-#endif
-#include "rtc_base/openssl_utility.h"
-#include "rtc_base/strings/str_join.h"
-#include "rtc_base/strings/string_builder.h"
-#include "rtc_base/thread.h"
-
 //////////////////////////////////////////////////////////////////////
 // SocketBIO
 //////////////////////////////////////////////////////////////////////
@@ -76,7 +85,7 @@ static BIO_METHOD* BIO_socket_method() {
   return methods;
 }
 
-static BIO* BIO_new_socket(rtc::Socket* socket) {
+static BIO* BIO_new_socket(webrtc::Socket* socket) {
   BIO* ret = BIO_new(BIO_socket_method());
   if (ret == nullptr) {
     return nullptr;
@@ -88,7 +97,7 @@ static BIO* BIO_new_socket(rtc::Socket* socket) {
 static int socket_new(BIO* b) {
   BIO_set_shutdown(b, 0);
   BIO_set_init(b, 1);
-  BIO_set_data(b, 0);
+  BIO_set_data(b, nullptr);
   return 1;
 }
 
@@ -101,7 +110,7 @@ static int socket_free(BIO* b) {
 static int socket_read(BIO* b, char* out, int outl) {
   if (!out)
     return -1;
-  rtc::Socket* socket = static_cast<rtc::Socket*>(BIO_get_data(b));
+  webrtc::Socket* socket = static_cast<webrtc::Socket*>(BIO_get_data(b));
   BIO_clear_retry_flags(b);
   int result = socket->Recv(out, outl, nullptr);
   if (result > 0) {
@@ -115,7 +124,7 @@ static int socket_read(BIO* b, char* out, int outl) {
 static int socket_write(BIO* b, const char* in, int inl) {
   if (!in)
     return -1;
-  rtc::Socket* socket = static_cast<rtc::Socket*>(BIO_get_data(b));
+  webrtc::Socket* socket = static_cast<webrtc::Socket*>(BIO_get_data(b));
   BIO_clear_retry_flags(b);
   int result = socket->Send(in, inl);
   if (result > 0) {
@@ -127,7 +136,7 @@ static int socket_write(BIO* b, const char* in, int inl) {
 }
 
 static int socket_puts(BIO* b, const char* str) {
-  return socket_write(b, str, rtc::checked_cast<int>(strlen(str)));
+  return socket_write(b, str, webrtc::checked_cast<int>(strlen(str)));
 }
 
 static long socket_ctrl(BIO* b, int cmd, long num, void* ptr) {  // NOLINT
@@ -135,9 +144,9 @@ static long socket_ctrl(BIO* b, int cmd, long num, void* ptr) {  // NOLINT
     case BIO_CTRL_RESET:
       return 0;
     case BIO_CTRL_EOF: {
-      rtc::Socket* socket = static_cast<rtc::Socket*>(ptr);
+      webrtc::Socket* socket = static_cast<webrtc::Socket*>(ptr);
       // 1 means socket closed.
-      return (socket->GetState() == rtc::Socket::CS_CLOSED) ? 1 : 0;
+      return (socket->GetState() == webrtc::Socket::CS_CLOSED) ? 1 : 0;
     }
     case BIO_CTRL_WPENDING:
     case BIO_CTRL_PENDING:
@@ -154,81 +163,28 @@ static void LogSslError() {
   uint32_t error_code;
   const char* file;
   int line;
-  do {
-    error_code = ERR_get_error_line(&file, &line);
+  while ((error_code = ERR_get_error_line(&file, &line)) != 0) {
     if (ERR_GET_LIB(error_code) == ERR_LIB_SSL) {
       RTC_LOG(LS_ERROR) << "ERR_LIB_SSL: " << error_code << ", " << file << ":"
                         << line;
-      break;
     }
-  } while (error_code != 0);
+  }
 }
 
 /////////////////////////////////////////////////////////////////////////////
 // OpenSSLAdapter
 /////////////////////////////////////////////////////////////////////////////
 
-namespace rtc {
-
-using ::webrtc::TimeDelta;
+namespace webrtc {
 
 bool OpenSSLAdapter::InitializeSSL() {
-  if (!SSL_library_init())
-    return false;
-#if !defined(ADDRESS_SANITIZER) || !defined(WEBRTC_MAC) || defined(WEBRTC_IOS)
-  // Loading the error strings crashes mac_asan.  Omit this debugging aid there.
-  SSL_load_error_strings();
-#endif
-  ERR_load_BIO_strings();
-  OpenSSL_add_all_algorithms();
-  RAND_poll();
-  return true;
+  // TODO: https://issues.webrtc.org/issues/339300437 - remove once
+  // BoringSSL no longer requires this after
+  // https://bugs.chromium.org/p/boringssl/issues/detail?id=35
+  // In OpenSSL it is supposed to be a no-op as of 1.1:
+  // https://www.openssl.org/docs/man1.1.1/man3/OPENSSL_init_ssl.html
+  return OPENSSL_init_ssl(0, nullptr);
 }
-
-namespace {
-
-// The checks below see the certificates the peer presented in the handshake
-// and, in the X509 build, the chain OpenSSL built from them. This leaves two
-// gaps when a custom SSLCertificateVerifier builds its own path: intermediates
-// it adds itself, e.g. from a cache or via AIA fetching, are not checked, so a
-// server could leave a distrusted intermediate out of the handshake; and the
-// trust anchor it chains to is not checked either.
-// Conversely, a distrusted certificate that the peer presents but that is not
-// needed for the path still causes the chain to be rejected. All of this is
-// acceptable for this defense-in-depth check.
-
-#ifdef WEBRTC_USE_CRYPTO_BUFFER_CALLBACK
-bool ContainsDistrustedCertificate(const STACK_OF(CRYPTO_BUFFER) * chain) {
-  for (size_t i = 0; i < sk_CRYPTO_BUFFER_num(chain); ++i) {
-    const CRYPTO_BUFFER* cert = sk_CRYPTO_BUFFER_value(chain, i);
-    if (openssl::IsDistrustedCertificate(std::span<const uint8_t>(
-            CRYPTO_BUFFER_data(cert), CRYPTO_BUFFER_len(cert)))) {
-      return true;
-    }
-  }
-  return false;
-}
-#else   // WEBRTC_USE_CRYPTO_BUFFER_CALLBACK
-bool ContainsDistrustedCertificate(STACK_OF(X509) * chain) {
-  for (int i = 0; i < static_cast<int>(sk_X509_num(chain)); ++i) {
-    unsigned char* der = nullptr;
-    int der_len = i2d_X509(sk_X509_value(chain, i), &der);
-    if (der_len <= 0) {
-      // Fail closed, consistent with openssl::IsDistrustedCertificate().
-      return true;
-    }
-    bool distrusted = openssl::IsDistrustedCertificate(
-        std::span<const uint8_t>(der, static_cast<size_t>(der_len)));
-    OPENSSL_free(der);
-    if (distrusted) {
-      return true;
-    }
-  }
-  return false;
-}
-#endif  // !defined(WEBRTC_USE_CRYPTO_BUFFER_CALLBACK)
-
-}  // namespace
 
 bool OpenSSLAdapter::CleanupSSL() {
   return true;
@@ -236,7 +192,8 @@ bool OpenSSLAdapter::CleanupSSL() {
 
 OpenSSLAdapter::OpenSSLAdapter(Socket* socket,
                                OpenSSLSessionCache* ssl_session_cache,
-                               SSLCertificateVerifier* ssl_cert_verifier)
+                               SSLCertificateVerifier* ssl_cert_verifier,
+                               bool dtls)
     : SSLAdapter(socket),
       ssl_session_cache_(ssl_session_cache),
       ssl_cert_verifier_(ssl_cert_verifier),
@@ -246,7 +203,7 @@ OpenSSLAdapter::OpenSSLAdapter(Socket* socket,
       ssl_write_needs_read_(false),
       ssl_(nullptr),
       ssl_ctx_(nullptr),
-      ssl_mode_(SSL_MODE_TLS),
+      ssl_mode_(dtls ? SSL_MODE_DTLS : SSL_MODE_TLS),
       ignore_bad_cert_(false),
       custom_cert_verifier_status_(false) {
   // If a factory is used, take a reference on the factory's SSL_CTX.
@@ -274,12 +231,6 @@ void OpenSSLAdapter::SetAlpnProtocols(const std::vector<std::string>& protos) {
 
 void OpenSSLAdapter::SetEllipticCurves(const std::vector<std::string>& curves) {
   elliptic_curves_ = curves;
-}
-
-void OpenSSLAdapter::SetMode(SSLMode mode) {
-  RTC_DCHECK(!ssl_ctx_);
-  RTC_DCHECK(state_ == SSL_NONE);
-  ssl_mode_ = mode;
 }
 
 void OpenSSLAdapter::SetCertVerifier(
@@ -335,7 +286,7 @@ int OpenSSLAdapter::BeginSSL() {
   // need to create one, and specify `false` to disable session caching.
   if (ssl_session_cache_ == nullptr) {
     RTC_DCHECK(!ssl_ctx_);
-    ssl_ctx_ = CreateContext(ssl_mode_, false);
+    ssl_ctx_ = CreateContext(ssl_mode_, /* enable_cache= */ false);
   }
 
   if (!ssl_ctx_) {
@@ -400,12 +351,12 @@ int OpenSSLAdapter::BeginSSL() {
     if (!tls_alpn_string.empty()) {
       SSL_set_alpn_protos(
           ssl_, reinterpret_cast<const unsigned char*>(tls_alpn_string.data()),
-          rtc::dchecked_cast<unsigned>(tls_alpn_string.size()));
+          dchecked_cast<unsigned>(tls_alpn_string.size()));
     }
   }
 
   if (!elliptic_curves_.empty()) {
-    SSL_set1_curves_list(ssl_, webrtc::StrJoin(elliptic_curves_, ":").c_str());
+    SSL_set1_curves_list(ssl_, StrJoin(elliptic_curves_, ":").c_str());
   }
 
   // Now that the initial config is done, transfer ownership of `bio` to the
@@ -428,6 +379,7 @@ int OpenSSLAdapter::ContinueSSL() {
   // Clear the DTLS timer
   timer_.reset();
 
+  ERR_clear_error();
   int code = (role_ == SSL_CLIENT) ? SSL_connect(ssl_) : SSL_accept(ssl_);
   switch (SSL_get_error(ssl_, code)) {
     case SSL_ERROR_NONE:
@@ -464,6 +416,9 @@ int OpenSSLAdapter::ContinueSSL() {
     case SSL_ERROR_WANT_WRITE:
       break;
 
+    case SSL_ERROR_SSL:
+      LogSslError();
+      [[fallthrough]];
     case SSL_ERROR_ZERO_RETURN:
     default:
       RTC_LOG(LS_WARNING) << "ContinueSSL -- error " << code;
@@ -513,6 +468,7 @@ int OpenSSLAdapter::DoSslWrite(const void* pv, size_t cb, int* error) {
   RTC_DCHECK(pending_data_.empty() || pv == pending_data_.data());
   RTC_DCHECK(error != nullptr);
 
+  ERR_clear_error();
   ssl_write_needs_read_ = false;
   int ret = SSL_write(ssl_, pv, checked_cast<int>(cb));
   *error = SSL_get_error(ssl_, ret);
@@ -608,7 +564,7 @@ int OpenSSLAdapter::Send(const void* pv, size_t cb) {
     pending_data_.SetData(static_cast<const uint8_t*>(pv), cb);
     // Since we're taking responsibility for sending this data, return its full
     // size. The user of this class can consider it sent.
-    return rtc::dchecked_cast<int>(cb);
+    return dchecked_cast<int>(cb);
   }
   return ret;
 }
@@ -645,6 +601,7 @@ int OpenSSLAdapter::Recv(void* pv, size_t cb, int64_t* timestamp) {
     return 0;
   }
 
+  ERR_clear_error();
   ssl_read_needs_write_ = false;
   int code = SSL_read(ssl_, pv, checked_cast<int>(cb));
   int error = SSL_get_error(ssl_, code);
@@ -796,9 +753,18 @@ void OpenSSLAdapter::OnCloseEvent(Socket* socket, int err) {
 }
 
 bool OpenSSLAdapter::SSLPostConnectionCheck(SSL* ssl, absl::string_view host) {
-  bool is_valid_cert_name =
-      openssl::VerifyPeerCertMatchesHost(ssl, host) &&
+  bool cert_verified = false;
+#ifdef WEBRTC_USE_CRYPTO_BUFFER_CALLBACK
+  // When using CRYPTO_BUFFER callback, SSL_get_verify_result cannot be called
+  // as it requires X509 method. Rely on custom_cert_verifier_status_ instead.
+  cert_verified = custom_cert_verifier_status_;
+#else
+  cert_verified =
       (SSL_get_verify_result(ssl) == X509_V_OK || custom_cert_verifier_status_);
+#endif
+
+  bool is_valid_cert_name =
+      openssl::VerifyPeerCertMatchesHost(ssl, host) && cert_verified;
 
   if (!is_valid_cert_name && ignore_bad_cert_) {
     RTC_DLOG(LS_WARNING) << "Other TLS post connection checks failed. "
@@ -809,67 +775,15 @@ bool OpenSSLAdapter::SSLPostConnectionCheck(SSL* ssl, absl::string_view host) {
   return is_valid_cert_name;
 }
 
-void OpenSSLAdapter::SSLInfoCallback(const SSL* s, int where, int value) {
-  std::string type;
-  bool info_log = false;
-  bool alert_log = false;
-  switch (where) {
-    case SSL_CB_EXIT:
-      info_log = true;
-      type = "exit";
-      break;
-    case SSL_CB_ALERT:
-      alert_log = true;
-      type = "alert";
-      break;
-    case SSL_CB_READ_ALERT:
-      alert_log = true;
-      type = "read_alert";
-      break;
-    case SSL_CB_WRITE_ALERT:
-      alert_log = true;
-      type = "write_alert";
-      break;
-    case SSL_CB_ACCEPT_LOOP:
-      info_log = true;
-      type = "accept_loop";
-      break;
-    case SSL_CB_ACCEPT_EXIT:
-      info_log = true;
-      type = "accept_exit";
-      break;
-    case SSL_CB_CONNECT_LOOP:
-      info_log = true;
-      type = "connect_loop";
-      break;
-    case SSL_CB_CONNECT_EXIT:
-      info_log = true;
-      type = "connect_exit";
-      break;
-    case SSL_CB_HANDSHAKE_START:
-      info_log = true;
-      type = "handshake_start";
-      break;
-    case SSL_CB_HANDSHAKE_DONE:
-      info_log = true;
-      type = "handshake_done";
-      break;
-    case SSL_CB_LOOP:
-    case SSL_CB_READ:
-    case SSL_CB_WRITE:
-    default:
-      break;
-  }
-
-  if (info_log) {
-    RTC_LOG(LS_INFO) << type << " " << SSL_state_string_long(s);
-  }
-  if (alert_log) {
-    RTC_LOG(LS_WARNING) << type << " " << SSL_alert_type_string_long(value)
-                        << " " << SSL_alert_desc_string_long(value) << " "
-                        << SSL_state_string_long(s);
-  }
-}
+// The ContainsDistrustedCertificate checks in SSLVerifyCallback below see the
+// certificates the peer presented in the handshake and, in the X509 build, the
+// chain OpenSSL built from them. This leaves two gaps when a custom
+// SSLCertificateVerifier builds its own path: intermediates it adds itself,
+// e.g. from a cache or via AIA fetching, are not checked, so a server could
+// leave a distrusted intermediate out of the handshake; and the trust anchor it
+// chains to is not checked either. Conversely, a distrusted certificate that
+// the peer presents but that is not needed for the path still causes the chain
+// to be rejected. All of this is acceptable for this defense-in-depth check.
 
 #ifdef WEBRTC_USE_CRYPTO_BUFFER_CALLBACK
 // static
@@ -884,7 +798,7 @@ enum ssl_verify_result_t OpenSSLAdapter::SSLVerifyCallback(SSL* ssl,
   // Reject chains containing distrusted certificates even if accepted by the
   // custom verifier.
   if (ret == ssl_verify_ok &&
-      ContainsDistrustedCertificate(SSL_get0_peer_certificates(ssl))) {
+      openssl::ContainsDistrustedCertificate(SSL_get0_peer_certificates(ssl))) {
     RTC_LOG(LS_WARNING) << "Peer certificate chain contains a distrusted "
                            "certificate.";
     stream->custom_cert_verifier_status_ = false;
@@ -916,14 +830,21 @@ enum ssl_verify_result_t OpenSSLAdapter::SSLVerifyInternal(SSL* ssl,
     return ssl_verify_invalid;
   }
 
-  BoringSSLCertificate cert(bssl::UpRef(sk_CRYPTO_BUFFER_value(chain, 0)));
-  if (!ssl_cert_verifier_->Verify(cert)) {
-    RTC_LOG(LS_WARNING) << "Failed to verify certificate using custom callback";
+  std::vector<std::unique_ptr<SSLCertificate>> certs;
+  for (size_t i = 0; i < sk_CRYPTO_BUFFER_num(chain); ++i) {
+    certs.emplace_back(new BoringSSLCertificate(
+        bssl::UpRef(sk_CRYPTO_BUFFER_value(chain, i))));
+  }
+
+  SSLCertChain cert_chain(std::move(certs));
+  if (!ssl_cert_verifier_->VerifyChain(cert_chain)) {
+    RTC_LOG(LS_WARNING)
+        << "Failed to verify certificate chain using custom callback";
     return ssl_verify_invalid;
   }
 
   custom_cert_verifier_status_ = true;
-  RTC_LOG(LS_INFO) << "Validated certificate using custom callback";
+  RTC_LOG(LS_INFO) << "Validated certificate chain using custom callback";
   return ssl_verify_ok;
 }
 #else  // WEBRTC_USE_CRYPTO_BUFFER_CALLBACK
@@ -942,9 +863,10 @@ int OpenSSLAdapter::SSLVerifyCallback(int status, X509_STORE_CTX* store) {
   // trust store or custom verifier. The untrusted stack holds the certificates
   // the peer presented; the chain is the path built so far, which may also
   // include certificates from the trust store.
-  if (status &&
-      (ContainsDistrustedCertificate(X509_STORE_CTX_get0_untrusted(store)) ||
-       ContainsDistrustedCertificate(X509_STORE_CTX_get0_chain(store)))) {
+  if (status && (openssl::ContainsDistrustedCertificate(
+                     X509_STORE_CTX_get0_untrusted(store)) ||
+                 openssl::ContainsDistrustedCertificate(
+                     X509_STORE_CTX_get0_chain(store)))) {
     RTC_LOG(LS_WARNING) << "Certificate chain contains a distrusted "
                            "certificate.";
     X509_STORE_CTX_set_error(store, X509_V_ERR_CERT_REJECTED);
@@ -987,32 +909,46 @@ int OpenSSLAdapter::SSLVerifyInternal(int previous_status,
   }
 
   RTC_LOG(LS_INFO) << "Invoking SSL Verify Callback.";
+
+  STACK_OF(X509)* chain = X509_STORE_CTX_get0_chain(store);
+  if (!chain || sk_X509_num(chain) == 0) {
+    RTC_LOG(LS_ERROR) << "Failed to get certificate chain from X509_STORE_CTX";
+    return previous_status;
+  }
+
+  std::vector<std::unique_ptr<SSLCertificate>> certs;
+  for (int i = 0; i < static_cast<int>(sk_X509_num(chain)); ++i) {
+    X509* x509_cert = sk_X509_value(chain, i);
 #ifdef OPENSSL_IS_BORINGSSL
-  // Convert X509 to CRYPTO_BUFFER.
-  uint8_t* data = nullptr;
-  int length = i2d_X509(X509_STORE_CTX_get_current_cert(store), &data);
-  if (length < 0) {
-    RTC_LOG(LS_ERROR) << "Failed to encode X509.";
-    return previous_status;
-  }
-  bssl::UniquePtr<uint8_t> owned_data(data);
-  bssl::UniquePtr<CRYPTO_BUFFER> crypto_buffer(
-      CRYPTO_BUFFER_new(data, length, openssl::GetBufferPool()));
-  if (!crypto_buffer) {
-    RTC_LOG(LS_ERROR) << "Failed to allocate CRYPTO_BUFFER.";
-    return previous_status;
-  }
-  const BoringSSLCertificate cert(std::move(crypto_buffer));
+    // Convert X509 to CRYPTO_BUFFER.
+    uint8_t* data = nullptr;
+    int length = i2d_X509(x509_cert, &data);
+    if (length <= 0) {
+      RTC_LOG(LS_ERROR) << "Failed to encode X509 certificate.";
+      return previous_status;
+    }
+    bssl::UniquePtr<uint8_t> owned_data(data);
+    bssl::UniquePtr<CRYPTO_BUFFER> crypto_buffer(
+        CRYPTO_BUFFER_new(data, length, openssl::GetBufferPool()));
+    if (!crypto_buffer) {
+      RTC_LOG(LS_ERROR) << "Failed to allocate CRYPTO_BUFFER.";
+      return previous_status;
+    }
+    certs.emplace_back(new BoringSSLCertificate(std::move(crypto_buffer)));
 #else
-  const OpenSSLCertificate cert(X509_STORE_CTX_get_current_cert(store));
+    certs.emplace_back(new OpenSSLCertificate(x509_cert));
 #endif
-  if (!ssl_cert_verifier_->Verify(cert)) {
-    RTC_LOG(LS_INFO) << "Failed to verify certificate using custom callback";
+  }
+
+  SSLCertChain cert_chain(std::move(certs));
+  if (!ssl_cert_verifier_->VerifyChain(cert_chain)) {
+    RTC_LOG(LS_INFO)
+        << "Failed to verify certificate chain using custom callback";
     return previous_status;
   }
 
   custom_cert_verifier_status_ = true;
-  RTC_LOG(LS_INFO) << "Validated certificate using custom callback";
+  RTC_LOG(LS_INFO) << "Validated certificate chain using custom callback";
   return 1;
 }
 #endif  // !defined(WEBRTC_USE_CRYPTO_BUFFER_CALLBACK)
@@ -1056,7 +992,7 @@ SSL_CTX* OpenSSLAdapter::CreateContext(SSLMode mode, bool enable_cache) {
 #endif  // WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS
 
 #if !defined(NDEBUG)
-  SSL_CTX_set_info_callback(ctx, SSLInfoCallback);
+  SSL_CTX_set_info_callback(ctx, openssl::SSLInfoCallback);
 #endif
 
 #ifdef OPENSSL_IS_BORINGSSL
@@ -1079,15 +1015,14 @@ SSL_CTX* OpenSSLAdapter::CreateContext(SSLMode mode, bool enable_cache) {
   SSL_CTX_set_cipher_list(
       ctx, "ALL:!SHA256:!SHA384:!aPSK:!ECDSA+SHA1:!ADH:!LOW:!EXP:!MD5:!3DES");
 
-  if (mode == SSL_MODE_DTLS) {
-    SSL_CTX_set_read_ahead(ctx, 1);
-  }
-
   if (enable_cache) {
     SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_CLIENT);
     SSL_CTX_sess_set_new_cb(ctx, &OpenSSLAdapter::NewSSLSessionCallback);
   }
 
+#ifdef OPENSSL_IS_BORINGSSL
+  SSL_CTX_set_permute_extensions(ctx, true);
+#endif
   return ctx;
 }
 
@@ -1099,7 +1034,7 @@ std::string TransformAlpnProtocols(
   // each protocol.
   std::string transformed_alpn;
   for (const std::string& proto : alpn_protocols) {
-    if (proto.size() == 0 || proto.size() > 0xFF) {
+    if (proto.empty() || proto.size() > 0xFF) {
       RTC_LOG(LS_ERROR) << "OpenSSLAdapter::Error("
                            "TransformAlpnProtocols received proto with size "
                         << proto.size() << ")";
@@ -1180,4 +1115,4 @@ OpenSSLAdapter::EarlyExitCatcher::~EarlyExitCatcher() {
   }
 }
 
-}  // namespace rtc
+}  // namespace webrtc

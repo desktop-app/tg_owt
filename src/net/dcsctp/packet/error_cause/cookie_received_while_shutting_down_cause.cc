@@ -9,12 +9,11 @@
  */
 #include "net/dcsctp/packet/error_cause/cookie_received_while_shutting_down_cause.h"
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
 #include <vector>
-
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 
 namespace dcsctp {
 
@@ -23,13 +22,11 @@ namespace dcsctp {
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //  |     Cause Code=10              |      Cause Length=4          |
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int CookieReceivedWhileShuttingDownCause::kType;
 
-absl::optional<CookieReceivedWhileShuttingDownCause>
-CookieReceivedWhileShuttingDownCause::Parse(
-    rtc::ArrayView<const uint8_t> data) {
+std::optional<CookieReceivedWhileShuttingDownCause>
+CookieReceivedWhileShuttingDownCause::Parse(std::span<const uint8_t> data) {
   if (!ParseTLV(data).has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return CookieReceivedWhileShuttingDownCause();
 }

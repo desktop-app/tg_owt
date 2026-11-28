@@ -9,20 +9,19 @@
  */
 #include "modules/video_coding/svc/scalability_structure_full_svc.h"
 
-#include <utility>
+#include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/transport/rtp/dependency_descriptor.h"
+#include "api/video/video_bitrate_allocation.h"
+#include "common_video/generic_frame_descriptor/generic_frame_info.h"
+#include "modules/video_coding/svc/scalable_video_controller.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 
 namespace webrtc {
-
-constexpr int ScalabilityStructureFullSvc::kMaxNumSpatialLayers;
-constexpr int ScalabilityStructureFullSvc::kMaxNumTemporalLayers;
-constexpr absl::string_view ScalabilityStructureFullSvc::kFramePatternNames[];
 
 ScalabilityStructureFullSvc::ScalabilityStructureFullSvc(
     int num_spatial_layers,
@@ -61,7 +60,8 @@ bool ScalabilityStructureFullSvc::TemporalLayerIsActive(int tid) const {
     return false;
   }
   for (int sid = 0; sid < num_spatial_layers_; ++sid) {
-    if (DecodeTargetIsActive(sid, tid)) {
+    if (DecodeTargetIsActive(sid, tid) &&
+        (tid == 0 || can_reference_t0_frame_for_spatial_id_[sid])) {
       return true;
     }
   }
@@ -130,19 +130,31 @@ ScalabilityStructureFullSvc::NextPattern() const {
 std::vector<ScalableVideoController::LayerFrameConfig>
 ScalabilityStructureFullSvc::NextFrameConfig(bool restart) {
   std::vector<LayerFrameConfig> configs;
-  if (active_decode_targets_.none()) {
+  std::optional<int> first_active_layer;
+  for (int sid = 0; sid < num_spatial_layers_; ++sid) {
+    if (DecodeTargetIsActive(sid, /*tid=*/0)) {
+      first_active_layer = sid;
+      break;
+    }
+  }
+  if (!first_active_layer.has_value()) {
     last_pattern_ = kNone;
     return configs;
   }
   configs.reserve(num_spatial_layers_);
 
+  if (!can_reference_t0_frame_for_spatial_id_[*first_active_layer]) {
+    // The lowest active spatial layer has no temporal or spatial reference, so
+    // a keyframe is required.
+    restart = true;
+  }
   if (last_pattern_ == kNone || restart) {
     can_reference_t0_frame_for_spatial_id_.reset();
     last_pattern_ = kNone;
   }
   FramePattern current_pattern = NextPattern();
 
-  absl::optional<int> spatial_dependency_buffer_id;
+  std::optional<int> spatial_dependency_buffer_id;
   switch (current_pattern) {
     case kDeltaT0:
     case kKey:
@@ -246,6 +258,13 @@ ScalabilityStructureFullSvc::NextFrameConfig(bool restart) {
   }
 
   return configs;
+}
+
+void ScalabilityStructureFullSvc::OnFrameDropped(
+    const LayerFrameConfig& config) {
+  // Progress the pattern for the next frame, without updating any of the
+  // `can_reference_...` state.
+  last_pattern_ = static_cast<FramePattern>(config.Id());
 }
 
 GenericFrameInfo ScalabilityStructureFullSvc::OnEncodeDone(

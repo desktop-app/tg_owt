@@ -9,11 +9,23 @@
  */
 #include "net/dcsctp/tx/stream_scheduler.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
 #include <vector>
 
+#include "api/units/timestamp.h"
+#include "net/dcsctp/common/internal_types.h"
+#include "net/dcsctp/packet/chunk/idata_chunk.h"
+#include "net/dcsctp/packet/data.h"
 #include "net/dcsctp/packet/sctp_packet.h"
 #include "net/dcsctp/public/types.h"
+#include "net/dcsctp/tx/send_queue.h"
 #include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace dcsctp {
 namespace {
@@ -40,12 +52,13 @@ MATCHER_P(HasDataWithMid, mid, "") {
   return true;
 }
 
-std::function<absl::optional<SendQueue::DataToSend>(Timestamp, size_t)>
+std::function<std::optional<SendQueue::DataToSend>(Timestamp, size_t)>
 CreateChunk(OutgoingMessageId message_id,
             StreamID sid,
             MID mid,
             size_t payload_size = kPayloadSize) {
-  return [sid, mid, payload_size, message_id](Timestamp now, size_t max_size) {
+  return [sid, mid, payload_size, message_id](Timestamp /* now */,
+                                              size_t /* max_size */) {
     return SendQueue::DataToSend(
         message_id,
         Data(sid, SSN(0), mid, FSN(0), PPID(42),
@@ -58,7 +71,7 @@ std::map<StreamID, size_t> GetPacketCounts(StreamScheduler& scheduler,
                                            size_t packets_to_generate) {
   std::map<StreamID, size_t> packet_counts;
   for (size_t i = 0; i < packets_to_generate; ++i) {
-    absl::optional<SendQueue::DataToSend> data = scheduler.Produce(kNow, kMtu);
+    std::optional<SendQueue::DataToSend> data = scheduler.Produce(kNow, kMtu);
     if (data.has_value()) {
       ++packet_counts[data->data.stream_id];
     }
@@ -68,7 +81,7 @@ std::map<StreamID, size_t> GetPacketCounts(StreamScheduler& scheduler,
 
 class MockStreamProducer : public StreamScheduler::StreamProducer {
  public:
-  MOCK_METHOD(absl::optional<SendQueue::DataToSend>,
+  MOCK_METHOD(std::optional<SendQueue::DataToSend>,
               Produce,
               (Timestamp, size_t),
               (override));
@@ -101,7 +114,7 @@ class TestStream {
 TEST(StreamSchedulerTest, HasNoActiveStreams) {
   StreamScheduler scheduler("", kMtu);
 
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Stream properties can be set and retrieved
@@ -134,7 +147,7 @@ TEST(StreamSchedulerTest, CanProduceFromSingleStream) {
   stream->MaybeMakeActive();
 
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(0)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Switches between two streams after every packet.
@@ -175,7 +188,7 @@ TEST(StreamSchedulerTest, WillRoundRobinBetweenStreams) {
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(201)));
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(102)));
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(202)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Switches between two streams after every packet, but keeps producing from the
@@ -241,7 +254,7 @@ TEST(StreamSchedulerTest, WillRoundRobinOnlyWhenFinishedProducingChunk) {
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(201)));
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(102)));
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(202)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Deactivates a stream before it has finished producing all packets.
@@ -265,7 +278,7 @@ TEST(StreamSchedulerTest, StreamsCanBeMadeInactive) {
 
   // ... but the stream is made inactive before it can be produced.
   stream1->MakeInactive();
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Resumes a paused stream - makes a stream active after inactivating it.
@@ -292,10 +305,10 @@ TEST(StreamSchedulerTest, SingleStreamCanBeResumed) {
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(101)));
 
   stream1->MakeInactive();
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
   stream1->MaybeMakeActive();
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(102)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Iterates between streams, where one is suddenly paused and later resumed.
@@ -339,7 +352,7 @@ TEST(StreamSchedulerTest, WillRoundRobinWithPausedStream) {
   stream1->MaybeMakeActive();
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(101)));
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(102)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Verifies that packet counts are evenly distributed in round robin scheduling.
@@ -439,7 +452,7 @@ TEST(StreamSchedulerTest, WillDoFairQueuingWithSamePriority) {
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(201)));
   // t = 210
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(202)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Will do weighted fair queuing with three streams having different priority.
@@ -510,7 +523,7 @@ TEST(StreamSchedulerTest, WillDoWeightedFairQueuingSameSizeDifferentPriority) {
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(101)));
   // t ~= 240
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(102)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Will do weighted fair queuing with three streams having different priority
@@ -604,7 +617,7 @@ TEST(StreamSchedulerTest, WillDoWeightedFairQueuingDifferentSizeAndPriority) {
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(202)));
   // t ~= 11200
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(102)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 TEST(StreamSchedulerTest, WillDistributeWFQPacketsInTwoStreamsByPriority) {
   // A simple test with two streams of different priority, but sending packets
@@ -728,7 +741,7 @@ TEST(StreamSchedulerTest, SendLargeMessageWithSmallMtu) {
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(1)));
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(1)));
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(0)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 // Sending large messages with large MTU will not fragment messages and will
@@ -759,7 +772,7 @@ TEST(StreamSchedulerTest, SendLargeMessageWithLargeMtu) {
   stream2->MaybeMakeActive();
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(1)));
   EXPECT_THAT(scheduler.Produce(kNow, kMtu), HasDataWithMid(MID(0)));
-  EXPECT_EQ(scheduler.Produce(kNow, kMtu), absl::nullopt);
+  EXPECT_EQ(scheduler.Produce(kNow, kMtu), std::nullopt);
 }
 
 }  // namespace

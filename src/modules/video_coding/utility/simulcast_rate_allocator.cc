@@ -10,38 +10,45 @@
 
 #include "modules/video_coding/utility/simulcast_rate_allocator.h"
 
-#include <stdio.h>
-
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <numeric>
-#include <string>
 #include <tuple>
 #include <vector>
 
+#include "api/environment/environment.h"
+#include "api/units/data_rate.h"
+#include "api/video/video_bitrate_allocation.h"
+#include "api/video/video_bitrate_allocator.h"
+#include "api/video/video_codec_constants.h"
+#include "api/video/video_codec_type.h"
+#include "api/video_codecs/sdp_video_format.h"
+#include "api/video_codecs/simulcast_stream.h"
+#include "api/video_codecs/video_codec.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/experiments/rate_control_settings.h"
-#include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
 namespace {
 // Ratio allocation between temporal streams:
 // Values as required for the VP8 codec (accumulating).
-static const float
-    kLayerRateAllocation[kMaxTemporalStreams][kMaxTemporalStreams] = {
-        {1.0f, 1.0f, 1.0f, 1.0f},  // 1 layer
-        {0.6f, 1.0f, 1.0f, 1.0f},  // 2 layers {60%, 40%}
-        {0.4f, 0.6f, 1.0f, 1.0f},  // 3 layers {40%, 20%, 40%}
-        {0.25f, 0.4f, 0.6f, 1.0f}  // 4 layers {25%, 15%, 20%, 40%}
+const float kLayerRateAllocation[kMaxTemporalStreams][kMaxTemporalStreams] = {
+    {1.0f, 1.0f, 1.0f, 1.0f},  // 1 layer
+    {0.6f, 1.0f, 1.0f, 1.0f},  // 2 layers {60%, 40%}
+    {0.4f, 0.6f, 1.0f, 1.0f},  // 3 layers {40%, 20%, 40%}
+    {0.25f, 0.4f, 0.6f, 1.0f}  // 4 layers {25%, 15%, 20%, 40%}
 };
 
-static const float kBaseHeavy3TlRateAllocation[kMaxTemporalStreams] = {
+const float kBaseHeavy3TlRateAllocation[kMaxTemporalStreams] = {
     0.6f, 0.8f, 1.0f, 1.0f  // 3 layers {60%, 20%, 20%}
 };
 
 const uint32_t kLegacyScreenshareTl0BitrateKbps = 200;
 const uint32_t kLegacyScreenshareTl1BitrateKbps = 1000;
+
+constexpr double kVideoHysteresisFactor = 1.2;
+constexpr double kScreenshareHysteresisFactor = 1.35;
 }  // namespace
 
 float SimulcastRateAllocator::GetTemporalRateAllocation(
@@ -58,10 +65,10 @@ float SimulcastRateAllocator::GetTemporalRateAllocation(
   return kLayerRateAllocation[num_layers - 1][temporal_id];
 }
 
-SimulcastRateAllocator::SimulcastRateAllocator(const VideoCodec& codec)
+SimulcastRateAllocator::SimulcastRateAllocator(const Environment& env,
+                                               const VideoCodec& codec)
     : codec_(codec),
-      stable_rate_settings_(StableTargetRateExperiment::ParseFromFieldTrials()),
-      rate_control_settings_(RateControlSettings::ParseFromFieldTrials()),
+      rate_control_settings_(env.field_trials()),
       legacy_conference_mode_(false) {}
 
 SimulcastRateAllocator::~SimulcastRateAllocator() = default;
@@ -70,10 +77,6 @@ VideoBitrateAllocation SimulcastRateAllocator::Allocate(
     VideoBitrateAllocationParameters parameters) {
   VideoBitrateAllocation allocated_bitrates;
   DataRate stable_rate = parameters.total_bitrate;
-  if (stable_rate_settings_.IsEnabled() &&
-      parameters.stable_bitrate > DataRate::Zero()) {
-    stable_rate = std::min(parameters.stable_bitrate, parameters.total_bitrate);
-  }
   DistributeAllocationToSimulcastLayers(parameters.total_bitrate, stable_rate,
                                         &allocated_bitrates);
   DistributeAllocationToTemporalLayers(&allocated_bitrates);
@@ -161,10 +164,9 @@ void SimulcastRateAllocator::DistributeAllocationToSimulcastLayers(
     // layers because they require a higher minimum bitrate.
     DataRate min_bitrate = DataRate::KilobitsPerSec(stream.minBitrate);
     DataRate target_bitrate = DataRate::KilobitsPerSec(stream.targetBitrate);
-    double hysteresis_factor =
-        codec_.mode == VideoCodecMode::kRealtimeVideo
-            ? stable_rate_settings_.GetVideoHysteresisFactor()
-            : stable_rate_settings_.GetScreenshareHysteresisFactor();
+    double hysteresis_factor = codec_.mode == VideoCodecMode::kRealtimeVideo
+                                   ? kVideoHysteresisFactor
+                                   : kScreenshareHysteresisFactor;
     if (!first_allocation && !stream_enabled_[layer_index[active_layer]]) {
       min_bitrate = std::min(hysteresis_factor * min_bitrate, target_bitrate);
     }
@@ -277,7 +279,7 @@ void SimulcastRateAllocator::DistributeAllocationToTemporalLayers(
 
 std::vector<uint32_t> SimulcastRateAllocator::DefaultTemporalLayerAllocation(
     int bitrate_kbps,
-    int max_bitrate_kbps,
+    int /* max_bitrate_kbps */,
     int simulcast_id) const {
   const size_t num_temporal_layers = NumTemporalStreams(simulcast_id);
   std::vector<uint32_t> bitrates;
@@ -324,16 +326,19 @@ SimulcastRateAllocator::ScreenshareTemporalLayerAllocation(
   return allocation;
 }
 
-const VideoCodec& webrtc::SimulcastRateAllocator::GetCodec() const {
+const VideoCodec& SimulcastRateAllocator::GetCodec() const {
   return codec_;
 }
 
 int SimulcastRateAllocator::NumTemporalStreams(size_t simulcast_id) const {
+  bool is_vp8 = codec_.simulcastStream[simulcast_id].format
+                    ? codec_.simulcastStream[simulcast_id].format->IsSameCodec(
+                          webrtc::SdpVideoFormat::VP8())
+                    : codec_.codecType == kVideoCodecVP8;
   return std::max<uint8_t>(
-      1,
-      codec_.codecType == kVideoCodecVP8 && codec_.numberOfSimulcastStreams == 0
-          ? codec_.VP8().numberOfTemporalLayers
-          : codec_.simulcastStream[simulcast_id].numberOfTemporalLayers);
+      1, is_vp8 && codec_.numberOfSimulcastStreams == 0
+             ? codec_.VP8().numberOfTemporalLayers
+             : codec_.simulcastStream[simulcast_id].numberOfTemporalLayers);
 }
 
 void SimulcastRateAllocator::SetLegacyConferenceMode(bool enabled) {

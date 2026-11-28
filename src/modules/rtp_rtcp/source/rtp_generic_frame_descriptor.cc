@@ -11,14 +11,11 @@
 #include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor.h"
 
 #include <cstdint>
+#include <span>
 
 #include "rtc_base/checks.h"
 
 namespace webrtc {
-
-constexpr int RtpGenericFrameDescriptor::kMaxNumFrameDependencies;
-constexpr int RtpGenericFrameDescriptor::kMaxTemporalLayers;
-constexpr int RtpGenericFrameDescriptor::kMaxSpatialLayers;
 
 RtpGenericFrameDescriptor::RtpGenericFrameDescriptor() = default;
 RtpGenericFrameDescriptor::RtpGenericFrameDescriptor(
@@ -78,21 +75,19 @@ void RtpGenericFrameDescriptor::SetFrameId(uint16_t frame_id) {
   frame_id_ = frame_id;
 }
 
-rtc::ArrayView<const uint16_t>
-RtpGenericFrameDescriptor::FrameDependenciesDiffs() const {
+std::span<const uint16_t> RtpGenericFrameDescriptor::FrameDependenciesDiffs()
+    const {
   RTC_DCHECK(FirstPacketInSubFrame());
-  return rtc::MakeArrayView(frame_deps_id_diffs_, num_frame_deps_);
+  return std::span(frame_deps_id_diffs_, num_frame_deps_);
 }
 
-bool RtpGenericFrameDescriptor::AddFrameDependencyDiff(uint16_t fdiff) {
+bool RtpGenericFrameDescriptor::AddFrameDependencyDiff(int64_t fdiff) {
   RTC_DCHECK(FirstPacketInSubFrame());
   if (num_frame_deps_ == kMaxNumFrameDependencies)
     return false;
-  if (fdiff == 0)
+  if (fdiff <= 0 || fdiff > kMaxFrameDependencyDiff)
     return false;
-  RTC_DCHECK_LT(fdiff, 1 << 14);
-  RTC_DCHECK_GT(fdiff, 0);
-  frame_deps_id_diffs_[num_frame_deps_] = fdiff;
+  frame_deps_id_diffs_[num_frame_deps_] = static_cast<uint16_t>(fdiff);
   num_frame_deps_++;
   return true;
 }

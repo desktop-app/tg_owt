@@ -35,7 +35,7 @@
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/ssl_stream_adapter.h"
 
-namespace rtc {
+namespace webrtc {
 
 class OpenSSLAdapter final : public SSLAdapter {
  public:
@@ -50,13 +50,13 @@ class OpenSSLAdapter final : public SSLAdapter {
   // immutable after the the SSL connection starts.
   explicit OpenSSLAdapter(Socket* socket,
                           OpenSSLSessionCache* ssl_session_cache = nullptr,
-                          SSLCertificateVerifier* ssl_cert_verifier = nullptr);
+                          SSLCertificateVerifier* ssl_cert_verifier = nullptr,
+                          bool dtls = false);
   ~OpenSSLAdapter() override;
 
   void SetIgnoreBadCert(bool ignore) override;
   void SetAlpnProtocols(const std::vector<std::string>& protos) override;
   void SetEllipticCurves(const std::vector<std::string>& curves) override;
-  void SetMode(SSLMode mode) override;
   void SetCertVerifier(SSLCertificateVerifier* ssl_cert_verifier) override;
   void SetIdentity(std::unique_ptr<SSLIdentity> identity) override;
   void SetRole(SSLRole role) override;
@@ -116,9 +116,6 @@ class OpenSSLAdapter final : public SSLAdapter {
   int DoSslWrite(const void* pv, size_t cb, int* error);
   bool SSLPostConnectionCheck(SSL* ssl, absl::string_view host);
 
-  // Logs info about the state of the SSL connection.
-  static void SSLInfoCallback(const SSL* ssl, int where, int ret);
-
 #if defined(OPENSSL_IS_BORINGSSL) && \
     defined(WEBRTC_EXCLUDE_BUILT_IN_SSL_ROOT_CERTS)
   static enum ssl_verify_result_t SSLVerifyCallback(SSL* ssl,
@@ -130,7 +127,6 @@ class OpenSSLAdapter final : public SSLAdapter {
   // Returns 1 on success, `status_on_error` on error or verification failure.
   int SSLVerifyInternal(int status_on_error, SSL* ssl, X509_STORE_CTX* store);
 #endif
-  friend class OpenSSLStreamAdapter;  // for custom_verify_callback_;
 
   // If the SSL_CTX was created with `enable_cache` set to true, this callback
   // will be called when a SSL session has been successfully established,
@@ -173,7 +169,7 @@ class OpenSSLAdapter final : public SSLAdapter {
   // Holds the result of the call to run of the ssl_cert_verify_->Verify()
   bool custom_cert_verifier_status_;
   // Flag to cancel pending timeout task.
-  webrtc::ScopedTaskSafety timer_;
+  ScopedTaskSafety timer_;
 };
 
 // The OpenSSLAdapterFactory is responsbile for creating multiple new
@@ -219,7 +215,7 @@ class OpenSSLAdapterFactory : public SSLAdapterFactory {
   // Holds a cache of existing SSL Sessions.
   std::unique_ptr<OpenSSLSessionCache> ssl_session_cache_;
   // Provides an optional custom callback for verifying SSL certificates, this
-  // in currently only used for TLS-TURN connections.
+  // in currently only used for TURN/TLS connections.
   SSLCertificateVerifier* ssl_cert_verifier_ = nullptr;
   // TODO(benwright): Remove this when context is moved to OpenSSLCommon.
   // Hold a friend class to the OpenSSLAdapter to retrieve the context.
@@ -232,6 +228,7 @@ class OpenSSLAdapterFactory : public SSLAdapterFactory {
 
 std::string TransformAlpnProtocols(const std::vector<std::string>& protos);
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // RTC_BASE_OPENSSL_ADAPTER_H_

@@ -13,9 +13,11 @@
 #ifndef RTC_BASE_NUMERICS_SAFE_CONVERSIONS_IMPL_H_
 #define RTC_BASE_NUMERICS_SAFE_CONVERSIONS_IMPL_H_
 
+#include <cstddef>
 #include <limits>
+#include <type_traits>
 
-namespace rtc {
+namespace webrtc {
 namespace internal {
 
 enum DstSign { DST_UNSIGNED, DST_SIGNED };
@@ -71,6 +73,26 @@ struct StaticRangeCheck<Dst, Src, DST_UNSIGNED, SRC_SIGNED> {
   static const DstRange value = OVERLAPS_RANGE;
 };
 
+template <typename T>
+constexpr T PowerOfTwo(int exp) {
+  T result = 1;
+  for (int i = 0; i < exp; ++i) {
+    result *= 2;
+  }
+  return result;
+}
+
+template <typename Dst, typename Src>
+inline constexpr bool IsValueInUpperBound(Src value) {
+  if constexpr (std::is_floating_point_v<Src>) {
+    constexpr Src kUpperBound =
+        PowerOfTwo<Src>(std::numeric_limits<Dst>::digits);
+    return value < kUpperBound;
+  } else {
+    return value <= static_cast<Src>(std::numeric_limits<Dst>::max());
+  }
+}
+
 enum RangeCheckResult {
   TYPE_VALID = 0,      // Value can be represented by the destination type.
   TYPE_UNDERFLOW = 1,  // Value would overflow.
@@ -101,7 +123,9 @@ struct RangeCheckImpl {};
 // Dst range always contains the result: nothing to check.
 template <typename Dst, typename Src, DstSign IsDstSigned, SrcSign IsSrcSigned>
 struct RangeCheckImpl<Dst, Src, IsDstSigned, IsSrcSigned, CONTAINS_RANGE> {
-  static constexpr RangeCheckResult Check(Src value) { return TYPE_VALID; }
+  static constexpr RangeCheckResult Check(Src /* value */) {
+    return TYPE_VALID;
+  }
 };
 
 // Signed to signed narrowing.
@@ -114,7 +138,7 @@ struct RangeCheckImpl<Dst, Src, DST_SIGNED, SRC_SIGNED, OVERLAPS_RANGE> {
                      value <= static_cast<Src>(DstLimits::max()),
                      value >= static_cast<Src>(DstLimits::max() * -1))
                : BASE_NUMERIC_RANGE_CHECK_RESULT(
-                     value <= static_cast<Src>(DstLimits::max()),
+                     (IsValueInUpperBound<Dst, Src>(value)),
                      value >= static_cast<Src>(DstLimits::min()));
   }
 };
@@ -157,7 +181,7 @@ struct RangeCheckImpl<Dst, Src, DST_UNSIGNED, SRC_SIGNED, OVERLAPS_RANGE> {
                ? BASE_NUMERIC_RANGE_CHECK_RESULT(true,
                                                  value >= static_cast<Src>(0))
                : BASE_NUMERIC_RANGE_CHECK_RESULT(
-                     value <= static_cast<Src>(DstLimits::max()),
+                     (IsValueInUpperBound<Dst, Src>(value)),
                      value >= static_cast<Src>(0));
   }
 };
@@ -172,6 +196,6 @@ inline constexpr RangeCheckResult RangeCheck(Src value) {
 }
 
 }  // namespace internal
-}  // namespace rtc
+}  // namespace webrtc
 
 #endif  // RTC_BASE_NUMERICS_SAFE_CONVERSIONS_IMPL_H_

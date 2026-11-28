@@ -10,17 +10,25 @@
 
 #include "api/neteq/default_neteq_controller_factory.h"
 
+#include <memory>
+#include <utility>
+
+#include "api/environment/environment.h"
+#include "api/neteq/neteq_controller.h"
 #include "modules/audio_coding/neteq/decision_logic.h"
+#include "modules/audio_coding/neteq/delay_manager.h"
 
 namespace webrtc {
 
 DefaultNetEqControllerFactory::DefaultNetEqControllerFactory() = default;
 DefaultNetEqControllerFactory::~DefaultNetEqControllerFactory() = default;
 
-std::unique_ptr<NetEqController>
-DefaultNetEqControllerFactory::CreateNetEqController(
+std::unique_ptr<NetEqController> DefaultNetEqControllerFactory::Create(
+    const Environment& env,
     const NetEqController::Config& config) const {
-  return std::make_unique<DecisionLogic>(config);
+  auto delay_manager = std::make_unique<DelayManager>(
+      DelayManager::Config(env.field_trials()), config.tick_timer);
+  return std::make_unique<DecisionLogic>(env, config, std::move(delay_manager));
 }
 
 }  // namespace webrtc

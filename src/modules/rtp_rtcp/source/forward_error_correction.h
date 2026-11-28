@@ -14,16 +14,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <array>
 #include <list>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
 #include "api/scoped_refptr.h"
-#include "api/units/timestamp.h"
 #include "modules/include/module_fec_types.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
-#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/forward_error_correction_internal.h"
 #include "rtc_base/copy_on_write_buffer.h"
 
@@ -56,7 +56,7 @@ class ForwardErrorCorrection {
     // reaches zero.
     virtual int32_t Release();
 
-    rtc::CopyOnWriteBuffer data;  // Packet data.
+    CopyOnWriteBuffer data;  // Packet data.
 
    private:
     int32_t ref_count_;  // Counts the number of references to a packet.
@@ -87,7 +87,7 @@ class ForwardErrorCorrection {
                   // otherwise.
     bool is_recovered;
     RtpHeaderExtensionMap extensions;
-    rtc::scoped_refptr<Packet> pkt;  // Pointer to the packet storage.
+    scoped_refptr<Packet> pkt;  // Pointer to the packet storage.
   };
 
   // The recovered list parameter of DecodeFec() references structs of
@@ -103,7 +103,7 @@ class ForwardErrorCorrection {
                          // through the received packet list.
     bool returned;  // True when the packet already has been returned to the
                     // caller through the callback.
-    rtc::scoped_refptr<Packet> pkt;  // Pointer to the packet storage.
+    scoped_refptr<Packet> pkt;  // Pointer to the packet storage.
   };
 
   // Used to link media packets to their protecting FEC packets.
@@ -114,7 +114,7 @@ class ForwardErrorCorrection {
     ProtectedPacket();
     ~ProtectedPacket();
 
-    rtc::scoped_refptr<ForwardErrorCorrection::Packet> pkt;
+    scoped_refptr<ForwardErrorCorrection::Packet> pkt;
   };
 
   using ProtectedPacketList = std::list<std::unique_ptr<ProtectedPacket>>;
@@ -149,7 +149,7 @@ class ForwardErrorCorrection {
         protected_streams;
     size_t protection_length;
     // Raw data.
-    rtc::scoped_refptr<ForwardErrorCorrection::Packet> pkt;
+    scoped_refptr<ForwardErrorCorrection::Packet> pkt;
   };
 
   using PacketList = std::list<std::unique_ptr<Packet>>;
@@ -251,8 +251,8 @@ class ForwardErrorCorrection {
 
   // TODO(brandtr): Remove these functions when the Packet classes
   // have been refactored.
-  static uint16_t ParseSequenceNumber(const uint8_t* packet);
-  static uint32_t ParseSsrc(const uint8_t* packet);
+  static uint16_t ParseSequenceNumber(std::span<const uint8_t> packet);
+  static uint32_t ParseSsrc(std::span<const uint8_t> packet);
 
  protected:
   ForwardErrorCorrection(std::unique_ptr<FecHeaderReader> fec_header_reader,
@@ -364,8 +364,10 @@ class ForwardErrorCorrection {
   // Arrays used to avoid dynamically allocating memory when generating
   // the packet masks.
   // (There are never more than `kUlpfecMaxMediaPackets` FEC packets generated.)
-  uint8_t packet_masks_[kUlpfecMaxMediaPackets * kUlpfecMaxPacketMaskSize];
-  uint8_t tmp_packet_masks_[kUlpfecMaxMediaPackets * kUlpfecMaxPacketMaskSize];
+  std::array<uint8_t, kUlpfecMaxMediaPackets * kUlpfecMaxPacketMaskSize>
+      packet_masks_;
+  std::array<uint8_t, kUlpfecMaxMediaPackets * kUlpfecMaxPacketMaskSize>
+      tmp_packet_masks_;
   size_t packet_mask_size_;
 };
 
@@ -399,7 +401,7 @@ class FecHeaderWriter {
   struct ProtectedStream {
     uint32_t ssrc = 0;
     uint16_t seq_num_base = 0;
-    rtc::ArrayView<const uint8_t> packet_mask;
+    std::span<const uint8_t> packet_mask;
   };
 
   virtual ~FecHeaderWriter();
@@ -425,7 +427,7 @@ class FecHeaderWriter {
 
   // Writes FEC header.
   virtual void FinalizeFecHeader(
-      rtc::ArrayView<const ProtectedStream> protected_streams,
+      std::span<const ProtectedStream> protected_streams,
       ForwardErrorCorrection::Packet& fec_packet) const = 0;
 
  protected:

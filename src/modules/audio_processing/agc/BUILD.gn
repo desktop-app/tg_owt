@@ -21,25 +21,22 @@ rtc_library("agc") {
   deps = [
     ":gain_control_interface",
     ":level_estimation",
-    "..:api",
     "..:apm_logging",
     "..:audio_buffer",
     "..:audio_frame_view",
-    "../../../api:array_view",
+    "../../../api:field_trials_view",
+    "../../../api/audio:audio_processing",
+    "../../../api/environment",
     "../../../common_audio",
-    "../../../common_audio:common_audio_c",
     "../../../rtc_base:checks",
     "../../../rtc_base:gtest_prod",
     "../../../rtc_base:logging",
     "../../../rtc_base:safe_minmax",
-    "../../../system_wrappers:field_trial",
     "../../../system_wrappers:metrics",
     "../agc2:clipping_predictor",
     "../agc2:gain_map",
     "../agc2:input_volume_stats_reporter",
-    "../vad",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_library("level_estimation") {
@@ -52,7 +49,6 @@ rtc_library("level_estimation") {
     "utility.h",
   ]
   deps = [
-    "../../../api:array_view",
     "../../../rtc_base:checks",
     "../vad",
   ]
@@ -75,11 +71,9 @@ rtc_library("legacy_agc") {
   ]
 
   deps = [
-    "../../../common_audio",
     "../../../common_audio:common_audio_c",
-    "../../../common_audio/third_party/ooura:fft_size_256",
+    "../../../common_audio:common_audio_cc",
     "../../../rtc_base:checks",
-    "../../../system_wrappers",
   ]
 
   if (rtc_build_with_neon) {
@@ -92,35 +86,54 @@ rtc_library("legacy_agc") {
 }
 
 if (rtc_include_tests) {
-  rtc_library("agc_unittests") {
+  rtc_library("mock_agc") {
     testonly = true
-    sources = [
-      "agc_manager_direct_unittest.cc",
-      "loudness_histogram_unittest.cc",
-      "mock_agc.h",
+    sources = [ "mock_agc.h" ]
+    deps = [
+      ":level_estimation",
+      "../../../test:test_support",
     ]
-    configs += [ "..:apm_debug_dump" ]
+  }
 
+  rtc_cc_test("agc_manager_direct_unittest") {
+    sources = [ "agc_manager_direct_unittest.cc" ]
     deps = [
       ":agc",
       ":gain_control_interface",
       ":level_estimation",
-      "..:mocks",
-      "../../../api:array_view",
+      ":mock_agc",
+      "..:audio_buffer",
+      "../../../api/audio:audio_processing",
+      "../../../api/environment",
+      "../../../api/environment:environment_factory",
       "../../../rtc_base:checks",
-      "../../../rtc_base:random",
-      "../../../rtc_base:safe_conversions",
       "../../../rtc_base:safe_minmax",
       "../../../rtc_base:stringutils",
-      "../../../system_wrappers:metrics",
-      "../../../test:field_trial",
+      "../../../test:create_test_environment",
+      "../../../test:create_test_field_trials",
       "../../../test:fileutils",
       "../../../test:test_support",
-      "//testing/gtest",
     ]
-    absl_deps = [
-      "//third_party/abseil-cpp/absl/strings",
-      "//third_party/abseil-cpp/absl/types:optional",
+    configs += [ "..:apm_debug_dump" ]
+    data_deps = [ "../../../resources:audio_processing_unittests_data" ]
+    if (is_ios) {
+      deps += [ "../../../resources:audio_processing_unittests_bundle_data" ]
+    }
+  }
+
+  rtc_cc_test("loudness_histogram_unittest") {
+    sources = [ "loudness_histogram_unittest.cc" ]
+    deps = [
+      ":level_estimation",
+      ":mock_agc",
+      "../../../test:fileutils",
+      "../../../test:test_support",
+      "//third_party/abseil-cpp/absl/strings:string_view",
     ]
+    configs += [ "..:apm_debug_dump" ]
+    data_deps = [ "../../../resources:audio_processing_unittests_data" ]
+    if (is_ios) {
+      deps += [ "../../../resources:audio_processing_unittests_bundle_data" ]
+    }
   }
 }

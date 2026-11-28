@@ -11,63 +11,45 @@
 #ifndef P2P_BASE_PORT_H_
 #define P2P_BASE_PORT_H_
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <map>
 #include <memory>
+#include <optional>
 #include <set>
+#include <span>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "absl/base/attributes.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/candidate.h"
-#include "api/field_trials_view.h"
+#include "api/environment/environment.h"
+#include "api/local_network_access_permission.h"
 #include "api/packet_socket_factory.h"
-#include "api/rtc_error.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_base.h"
-#include "api/transport/field_trial_based_config.h"
 #include "api/transport/stun.h"
-#include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair.h"
-#include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.h"
-#include "logging/rtc_event_log/ice_logger.h"
 #include "p2p/base/candidate_pair_interface.h"
 #include "p2p/base/connection.h"
-#include "p2p/base/connection_info.h"
-#include "p2p/base/p2p_constants.h"
+#include "p2p/base/p2p_constants.h"  // IWYU pragma: keep
 #include "p2p/base/port_interface.h"
-#include "p2p/base/stun_request.h"
 #include "p2p/base/transport_description.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/callback_list.h"
-#include "rtc_base/checks.h"
+#include "rtc_base/containers/flat_map.h"
 #include "rtc_base/dscp.h"
-#include "rtc_base/memory/always_valid_pointer.h"
 #include "rtc_base/net_helper.h"
 #include "rtc_base/network.h"
 #include "rtc_base/network/received_packet.h"
 #include "rtc_base/network/sent_packet.h"
-#include "rtc_base/proxy_info.h"
-#include "rtc_base/rate_tracker.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/system/rtc_export.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/weak_ptr.h"
 
-namespace cricket {
-
-// RFC 6544, TCP candidate encoding rules.
-extern const int DISCARD_PORT;
-extern const char TCPTYPE_ACTIVE_STR[];
-extern const char TCPTYPE_PASSIVE_STR[];
-extern const char TCPTYPE_SIMOPEN_STR[];
+namespace webrtc {
 
 enum class MdnsNameRegistrationStatus {
   // IP concealment with mDNS is not enabled or the name registration process is
@@ -103,7 +85,7 @@ class CandidateStats {
   CandidateStats(const CandidateStats&) = default;
   CandidateStats(CandidateStats&&) = default;
   CandidateStats(Candidate candidate,
-                 absl::optional<StunStats> stats = absl::nullopt)
+                 std::optional<StunStats> stats = std::nullopt)
       : candidate_(std::move(candidate)), stun_stats_(std::move(stats)) {}
   ~CandidateStats() = default;
 
@@ -111,24 +93,21 @@ class CandidateStats {
 
   const Candidate& candidate() const { return candidate_; }
 
-  const absl::optional<StunStats>& stun_stats() const { return stun_stats_; }
+  const std::optional<StunStats>& stun_stats() const { return stun_stats_; }
 
  private:
   Candidate candidate_;
   // STUN port stats if this candidate is a STUN candidate.
-  absl::optional<StunStats> stun_stats_;
+  std::optional<StunStats> stun_stats_;
 };
 
 typedef std::vector<CandidateStats> CandidateStatsList;
 
-const char* ProtoToString(ProtocolType proto);
-absl::optional<ProtocolType> StringToProto(absl::string_view proto_name);
-
 struct ProtocolAddress {
-  rtc::SocketAddress address;
+  SocketAddress address;
   ProtocolType proto;
 
-  ProtocolAddress(const rtc::SocketAddress& a, ProtocolType p)
+  ProtocolAddress(const SocketAddress& a, ProtocolType p)
       : address(a), proto(p) {}
 
   bool operator==(const ProtocolAddress& o) const {
@@ -158,6 +137,7 @@ struct IceCandidateErrorEvent {
 };
 
 struct CandidatePairChangeEvent {
+  std::string transport_name;
   CandidatePair selected_candidate_pair;
   int64_t last_data_received_ms;
   std::string reason;
@@ -165,35 +145,60 @@ struct CandidatePairChangeEvent {
   int64_t estimated_disconnected_time_ms;
 };
 
-typedef std::set<rtc::SocketAddress> ServerAddresses;
+typedef std::set<SocketAddress> ServerAddresses;
 
 // Represents a local communication mechanism that can be used to create
 // connections to similar mechanisms of the other client.  Subclasses of this
 // one add support for specific mechanisms like local UDP ports.
-class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
+class RTC_EXPORT Port : public PortInterface {
  public:
-  // INIT: The state when a port is just created.
-  // KEEP_ALIVE_UNTIL_PRUNED: A port should not be destroyed even if no
-  // connection is using it.
-  // PRUNED: It will be destroyed if no connection is using it for a period of
-  // 30 seconds.
-  enum class State { INIT, KEEP_ALIVE_UNTIL_PRUNED, PRUNED };
-  Port(webrtc::TaskQueueBase* thread,
-       absl::string_view type ABSL_ATTRIBUTE_LIFETIME_BOUND,
-       rtc::PacketSocketFactory* factory,
-       const rtc::Network* network,
-       absl::string_view username_fragment,
-       absl::string_view password,
-       const webrtc::FieldTrialsView* field_trials = nullptr);
-  Port(webrtc::TaskQueueBase* thread,
-       absl::string_view type ABSL_ATTRIBUTE_LIFETIME_BOUND,
-       rtc::PacketSocketFactory* factory,
-       const rtc::Network* network,
+  // Callbacks registered at Port construction time. `tag` is an optional
+  // removal tag applied to `port_destroyed` and `unknown_address`.
+  struct Callbacks {
+    const void* tag = nullptr;
+    absl::AnyInvocable<void(Port*, const Candidate&)> candidate_ready;
+    absl::AnyInvocable<void(Port*, const IceCandidateErrorEvent&)>
+        candidate_error;
+    absl::AnyInvocable<void(Port*)> port_complete;
+    absl::AnyInvocable<void(PortInterface*)> port_destroyed;
+    absl::AnyInvocable<void(Port*)> port_error;
+    absl::AnyInvocable<void(PortInterface*,
+                            const SocketAddress&,
+                            ProtocolType,
+                            IceMessage*,
+                            const std::string&,
+                            bool)>
+        unknown_address;
+  };
+  // A struct containing common arguments to creating a port. See also
+  // CreateRelayPortArgs.
+  struct PortParametersRef {
+    Environment env;
+    TaskQueueBase* network_thread;
+    PacketSocketFactory* socket_factory;
+    const ::webrtc::Network* network;
+    absl::string_view ice_username_fragment;
+    absl::string_view ice_password;
+    absl::string_view content_name;
+    int component = ICE_CANDIDATE_COMPONENT_DEFAULT;
+    uint32_t generation = 0;
+    bool send_retransmit_count_attribute = false;
+    LocalNetworkAccessPermissionFactoryInterface* lna_permission_factory =
+        nullptr;
+    uint64_t ice_tiebreaker = 0;
+    Callbacks callbacks;
+  };
+
+ protected:
+  // Constructors for use only by via constructors in derived classes.
+  Port(PortParametersRef args, IceCandidateType type);
+  Port(PortParametersRef args,
+       IceCandidateType type,
        uint16_t min_port,
        uint16_t max_port,
-       absl::string_view username_fragment,
-       absl::string_view password,
-       const webrtc::FieldTrialsView* field_trials = nullptr);
+       bool shared_socket = false);
+
+ public:
   ~Port() override;
 
   // Note that the port type does NOT uniquely identify different subclasses of
@@ -201,18 +206,27 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   // uniquely identify subclasses. Whenever a new subclass of Port introduces a
   // conflict in the value of the 2-tuple, make sure that the implementation
   // that relies on this 2-tuple for RTTI is properly changed.
-  const absl::string_view Type() const override;
-  const rtc::Network* Network() const override;
+  IceCandidateType Type() const override;
+  const ::webrtc::Network* Network() const override;
 
   // Methods to set/get ICE role and tiebreaker values.
   IceRole GetIceRole() const override;
   void SetIceRole(IceRole role) override;
 
-  void SetIceTiebreaker(uint64_t tiebreaker) override;
+  /*
+  int SendTo(std::span<const uint8_t> data,
+             const SocketAddress& addr,
+             const AsyncSocketPacketOptions& options,
+             bool payload) override = 0;
+  */
+
   uint64_t IceTiebreaker() const override;
 
   bool SharedSocket() const override;
-  void ResetSharedSocket() { shared_socket_ = false; }
+  void ResetSharedSocket() {
+    RTC_DCHECK_RUN_ON(thread_);
+    shared_socket_ = false;
+  }
 
   // Should not destroy the port even if no connection is using it. Called when
   // a port is ready to use.
@@ -224,32 +238,29 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   void CancelPendingTasks();
 
   // The thread on which this port performs its I/O.
-  webrtc::TaskQueueBase* thread() override { return thread_; }
+  TaskQueueBase* thread() override { return thread_; }
 
   // The factory used to create the sockets of this port.
-  rtc::PacketSocketFactory* socket_factory() const override { return factory_; }
+  PacketSocketFactory* socket_factory() const override { return factory_; }
 
   // For debugging purposes.
   const std::string& content_name() const override { return content_name_; }
   void set_content_name(absl::string_view content_name) {
+    RTC_DCHECK_RUN_ON(thread_);
     content_name_ = std::string(content_name);
   }
 
-  int component() const { return component_; }
-  void set_component(int component) { component_ = component; }
+  int component() const {
+    RTC_DCHECK_RUN_ON(thread_);
+    return component_;
+  }
 
   bool send_retransmit_count_attribute() const override {
     return send_retransmit_count_attribute_;
   }
-  void set_send_retransmit_count_attribute(bool enable) {
-    send_retransmit_count_attribute_ = enable;
-  }
 
   // Identifies the generation that this port was created in.
   uint32_t generation() const override { return generation_; }
-  void set_generation(uint32_t generation) override {
-    generation_ = generation;
-  }
 
   const std::string& username_fragment() const;
   const std::string& password() const { return password_; }
@@ -263,32 +274,49 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
 
   // Fired when candidates are discovered by the port. When all candidates
   // are discovered that belong to port SignalAddressReady is fired.
-  sigslot::signal2<Port*, const Candidate&> SignalCandidateReady;
+  void NotifyCandidateReady(Port* port, const Candidate& candidate) {
+    RTC_DCHECK_RUN_ON(thread_);
+    if (candidate_ready_callback_) {
+      candidate_ready_callback_(this, candidate);
+    }
+  }
   // Provides all of the above information in one handy object.
   const std::vector<Candidate>& Candidates() const override;
   // Fired when candidate discovery failed using certain server.
-  sigslot::signal2<Port*, const IceCandidateErrorEvent&> SignalCandidateError;
+  void SendCandidateError(const IceCandidateErrorEvent& candidate_error_event);
 
   // SignalPortComplete is sent when port completes the task of candidates
   // allocation.
-  sigslot::signal1<Port*> SignalPortComplete;
+  void NotifyPortComplete(Port* port) {
+    RTC_DCHECK_RUN_ON(thread_);
+    if (port_complete_callback_) {
+      port_complete_callback_(this);
+    }
+  }
+
   // This signal sent when port fails to allocate candidates and this port
   // can't be used in establishing the connections. When port is in shared mode
   // and port fails to allocate one of the candidates, port shouldn't send
   // this signal as other candidates might be usefull in establishing the
   // connection.
-  sigslot::signal1<Port*> SignalPortError;
+  void NotifyPortError(Port* port) {
+    RTC_DCHECK_RUN_ON(thread_);
+    if (port_error_callback_) {
+      port_error_callback_(this);
+    }
+  }
 
   void SubscribePortDestroyed(
+      const void* tag,
       std::function<void(PortInterface*)> callback) override;
   void SendPortDestroyed(Port* port);
   // Returns a map containing all of the connections of this port, keyed by the
   // remote address.
-  typedef std::map<rtc::SocketAddress, Connection*> AddressMap;
+  using AddressMap = flat_map<SocketAddress, std::unique_ptr<Connection>>;
   const AddressMap& connections() { return connections_; }
 
   // Returns the connection to the given address or NULL if none exists.
-  Connection* GetConnection(const rtc::SocketAddress& remote_addr) override;
+  Connection* GetConnection(const SocketAddress& remote_addr) override;
 
   // Removes and deletes a connection object. `DestroyConnection` will
   // delete the connection object directly whereas `DestroyConnectionAsync`
@@ -307,30 +335,23 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   // to accept the packet based on the `remote_addr`. Currently only UDP
   // port implemented this method.
   // TODO(mallinath) - Make it pure virtual.
-  virtual bool HandleIncomingPacket(rtc::AsyncPacketSocket* socket,
-                                    const rtc::ReceivedPacket& packet);
+  virtual bool HandleIncomingPacket(AsyncPacketSocket* socket,
+                                    const ReceivedIpPacket& packet);
 
   // Shall the port handle packet from this `remote_addr`.
   // This method is overridden by TurnPort.
   virtual bool CanHandleIncomingPacketsFrom(
-      const rtc::SocketAddress& remote_addr) const;
+      const SocketAddress& remote_addr) const;
 
   // Sends a response error to the given request.
   void SendBindingErrorResponse(StunMessage* message,
-                                const rtc::SocketAddress& addr,
+                                const SocketAddress& addr,
                                 int error_code,
                                 absl::string_view reason) override;
   void SendUnknownAttributesErrorResponse(
       StunMessage* message,
-      const rtc::SocketAddress& addr,
+      const SocketAddress& addr,
       const std::vector<uint16_t>& unknown_types);
-
-  void set_proxy(absl::string_view user_agent, const rtc::ProxyInfo& proxy) {
-    user_agent_ = std::string(user_agent);
-    proxy_ = proxy;
-  }
-  const std::string& user_agent() override { return user_agent_; }
-  const rtc::ProxyInfo& proxy() override { return proxy_; }
 
   void EnablePortPackets() override;
 
@@ -339,13 +360,13 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
 
   // Debugging description of this port
   std::string ToString() const override;
-  uint16_t min_port() { return min_port_; }
-  uint16_t max_port() { return max_port_; }
+  uint16_t min_port() const { return min_port_; }
+  uint16_t max_port() const { return max_port_; }
 
   // Timeout shortening function to speed up unit tests.
   void set_timeout_delay(int delay);
 
-  // This method will return local and remote username fragements from the
+  // This method will return local and remote username fragments from the
   // stun username attribute if present.
   bool ParseStunUsername(const StunMessage* stun_msg,
                          std::string* local_username,
@@ -353,7 +374,7 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   std::string CreateStunUsername(
       absl::string_view remote_username) const override;
 
-  bool MaybeIceRoleConflict(const rtc::SocketAddress& addr,
+  bool MaybeIceRoleConflict(const SocketAddress& addr,
                             IceMessage* stun_msg,
                             absl::string_view remote_ufrag) override;
 
@@ -361,8 +382,8 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   // This is made pure virtual to notify subclasses of Port that they MUST
   // listen to AsyncPacketSocket::SignalSentPacket and then call
   // PortInterface::OnSentPacket.
-  virtual void OnSentPacket(rtc::AsyncPacketSocket* socket,
-                            const rtc::SentPacket& sent_packet) = 0;
+  virtual void OnSentPacket(AsyncPacketSocket* socket,
+                            const SentPacketInfo& sent_packet) = 0;
 
   // Called when the socket is currently able to send.
   void OnReadyToSend();
@@ -370,34 +391,64 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   // Called when the Connection discovers a local peer reflexive candidate.
   void AddPrflxCandidate(const Candidate& local) override;
 
-  int16_t network_cost() const override { return network_cost_; }
+  int16_t network_cost() const override {
+    RTC_DCHECK_RUN_ON(thread_);
+    return network_cost_;
+  }
 
-  void GetStunStats(absl::optional<StunStats>* stats) override {}
+  void GetStunStats(std::optional<StunStats>* /* stats */) override {}
 
-  // Foundation:  An arbitrary string that is the same for two candidates
-  //   that have the same type, base IP address, protocol (UDP, TCP,
-  //   etc.), and STUN or TURN server.  If any of these are different,
-  //   then the foundation will be different.  Two candidate pairs with
-  //   the same foundation pairs are likely to have similar network
-  //   characteristics. Foundations are used in the frozen algorithm.
-  std::string ComputeFoundation(
-      absl::string_view type,
-      absl::string_view protocol,
-      absl::string_view relay_protocol,
-      const rtc::SocketAddress& base_address) override;
+  // Signals for ICE role conflicts.
+  void SubscribeRoleConflict(absl::AnyInvocable<void()> callback) override;
+  void NotifyRoleConflict() override;
+
+  void SubscribeUnknownAddress(
+      const void* tag,
+      absl::AnyInvocable<void(PortInterface*,
+                              const SocketAddress&,
+                              ProtocolType,
+                              IceMessage*,
+                              const std::string&,
+                              bool)> callback) override;
+  void NotifyUnknownAddress(PortInterface* port,
+                            const SocketAddress& address,
+                            ProtocolType proto,
+                            IceMessage* msg,
+                            const std::string& rf,
+                            bool port_muxed) override;
+
+  // This function causes strange linker behavior if it's inlined,
+  // otherwise it would have been ABSL_DEPRECATE_AND_INLINE.
+  void SubscribeReadPacket(
+      const void* tag,
+      absl::AnyInvocable<void(PortInterface*,
+                              std::span<const uint8_t>,
+                              const SocketAddress&)> callback) override;
+
+  void NotifyReadPacket(PortInterface* prot,
+                        std::span<const uint8_t> data,
+                        const SocketAddress& remote_address) override;
+
+  void SubscribeSentPacket(
+      const void* tag,
+      absl::AnyInvocable<void(const SentPacketInfo&)> callback) override;
+  void NotifySentPacket(const SentPacketInfo& packet) override;
 
  protected:
   void UpdateNetworkCost() override;
 
-  rtc::WeakPtr<Port> NewWeakPtr() { return weak_factory_.GetWeakPtr(); }
+  WeakPtr<Port> NewWeakPtr() {
+    RTC_DCHECK_RUN_ON(thread_);
+    return weak_factory_.GetWeakPtr();
+  }
 
-  void AddAddress(const rtc::SocketAddress& address,
-                  const rtc::SocketAddress& base_address,
-                  const rtc::SocketAddress& related_address,
+  void AddAddress(const SocketAddress& address,
+                  const SocketAddress& base_address,
+                  const SocketAddress& related_address,
                   absl::string_view protocol,
                   absl::string_view relay_protocol,
                   absl::string_view tcptype,
-                  absl::string_view type,
+                  IceCandidateType type,
                   uint32_t type_preference,
                   uint32_t relay_preference,
                   absl::string_view url,
@@ -416,84 +467,91 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   // Called when a packet is received from an unknown address that is not
   // currently a connection.  If this is an authenticated STUN binding request,
   // then we will signal the client.
-  void OnReadPacket(const rtc::ReceivedPacket& packet, ProtocolType proto);
-
-  [[deprecated(
-      "Use OnReadPacket(const rtc::ReceivedPacket& packet, ProtocolType "
-      "proto)")]] void
-  OnReadPacket(const char* data,
-               size_t size,
-               const rtc::SocketAddress& addr,
-               ProtocolType proto) {
-    OnReadPacket(rtc::ReceivedPacket::CreateFromLegacy(
-                     data, size, /*packet_time_us = */ -1, addr),
-                 proto);
-  }
+  void OnReadPacket(const ReceivedIpPacket& packet, ProtocolType proto);
 
   // If the given data comprises a complete and correct STUN message then the
   // return value is true, otherwise false. If the message username corresponds
   // with this port's username fragment, msg will contain the parsed STUN
   // message.  Otherwise, the function may send a STUN response internally.
   // remote_username contains the remote fragment of the STUN username.
-  bool GetStunMessage(const char* data,
-                      size_t size,
-                      const rtc::SocketAddress& addr,
+  bool GetStunMessage(std::span<const uint8_t> data,
+                      const SocketAddress& addr,
                       std::unique_ptr<IceMessage>* out_msg,
                       std::string* out_username) override;
-
   // Checks if the address in addr is compatible with the port's ip.
-  bool IsCompatibleAddress(const rtc::SocketAddress& addr);
+  bool IsCompatibleAddress(const SocketAddress& addr);
 
   // Returns DSCP value packets generated by the port itself should use.
-  rtc::DiffServCodePoint StunDscpValue() const override;
+  DiffServCodePoint StunDscpValue() const override;
 
   // Extra work to be done in subclasses when a connection is destroyed.
-  virtual void HandleConnectionDestroyed(Connection* conn) {}
+  virtual void HandleConnectionDestroyed(Connection* /* conn */) {}
 
   void DestroyAllConnections();
 
-  void CopyPortInformationToPacketInfo(rtc::PacketInfo* info) const;
+  void CopyPortInformationToPacketInfo(PacketInfo* info) const;
 
   MdnsNameRegistrationStatus mdns_name_registration_status() const {
+    RTC_DCHECK_RUN_ON(thread_);
+
     return mdns_name_registration_status_;
   }
   void set_mdns_name_registration_status(MdnsNameRegistrationStatus status) {
+    RTC_DCHECK_RUN_ON(thread_);
     mdns_name_registration_status_ = status;
   }
 
-  const webrtc::FieldTrialsView& field_trials() const { return *field_trials_; }
+  const Environment& env() const { return env_; }
+  IceCandidateType type() const { return type_; }
+
+  // Requests the Local Network Access Permission if necessary. Asynchronously
+  // calls `callback` with the result of requesting the permission. If the
+  // permission is not needed e.g. because `address` is public, it calls
+  // `callback` synchronously. It's guaranteed that the callback won't be called
+  // after this class is destroyed.
+  void MaybeRequestLocalNetworkAccessPermission(
+      const SocketAddress& address,
+      absl::AnyInvocable<void(LocalNetworkAccessPermissionStatus)> callback);
 
  private:
-  void Construct();
+  void RegisterCallbacks(Callbacks&& callbacks);
+
+  bool MaybeObfuscateAddress(const Candidate& c, bool is_final)
+      RTC_RUN_ON(thread_);
 
   void PostDestroyIfDead(bool delayed);
   void DestroyIfDead();
 
-  // Called internally when deleting a connection object.
-  // Returns true if the connection object was removed from the `connections_`
-  // list and the state updated accordingly. If the connection was not found
-  // in the list, the return value is false. Note that this may indicate
-  // incorrect behavior of external code that might be attempting to delete
-  // connection objects from within a 'on destroyed' callback notification
-  // for the connection object itself.
-  bool OnConnectionDestroyed(Connection* conn);
-
   // Private implementation of DestroyConnection to keep the async usage
-  // distinct.
+  // distinct. If the connection is found in connections_, it is removed and the
+  // state updated accordingly. If the connection is not found, the function
+  // returns without doing anything. Note that this may indicate incorrect
+  // behavior of external code that might be attempting to delete connection
+  // objects from within a 'on destroyed' callback notification for the
+  // connection object itself.
   void DestroyConnectionInternal(Connection* conn, bool async);
 
-  void OnNetworkTypeChanged(const rtc::Network* network);
+  void OnNetworkTypeChanged(const ::webrtc::Network* network);
 
-  webrtc::TaskQueueBase* const thread_;
-  rtc::PacketSocketFactory* const factory_;
-  const absl::string_view type_;
-  bool send_retransmit_count_attribute_;
-  const rtc::Network* network_;
-  uint16_t min_port_;
-  uint16_t max_port_;
-  std::string content_name_;
-  int component_;
-  uint32_t generation_;
+  void OnNetworkSliceChanged(const ::webrtc::Network* network);
+
+  void OnRequestLocalNetworkAccessPermission(
+      LocalNetworkAccessPermissionInterface* permission_query,
+      absl::AnyInvocable<void(LocalNetworkAccessPermissionStatus)> callback,
+      LocalNetworkAccessPermissionStatus status);
+
+  const Environment env_;
+  TaskQueueBase* const thread_;
+  PacketSocketFactory* const factory_;
+  LocalNetworkAccessPermissionFactoryInterface* const lna_permission_factory_;
+  const IceCandidateType type_;
+  const bool send_retransmit_count_attribute_;
+  const ::webrtc::Network* const network_;
+  const uint16_t min_port_;
+  const uint16_t max_port_;
+  std::string content_name_ RTC_GUARDED_BY(thread_);
+  int component_ RTC_GUARDED_BY(thread_);
+  const uint32_t generation_;
   // In order to establish a connection to this Port (so that real data can be
   // sent through), the other side must send us a STUN binding request that is
   // authenticated with this username_fragment and password.
@@ -501,36 +559,60 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   std::string ice_username_fragment_ RTC_GUARDED_BY(thread_);
   std::string password_ RTC_GUARDED_BY(thread_);
   std::vector<Candidate> candidates_ RTC_GUARDED_BY(thread_);
-  AddressMap connections_;
-  int timeout_delay_;
-  bool enable_port_packets_;
-  IceRole ice_role_;
-  uint64_t tiebreaker_;
-  bool shared_socket_;
-  // Information to use when going through a proxy.
-  std::string user_agent_;
-  rtc::ProxyInfo proxy_;
+  AddressMap connections_ RTC_GUARDED_BY(thread_);
+  int timeout_delay_ RTC_GUARDED_BY(thread_);
+  bool enable_port_packets_ RTC_GUARDED_BY(thread_);
+  IceRole ice_role_ RTC_GUARDED_BY(thread_);
+  // https://datatracker.ietf.org/doc/html/rfc5245#section-5.2
+  const uint64_t ice_tiebreaker_;
+  bool shared_socket_ RTC_GUARDED_BY(thread_);
 
   // A virtual cost perceived by the user, usually based on the network type
   // (WiFi. vs. Cellular). It takes precedence over the priority when
   // comparing two connections.
-  int16_t network_cost_;
-  State state_ = State::INIT;
-  int64_t last_time_all_connections_removed_ = 0;
-  MdnsNameRegistrationStatus mdns_name_registration_status_ =
-      MdnsNameRegistrationStatus::kNotStarted;
+  int16_t network_cost_ RTC_GUARDED_BY(thread_);
+  // INIT: The state when a port is just created.
+  // KEEP_ALIVE_UNTIL_PRUNED: A port should not be destroyed even if no
+  // connection is using it.
+  // PRUNED: It will be destroyed if no connection is using it for a period of
+  // 30 seconds.
+  enum class State { INIT, KEEP_ALIVE_UNTIL_PRUNED, PRUNED };
+  State state_ RTC_GUARDED_BY(thread_) = State::INIT;
+  int64_t last_time_all_connections_removed_ RTC_GUARDED_BY(thread_) = 0;
+  MdnsNameRegistrationStatus mdns_name_registration_status_
+      RTC_GUARDED_BY(thread_) = MdnsNameRegistrationStatus::kNotStarted;
 
-  rtc::WeakPtrFactory<Port> weak_factory_;
-  webrtc::AlwaysValidPointer<const webrtc::FieldTrialsView,
-                             webrtc::FieldTrialBasedConfig>
-      field_trials_;
+  std::vector<std::unique_ptr<LocalNetworkAccessPermissionInterface>>
+      permission_queries_ RTC_GUARDED_BY(thread_);
 
-  bool MaybeObfuscateAddress(const Candidate& c, bool is_final)
-      RTC_RUN_ON(thread_);
+  CallbackList<PortInterface*,
+               const SocketAddress&,
+               ProtocolType,
+               IceMessage*,
+               const std::string&,
+               bool>
+      unknown_address_callbacks_;
+  CallbackList<PortInterface*, std::span<const uint8_t>, const SocketAddress&>
+      read_packet_callbacks_;
+  CallbackList<const SentPacketInfo&> sent_packet_callbacks_;
 
-  webrtc::CallbackList<PortInterface*> port_destroyed_callback_list_;
+  CallbackList<PortInterface*> port_destroyed_callback_list_
+      RTC_GUARDED_BY(thread_);
+  absl::AnyInvocable<void(Port*, const IceCandidateErrorEvent&)>
+      candidate_error_callback_ RTC_GUARDED_BY(thread_);
+  absl::AnyInvocable<void(Port*, const Candidate&)> candidate_ready_callback_
+      RTC_GUARDED_BY(thread_);
+  absl::AnyInvocable<void(Port*)> port_complete_callback_
+      RTC_GUARDED_BY(thread_);
+  absl::AnyInvocable<void(Port*)> port_error_callback_ RTC_GUARDED_BY(thread_);
+
+  absl::AnyInvocable<void()> role_conflict_callback_ RTC_GUARDED_BY(thread_);
+
+  // Keep as the last member variable.
+  WeakPtrFactory<Port> weak_factory_ RTC_GUARDED_BY(thread_);
 };
 
-}  // namespace cricket
+}  //  namespace webrtc
+
 
 #endif  // P2P_BASE_PORT_H_

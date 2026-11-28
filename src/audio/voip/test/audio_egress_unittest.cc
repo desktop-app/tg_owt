@@ -10,41 +10,54 @@
 
 #include "audio/voip/audio_egress.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <span>
+#include <utility>
+
+#include "api/audio/audio_frame.h"
+#include "api/audio_codecs/audio_encoder_factory.h"
+#include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/call/transport.h"
-#include "api/task_queue/default_task_queue_factory.h"
+#include "api/environment/environment.h"
+#include "api/rtp_headers.h"
+#include "api/scoped_refptr.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "modules/audio_mixer/sine_wave_generator.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "modules/rtp_rtcp/source/rtp_rtcp_impl2.h"
+#include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
 #include "rtc_base/event.h"
-#include "rtc_base/logging.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/mock_audio_encoder.h"
 #include "test/mock_transport.h"
-#include "test/run_loop.h"
 #include "test/time_controller/simulated_time_controller.h"
 
 namespace webrtc {
 namespace {
 
-using ::testing::Invoke;
+using ::testing::FloatEq;
 using ::testing::NiceMock;
+using ::testing::Return;
 using ::testing::Unused;
 
-std::unique_ptr<ModuleRtpRtcpImpl2> CreateRtpStack(Clock* clock,
+std::unique_ptr<ModuleRtpRtcpImpl2> CreateRtpStack(const Environment& env,
                                                    Transport* transport,
                                                    uint32_t remote_ssrc) {
   RtpRtcpInterface::Configuration rtp_config;
-  rtp_config.clock = clock;
   rtp_config.audio = true;
   rtp_config.rtcp_report_interval_ms = 5000;
   rtp_config.outgoing_transport = transport;
   rtp_config.local_media_ssrc = remote_ssrc;
-  auto rtp_rtcp = ModuleRtpRtcpImpl2::Create(rtp_config);
+  rtp_config.rtcp_mode = RtcpMode::kCompound;
+  auto rtp_rtcp = ModuleRtpRtcpImpl2::CreateSendModule(env, rtp_config);
   rtp_rtcp->SetSendingMediaStatus(false);
-  rtp_rtcp->SetRTCPStatus(RtcpMode::kCompound);
   return rtp_rtcp;
 }
 
@@ -67,15 +80,12 @@ class AudioEgressTest : public ::testing::Test {
   // Prepare test on audio egress by using PCMu codec with specific
   // sequence number and its status to be running.
   void SetUp() override {
-    rtp_rtcp_ =
-        CreateRtpStack(time_controller_.GetClock(), &transport_, kRemoteSsrc);
-    egress_ = std::make_unique<AudioEgress>(
-        rtp_rtcp_.get(), time_controller_.GetClock(),
-        time_controller_.GetTaskQueueFactory());
+    rtp_rtcp_ = CreateRtpStack(env_, &transport_, kRemoteSsrc);
+    egress_ = std::make_unique<AudioEgress>(env_, rtp_rtcp_.get());
     constexpr int kPcmuPayload = 0;
     egress_->SetEncoder(kPcmuPayload, kPcmuFormat,
-                        encoder_factory_->MakeAudioEncoder(
-                            kPcmuPayload, kPcmuFormat, absl::nullopt));
+                        encoder_factory_->Create(
+                            env_, kPcmuFormat, {.payload_type = kPcmuPayload}));
     egress_->StartSend();
     rtp_rtcp_->SetSequenceNumber(kSeqNum);
     rtp_rtcp_->SetSendingStatus(true);
@@ -104,10 +114,11 @@ class AudioEgressTest : public ::testing::Test {
   }
 
   GlobalSimulatedTimeController time_controller_{Timestamp::Micros(kStartTime)};
+  const Environment env_ = CreateTestEnvironment({.time = &time_controller_});
   NiceMock<MockTransport> transport_;
   SineWaveGenerator wave_generator_;
   std::unique_ptr<ModuleRtpRtcpImpl2> rtp_rtcp_;
-  rtc::scoped_refptr<AudioEncoderFactory> encoder_factory_;
+  scoped_refptr<AudioEncoderFactory> encoder_factory_;
   std::unique_ptr<AudioEgress> egress_;
 };
 
@@ -119,10 +130,10 @@ TEST_F(AudioEgressTest, SendingStatusAfterStartAndStop) {
 
 TEST_F(AudioEgressTest, ProcessAudioWithMute) {
   constexpr int kExpected = 10;
-  rtc::Event event;
+  Event event;
   int rtp_count = 0;
   RtpPacketReceived rtp;
-  auto rtp_sent = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto rtp_sent = [&](std::span<const uint8_t> packet, Unused) {
     rtp.Parse(packet);
     if (++rtp_count == kExpected) {
       event.Set();
@@ -130,7 +141,7 @@ TEST_F(AudioEgressTest, ProcessAudioWithMute) {
     return true;
   };
 
-  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(Invoke(rtp_sent));
+  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(rtp_sent);
 
   egress_->SetMute(true);
 
@@ -157,10 +168,10 @@ TEST_F(AudioEgressTest, ProcessAudioWithMute) {
 
 TEST_F(AudioEgressTest, ProcessAudioWithSineWave) {
   constexpr int kExpected = 10;
-  rtc::Event event;
+  Event event;
   int rtp_count = 0;
   RtpPacketReceived rtp;
-  auto rtp_sent = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto rtp_sent = [&](std::span<const uint8_t> packet, Unused) {
     rtp.Parse(packet);
     if (++rtp_count == kExpected) {
       event.Set();
@@ -168,7 +179,7 @@ TEST_F(AudioEgressTest, ProcessAudioWithSineWave) {
     return true;
   };
 
-  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(Invoke(rtp_sent));
+  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(rtp_sent);
 
   // Two 10 ms audio frames will result in rtp packet with ptime 20.
   for (size_t i = 0; i < kExpected * 2; i++) {
@@ -193,16 +204,16 @@ TEST_F(AudioEgressTest, ProcessAudioWithSineWave) {
 
 TEST_F(AudioEgressTest, SkipAudioEncodingAfterStopSend) {
   constexpr int kExpected = 10;
-  rtc::Event event;
+  Event event;
   int rtp_count = 0;
-  auto rtp_sent = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto rtp_sent = [&](std::span<const uint8_t> /* packet */, Unused) {
     if (++rtp_count == kExpected) {
       event.Set();
     }
     return true;
   };
 
-  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(Invoke(rtp_sent));
+  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(rtp_sent);
 
   // Two 10 ms audio frames will result in rtp packet with ptime 20.
   for (size_t i = 0; i < kExpected * 2; i++) {
@@ -226,7 +237,7 @@ TEST_F(AudioEgressTest, SkipAudioEncodingAfterStopSend) {
 }
 
 TEST_F(AudioEgressTest, ChangeEncoderFromPcmuToOpus) {
-  absl::optional<SdpAudioFormat> pcmu = egress_->GetEncoderFormat();
+  std::optional<SdpAudioFormat> pcmu = egress_->GetEncoderFormat();
   EXPECT_TRUE(pcmu);
   EXPECT_EQ(pcmu->clockrate_hz, kPcmuFormat.clockrate_hz);
   EXPECT_EQ(pcmu->num_channels, kPcmuFormat.num_channels);
@@ -235,10 +246,10 @@ TEST_F(AudioEgressTest, ChangeEncoderFromPcmuToOpus) {
   const SdpAudioFormat kOpusFormat = {"opus", 48000, 2};
 
   egress_->SetEncoder(kOpusPayload, kOpusFormat,
-                      encoder_factory_->MakeAudioEncoder(
-                          kOpusPayload, kOpusFormat, absl::nullopt));
+                      encoder_factory_->Create(env_, kOpusFormat,
+                                               {.payload_type = kOpusPayload}));
 
-  absl::optional<SdpAudioFormat> opus = egress_->GetEncoderFormat();
+  std::optional<SdpAudioFormat> opus = egress_->GetEncoderFormat();
   EXPECT_TRUE(opus);
   EXPECT_EQ(opus->clockrate_hz, kOpusFormat.clockrate_hz);
   EXPECT_EQ(opus->num_channels, kOpusFormat.num_channels);
@@ -257,7 +268,7 @@ TEST_F(AudioEgressTest, SendDTMF) {
   // 5, 6, 7 @ 100 ms (last one sends 3 dtmf)
   egress_->SendTelephoneEvent(kEvent, kDurationMs);
 
-  rtc::Event event;
+  Event event;
   int dtmf_count = 0;
   auto is_dtmf = [&](RtpPacketReceived& rtp) {
     return (rtp.PayloadType() == kPayloadType &&
@@ -269,7 +280,7 @@ TEST_F(AudioEgressTest, SendDTMF) {
   // It's possible that we may have actual audio RTP packets along with
   // DTMF packtets.  We are only interested in the exact number of DTMF
   // packets rtp stack is emitting.
-  auto rtp_sent = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto rtp_sent = [&](std::span<const uint8_t> packet, Unused) {
     RtpPacketReceived rtp;
     rtp.Parse(packet);
     if (is_dtmf(rtp) && ++dtmf_count == kExpected) {
@@ -278,7 +289,7 @@ TEST_F(AudioEgressTest, SendDTMF) {
     return true;
   };
 
-  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(Invoke(rtp_sent));
+  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(rtp_sent);
 
   // Two 10 ms audio frames will result in rtp packet with ptime 20.
   for (size_t i = 0; i < kExpected * 2; i++) {
@@ -294,16 +305,16 @@ TEST_F(AudioEgressTest, TestAudioInputLevelAndEnergyDuration) {
   // Per audio_level's kUpdateFrequency, we need more than 10 audio samples to
   // get audio level from input source.
   constexpr int kExpected = 6;
-  rtc::Event event;
+  Event event;
   int rtp_count = 0;
-  auto rtp_sent = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto rtp_sent = [&](std::span<const uint8_t> /* packet */, Unused) {
     if (++rtp_count == kExpected) {
       event.Set();
     }
     return true;
   };
 
-  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(Invoke(rtp_sent));
+  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(rtp_sent);
 
   // Two 10 ms audio frames will result in rtp packet with ptime 20.
   for (size_t i = 0; i < kExpected * 2; i++) {
@@ -320,6 +331,26 @@ TEST_F(AudioEgressTest, TestAudioInputLevelAndEnergyDuration) {
   EXPECT_EQ(egress_->GetInputAudioLevel(), kAudioLevel);
   EXPECT_DOUBLE_EQ(egress_->GetInputTotalEnergy(), kExpectedEnergy);
   EXPECT_DOUBLE_EQ(egress_->GetInputTotalDuration(), kExpectedDuration);
+}
+
+TEST_F(AudioEgressTest, ForwardsUplinkPacketLossFractionToEncoder) {
+  auto mock_encoder = std::make_unique<NiceMock<MockAudioEncoder>>();
+  ON_CALL(*mock_encoder, SampleRateHz()).WillByDefault(Return(8000));
+  ON_CALL(*mock_encoder, NumChannels()).WillByDefault(Return(1));
+  ON_CALL(*mock_encoder, RtpTimestampRateHz()).WillByDefault(Return(8000));
+  EXPECT_CALL(*mock_encoder, OnReceivedUplinkPacketLossFraction(FloatEq(0.25f)))
+      .Times(1);
+
+  constexpr int kPcmuPayload = 0;
+  egress_->SetEncoder(kPcmuPayload, kPcmuFormat, std::move(mock_encoder));
+  egress_->OnReceivedUplinkPacketLossFraction(0.25f);
+  time_controller_.AdvanceTime(TimeDelta::Zero());
+}
+
+TEST_F(AudioEgressTest, UplinkPacketLossFractionWithoutEncoderIsNoOp) {
+  AudioEgress unconfigured_egress(env_, rtp_rtcp_.get());
+  unconfigured_egress.OnReceivedUplinkPacketLossFraction(0.25f);
+  time_controller_.AdvanceTime(TimeDelta::Zero());
 }
 
 }  // namespace

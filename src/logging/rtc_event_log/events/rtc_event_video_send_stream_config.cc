@@ -10,9 +10,12 @@
 
 #include "logging/rtc_event_log/events/rtc_event_video_send_stream_config.h"
 
+#include <memory>
 #include <utility>
 
 #include "absl/memory/memory.h"
+#include "api/rtc_event_log/rtc_event.h"
+#include "logging/rtc_event_log/rtc_stream_config.h"
 
 namespace webrtc {
 
@@ -22,15 +25,14 @@ RtcEventVideoSendStreamConfig::RtcEventVideoSendStreamConfig(
 
 RtcEventVideoSendStreamConfig::RtcEventVideoSendStreamConfig(
     const RtcEventVideoSendStreamConfig& other)
-    : RtcEvent(other.timestamp_us_),
+    : RtcEvent(other),
       config_(std::make_unique<rtclog::StreamConfig>(*other.config_)) {}
 
 RtcEventVideoSendStreamConfig::~RtcEventVideoSendStreamConfig() = default;
 
 std::unique_ptr<RtcEventVideoSendStreamConfig>
 RtcEventVideoSendStreamConfig::Copy() const {
-  return absl::WrapUnique<RtcEventVideoSendStreamConfig>(
-      new RtcEventVideoSendStreamConfig(*this));
+  return absl::WrapUnique(new RtcEventVideoSendStreamConfig(*this));
 }
 
 }  // namespace webrtc

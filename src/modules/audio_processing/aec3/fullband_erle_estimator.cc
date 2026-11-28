@@ -11,15 +11,18 @@
 #include "modules/audio_processing/aec3/fullband_erle_estimator.h"
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <numeric>
+#include <optional>
+#include <span>
+#include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "api/audio/echo_canceller3_config.h"
 #include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/numerics/safe_minmax.h"
 
 namespace webrtc {
 
@@ -57,9 +60,9 @@ void FullBandErleEstimator::Reset() {
 }
 
 void FullBandErleEstimator::Update(
-    rtc::ArrayView<const float> X2,
-    rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>> Y2,
-    rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>> E2,
+    std::span<const float> X2,
+    std::span<const std::array<float, kFftLengthBy2Plus1>> Y2,
+    std::span<const std::array<float, kFftLengthBy2Plus1>> E2,
     const std::vector<bool>& converged_filters) {
   for (size_t ch = 0; ch < Y2.size(); ++ch) {
     if (converged_filters[ch]) {
@@ -142,7 +145,7 @@ void FullBandErleEstimator::ErleInstantaneous::Reset() {
 }
 
 void FullBandErleEstimator::ErleInstantaneous::ResetAccumulators() {
-  erle_log2_ = absl::nullopt;
+  erle_log2_ = std::nullopt;
   inst_quality_estimate_ = 0.f;
   num_points_ = 0;
   E2_acum_ = 0.f;

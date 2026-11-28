@@ -11,22 +11,29 @@
 #include "modules/video_coding/codecs/vp8/screenshare_layers.h"
 
 #include <stdlib.h>
-#include <string.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <vector>
 
+#include "api/environment/environment.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "api/video_codecs/vp8_frame_buffer_controller.h"
 #include "api/video_codecs/vp8_frame_config.h"
 #include "modules/video_coding/codecs/interface/common_constants.h"
 #include "modules/video_coding/codecs/vp8/libvpx_vp8_encoder.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/fake_clock.h"
 #include "system_wrappers/include/metrics.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
-#include "vpx/vp8cx.h"
+#include "test/time_controller/simulated_time_controller.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8cx.h"
 
 using ::testing::_;
 using ::testing::ElementsAre;
@@ -35,21 +42,21 @@ using ::testing::NiceMock;
 namespace webrtc {
 namespace {
 // 5 frames per second at 90 kHz.
-const uint32_t kTimestampDelta5Fps = 90000 / 5;
-const int kDefaultQp = 54;
-const int kDefaultTl0BitrateKbps = 200;
-const int kDefaultTl1BitrateKbps = 2000;
-const int kFrameRate = 5;
-const int kSyncPeriodSeconds = 2;
-const int kMaxSyncPeriodSeconds = 4;
+constexpr uint32_t kTimestampDelta5Fps = 90000 / 5;
+constexpr int kDefaultQp = 54;
+constexpr int kDefaultTl0BitrateKbps = 200;
+constexpr int kDefaultTl1BitrateKbps = 2000;
+constexpr int kFrameRate = 5;
+constexpr int kSyncPeriodSeconds = 2;
+constexpr int kMaxSyncPeriodSeconds = 4;
 
 // Expected flags for corresponding temporal layers.
-const int kTl0Flags = VP8_EFLAG_NO_UPD_GF | VP8_EFLAG_NO_UPD_ARF |
-                      VP8_EFLAG_NO_REF_GF | VP8_EFLAG_NO_REF_ARF;
-const int kTl1Flags =
+constexpr int kTl0Flags = VP8_EFLAG_NO_UPD_GF | VP8_EFLAG_NO_UPD_ARF |
+                          VP8_EFLAG_NO_REF_GF | VP8_EFLAG_NO_REF_ARF;
+constexpr int kTl1Flags =
     VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_UPD_ARF | VP8_EFLAG_NO_UPD_LAST;
-const int kTl1SyncFlags = VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_REF_GF |
-                          VP8_EFLAG_NO_UPD_ARF | VP8_EFLAG_NO_UPD_LAST;
+constexpr int kTl1SyncFlags = VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_REF_GF |
+                              VP8_EFLAG_NO_UPD_ARF | VP8_EFLAG_NO_UPD_LAST;
 const std::vector<uint32_t> kDefault2TlBitratesBps = {
     kDefaultTl0BitrateKbps * 1000,
     (kDefaultTl1BitrateKbps - kDefaultTl0BitrateKbps) * 1000};
@@ -64,10 +71,10 @@ class ScreenshareLayerTest : public ::testing::Test {
         frame_size_(-1),
         timestamp_(90),
         config_updated_(false) {}
-  virtual ~ScreenshareLayerTest() {}
+  ~ScreenshareLayerTest() override {}
 
   void SetUp() override {
-    layers_.reset(new ScreenshareLayers(2));
+    layers_ = std::make_unique<ScreenshareLayers>(env_, 2);
     cfg_ = ConfigureBitrates();
   }
 
@@ -84,7 +91,7 @@ class ScreenshareLayerTest : public ::testing::Test {
     return flags;
   }
 
-  int ConfigureFrame(bool key_frame) {
+  int ConfigureFrame(bool /* key_frame */) {
     tl_config_ = NextFrameConfig(0, timestamp_);
     EXPECT_EQ(0, tl_config_.encoder_layer_id)
         << "ScreenshareLayers always encodes using the bitrate allocator for "
@@ -113,7 +120,11 @@ class ScreenshareLayerTest : public ::testing::Test {
 
   Vp8FrameConfig NextFrameConfig(size_t stream_index, uint32_t timestamp) {
     int64_t timestamp_ms = timestamp / 90;
-    clock_.AdvanceTime(TimeDelta::Millis(timestamp_ms - rtc::TimeMillis()));
+    TimeDelta delta = Timestamp::Millis(timestamp_ms) -
+                      time_controller_.GetClock()->CurrentTime();
+    if (delta > TimeDelta::Zero()) {
+      time_controller_.AdvanceTime(delta);
+    }
     return layers_->NextFrameConfig(stream_index, timestamp);
   }
 
@@ -161,12 +172,10 @@ class ScreenshareLayerTest : public ::testing::Test {
   // Adds frames until we get one in the specified temporal layer. The last
   // FrameEncoded() call will be omitted and needs to be done by the caller.
   // Returns the flags for the last frame.
-  int SkipUntilTl(int layer) {
-    return SkipUntilTlAndSync(layer, absl::nullopt);
-  }
+  int SkipUntilTl(int layer) { return SkipUntilTlAndSync(layer, std::nullopt); }
 
   // Same as SkipUntilTl, but also waits until the sync bit condition is met.
-  int SkipUntilTlAndSync(int layer, absl::optional<bool> sync) {
+  int SkipUntilTlAndSync(int layer, std::optional<bool> sync) {
     int flags = 0;
     const int kMaxFramesToSkip =
         1 + (sync.value_or(false) ? kMaxSyncPeriodSeconds : 1) * kFrameRate;
@@ -191,10 +200,11 @@ class ScreenshareLayerTest : public ::testing::Test {
     return -1;
   }
 
+  GlobalSimulatedTimeController time_controller_{Timestamp::Zero()};
+  const Environment env_ = CreateTestEnvironment({.time = &time_controller_});
   int min_qp_;
   uint32_t max_qp_;
   int frame_size_;
-  rtc::ScopedFakeClock clock_;
   std::unique_ptr<ScreenshareLayers> layers_;
 
   uint32_t timestamp_;
@@ -212,7 +222,7 @@ class ScreenshareLayerTest : public ::testing::Test {
 };
 
 TEST_F(ScreenshareLayerTest, 1Layer) {
-  layers_.reset(new ScreenshareLayers(1));
+  layers_ = std::make_unique<ScreenshareLayers>(env_, 1);
   ConfigureBitrates();
   // One layer screenshare should not use the frame dropper as all frames will
   // belong to the base layer.
@@ -532,7 +542,7 @@ TEST_F(ScreenshareLayerTest, UpdatesHistograms) {
   const int kTl0Qp = 35;
   const int kTl1Qp = 30;
   for (int64_t timestamp = 0;
-       timestamp < kTimestampDelta5Fps * 5 * metrics::kMinRunTimeInSeconds;
+       timestamp < kTimestampDelta5Fps * 5 * metrics::kMinRunTime.seconds();
        timestamp += kTimestampDelta5Fps) {
     tl_config_ = NextFrameConfig(0, timestamp);
     if (tl_config_.drop_frame) {
@@ -567,7 +577,7 @@ TEST_F(ScreenshareLayerTest, UpdatesHistograms) {
     } else {
       RTC_DCHECK_NOTREACHED() << "Unexpected flags";
     }
-    clock_.AdvanceTime(TimeDelta::Millis(1000 / 5));
+    time_controller_.AdvanceTime(TimeDelta::Millis(1000 / 5));
   }
 
   EXPECT_TRUE(overshoot);
@@ -612,7 +622,9 @@ TEST_F(ScreenshareLayerTest, UpdatesHistograms) {
                             kDefaultTl1BitrateKbps));
 }
 
-TEST_F(ScreenshareLayerTest, RespectsConfiguredFramerate) {
+// TODO(https://issues.webrtc.org/444656962): Re-enable when the test no longer
+// rewinds time.
+TEST_F(ScreenshareLayerTest, DISABLED_RespectsConfiguredFramerate) {
   int64_t kTestSpanMs = 2000;
   int64_t kFrameIntervalsMs = 1000 / kFrameRate;
 
@@ -630,7 +642,7 @@ TEST_F(ScreenshareLayerTest, RespectsConfiguredFramerate) {
                             IgnoredCodecSpecificInfo());
     }
     timestamp += kFrameIntervalsMs * 90;
-    clock_.AdvanceTime(TimeDelta::Millis(kFrameIntervalsMs));
+    time_controller_.AdvanceTime(TimeDelta::Millis(kFrameIntervalsMs));
 
     ++num_input_frames;
   }
@@ -648,7 +660,7 @@ TEST_F(ScreenshareLayerTest, RespectsConfiguredFramerate) {
                             IgnoredCodecSpecificInfo());
     }
     timestamp += kFrameIntervalsMs * 90 / 2;
-    clock_.AdvanceTime(TimeDelta::Millis(kFrameIntervalsMs));
+    time_controller_.AdvanceTime(TimeDelta::Millis(kFrameIntervalsMs / 2));
     ++num_input_frames;
   }
 

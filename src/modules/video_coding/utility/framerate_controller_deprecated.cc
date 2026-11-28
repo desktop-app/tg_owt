@@ -10,9 +10,9 @@
 
 #include "modules/video_coding/utility/framerate_controller_deprecated.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace webrtc {
 
@@ -77,7 +77,7 @@ void FramerateControllerDeprecated::AddFrame(uint32_t timestamp_ms) {
   last_timestamp_ms_ = timestamp_ms;
 }
 
-absl::optional<float> FramerateControllerDeprecated::Rate(
+std::optional<float> FramerateControllerDeprecated::Rate(
     uint32_t timestamp_ms) const {
   return framerate_estimator_.Rate(timestamp_ms);
 }

@@ -10,16 +10,30 @@
 
 #include "sdk/android/src/jni/pc/rtp_transceiver.h"
 
-#include <string>
+#include <jni.h>
 
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "api/rtc_error.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_transceiver_direction.h"
+#include "api/rtp_transceiver_interface.h"
+#include "api/scoped_refptr.h"
+#include "rtc_base/logging.h"
 #include "sdk/android/generated_peerconnection_jni/RtpTransceiver_jni.h"
+#include "sdk/android/generated_rtcerror_jni/RtcError_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/src/jni/jvm.h"
 #include "sdk/android/src/jni/pc/media_stream_track.h"
 #include "sdk/android/src/jni/pc/rtp_capabilities.h"
 #include "sdk/android/src/jni/pc/rtp_parameters.h"
 #include "sdk/android/src/jni/pc/rtp_receiver.h"
 #include "sdk/android/src/jni/pc/rtp_sender.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 namespace webrtc {
 namespace jni {
@@ -37,7 +51,7 @@ ScopedJavaLocalRef<jobject> NativeToJavaRtpTransceiverDirection(
 
 RtpTransceiverInit JavaToNativeRtpTransceiverInit(
     JNIEnv* jni,
-    const JavaRef<jobject>& j_init) {
+    const jni_zero::JavaRef<jobject>& j_init) {
   RtpTransceiverInit init;
 
   // Convert the direction.
@@ -45,13 +59,13 @@ RtpTransceiverInit JavaToNativeRtpTransceiverInit(
       Java_RtpTransceiverInit_getDirectionNativeIndex(jni, j_init));
 
   // Convert the stream ids.
-  ScopedJavaLocalRef<jobject> j_stream_ids =
+  jni_zero::ScopedJavaLocalRef<jobject> j_stream_ids =
       Java_RtpTransceiverInit_getStreamIds(jni, j_init);
   init.stream_ids = JavaListToNativeVector<std::string, jstring>(
       jni, j_stream_ids, &JavaToNativeString);
 
   // Convert the send encodings.
-  ScopedJavaLocalRef<jobject> j_send_encodings =
+  jni_zero::ScopedJavaLocalRef<jobject> j_send_encodings =
       Java_RtpTransceiverInit_getSendEncodings(jni, j_init);
   init.send_encodings = JavaListToNativeVector<RtpEncodingParameters, jobject>(
       jni, j_send_encodings, &JavaToNativeRtpEncodingParameters);
@@ -60,7 +74,7 @@ RtpTransceiverInit JavaToNativeRtpTransceiverInit(
 
 ScopedJavaLocalRef<jobject> NativeToJavaRtpTransceiver(
     JNIEnv* env,
-    rtc::scoped_refptr<RtpTransceiverInterface> transceiver) {
+    scoped_refptr<RtpTransceiverInterface> transceiver) {
   if (!transceiver) {
     return nullptr;
   }
@@ -71,7 +85,7 @@ ScopedJavaLocalRef<jobject> NativeToJavaRtpTransceiver(
 
 JavaRtpTransceiverGlobalOwner::JavaRtpTransceiverGlobalOwner(
     JNIEnv* env,
-    const JavaRef<jobject>& j_transceiver)
+    const jni_zero::JavaRef<jobject>& j_transceiver)
     : j_transceiver_(env, j_transceiver) {}
 
 JavaRtpTransceiverGlobalOwner::JavaRtpTransceiverGlobalOwner(
@@ -94,7 +108,7 @@ ScopedJavaLocalRef<jobject> JNI_RtpTransceiver_GetMediaType(
 ScopedJavaLocalRef<jstring> JNI_RtpTransceiver_GetMid(
     JNIEnv* jni,
     jlong j_rtp_transceiver_pointer) {
-  absl::optional<std::string> mid =
+  std::optional<std::string> mid =
       reinterpret_cast<RtpTransceiverInterface*>(j_rtp_transceiver_pointer)
           ->mid();
   return NativeToJavaString(jni, mid);
@@ -133,22 +147,29 @@ ScopedJavaLocalRef<jobject> JNI_RtpTransceiver_Direction(
 ScopedJavaLocalRef<jobject> JNI_RtpTransceiver_CurrentDirection(
     JNIEnv* jni,
     jlong j_rtp_transceiver_pointer) {
-  absl::optional<RtpTransceiverDirection> direction =
+  std::optional<RtpTransceiverDirection> direction =
       reinterpret_cast<RtpTransceiverInterface*>(j_rtp_transceiver_pointer)
           ->current_direction();
   return direction ? NativeToJavaRtpTransceiverDirection(jni, *direction)
                    : nullptr;
 }
 
-void JNI_RtpTransceiver_SetCodecPreferences(
+ScopedJavaLocalRef<jobject> JNI_RtpTransceiver_SetCodecPreferences(
     JNIEnv* jni,
     jlong j_rtp_transceiver_pointer,
-    const JavaParamRef<jobject>& j_codecs) {
-  std::vector<RtpCodecCapability> codecs =
-      JavaListToNativeVector<RtpCodecCapability, jobject>(
-          jni, j_codecs, &JavaToNativeRtpCodecCapability);
-  reinterpret_cast<RtpTransceiverInterface*>(j_rtp_transceiver_pointer)
-      ->SetCodecPreferences(codecs);
+    const jni_zero::JavaRef<jobject>& j_codecs) {
+  std::vector<RtpCodecCapability> codecs;
+  if (j_codecs) {
+    codecs = JavaListToNativeVector<RtpCodecCapability, jobject>(
+        jni, j_codecs, &JavaToNativeRtpCodecCapability);
+  }
+  RTCError error =
+      reinterpret_cast<RtpTransceiverInterface*>(j_rtp_transceiver_pointer)
+          ->SetCodecPreferences(codecs);
+  if (!error.ok()) {
+    return Java_RtcError_error(jni, NativeToJavaString(jni, error.message()));
+  }
+  return Java_RtcError_success(jni);
 }
 
 void JNI_RtpTransceiver_StopInternal(JNIEnv* jni,
@@ -166,14 +187,14 @@ void JNI_RtpTransceiver_StopStandard(JNIEnv* jni,
 jboolean JNI_RtpTransceiver_SetDirection(
     JNIEnv* jni,
     jlong j_rtp_transceiver_pointer,
-    const base::android::JavaParamRef<jobject>& j_rtp_transceiver_direction) {
+    const jni_zero::JavaRef<jobject>& j_rtp_transceiver_direction) {
   if (IsNull(jni, j_rtp_transceiver_direction)) {
     return false;
   }
   RtpTransceiverDirection direction = static_cast<RtpTransceiverDirection>(
       Java_RtpTransceiverDirection_getNativeIndex(jni,
                                                   j_rtp_transceiver_direction));
-  webrtc::RTCError error =
+  RTCError error =
       reinterpret_cast<RtpTransceiverInterface*>(j_rtp_transceiver_pointer)
           ->SetDirectionWithError(direction);
   if (!error.ok()) {
@@ -186,3 +207,6 @@ jboolean JNI_RtpTransceiver_SetDirection(
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(RtpTransceiver)
+DEFINE_JNI(RtcError)

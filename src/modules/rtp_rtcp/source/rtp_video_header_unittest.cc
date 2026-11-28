@@ -10,8 +10,19 @@
 
 #include "modules/rtp_rtcp/source/rtp_video_header.h"
 
+#include <cstdint>
+#include <optional>
+
+#include "absl/container/inlined_vector.h"
+#include "api/transport/rtp/dependency_descriptor.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_content_type.h"
 #include "api/video/video_frame_metadata.h"
 #include "api/video/video_frame_type.h"
+#include "api/video/video_rotation.h"
+#include "modules/video_coding/codecs/h264/include/h264_globals.h"
+#include "modules/video_coding/codecs/vp8/include/vp8_globals.h"
+#include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -20,6 +31,7 @@ namespace {
 
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
+using ::testing::Optional;
 
 TEST(RTPVideoHeaderTest, FrameType_GetAsMetadata) {
   RTPVideoHeader video_header;
@@ -117,7 +129,7 @@ TEST(RTPVideoHeaderTest, FrameId_FromMetadata) {
 
 TEST(RTPVideoHeaderTest, FrameId_FromMetadataWhenFrameIdIsMissing) {
   VideoFrameMetadata metadata;
-  metadata.SetFrameId(absl::nullopt);
+  metadata.SetFrameId(std::nullopt);
   RTPVideoHeader video_header = RTPVideoHeader::FromMetadata(metadata);
   EXPECT_FALSE(video_header.generic.has_value());
 }
@@ -178,21 +190,21 @@ TEST(RTPVideoHeaderTest, FrameDependencies_GetAsMetadata) {
       video_header.generic.emplace();
   generic.dependencies = {5, 6, 7};
   VideoFrameMetadata metadata = video_header.GetAsMetadata();
-  EXPECT_THAT(metadata.GetFrameDependencies(), ElementsAre(5, 6, 7));
+  EXPECT_THAT(metadata.GetDependencies(), Optional(ElementsAre(5, 6, 7)));
 }
 
 TEST(RTPVideoHeaderTest, FrameDependency_GetAsMetadataWhenGenericIsMissing) {
   RTPVideoHeader video_header;
   VideoFrameMetadata metadata = video_header.GetAsMetadata();
   ASSERT_FALSE(video_header.generic);
-  EXPECT_THAT(metadata.GetFrameDependencies(), IsEmpty());
+  EXPECT_EQ(metadata.GetDependencies(), std::nullopt);
 }
 
 TEST(RTPVideoHeaderTest, FrameDependencies_FromMetadata) {
   VideoFrameMetadata metadata;
   absl::InlinedVector<int64_t, 5> dependencies = {5, 6, 7};
   metadata.SetFrameId(123);  // Must have a frame ID for related properties.
-  metadata.SetFrameDependencies(dependencies);
+  metadata.SetDependencies(dependencies);
   RTPVideoHeader video_header = RTPVideoHeader::FromMetadata(metadata);
   EXPECT_TRUE(video_header.generic.has_value());
   EXPECT_THAT(video_header.generic->dependencies, ElementsAre(5, 6, 7));
@@ -282,7 +294,7 @@ TEST(RTPVideoHeaderTest, RTPVideoHeaderCodecSpecifics_GetAsMetadata) {
     video_header.video_type_header = vp8_specifics;
     VideoFrameMetadata metadata = video_header.GetAsMetadata();
     EXPECT_EQ(
-        absl::get<RTPVideoHeaderVP8>(metadata.GetRTPVideoHeaderCodecSpecifics())
+        std::get<RTPVideoHeaderVP8>(metadata.GetRTPVideoHeaderCodecSpecifics())
             .pictureId,
         vp8_specifics.pictureId);
   }
@@ -294,7 +306,7 @@ TEST(RTPVideoHeaderTest, RTPVideoHeaderCodecSpecifics_GetAsMetadata) {
     video_header.video_type_header = vp9_specifics;
     VideoFrameMetadata metadata = video_header.GetAsMetadata();
     EXPECT_EQ(
-        absl::get<RTPVideoHeaderVP9>(metadata.GetRTPVideoHeaderCodecSpecifics())
+        std::get<RTPVideoHeaderVP9>(metadata.GetRTPVideoHeaderCodecSpecifics())
             .max_picture_id,
         vp9_specifics.max_picture_id);
   }
@@ -304,10 +316,10 @@ TEST(RTPVideoHeaderTest, RTPVideoHeaderCodecSpecifics_GetAsMetadata) {
     h264_specifics.nalu_type = 42;
     video_header.video_type_header = h264_specifics;
     VideoFrameMetadata metadata = video_header.GetAsMetadata();
-    EXPECT_EQ(absl::get<RTPVideoHeaderH264>(
-                  metadata.GetRTPVideoHeaderCodecSpecifics())
-                  .nalu_type,
-              h264_specifics.nalu_type);
+    EXPECT_EQ(
+        std::get<RTPVideoHeaderH264>(metadata.GetRTPVideoHeaderCodecSpecifics())
+            .nalu_type,
+        h264_specifics.nalu_type);
   }
 }
 
@@ -321,7 +333,7 @@ TEST(RTPVideoHeaderTest, RTPVideoHeaderCodecSpecifics_FromMetadata) {
     metadata.SetRTPVideoHeaderCodecSpecifics(vp8_specifics);
     RTPVideoHeader video_header = RTPVideoHeader::FromMetadata(metadata);
     EXPECT_EQ(
-        absl::get<RTPVideoHeaderVP8>(video_header.video_type_header).pictureId,
+        std::get<RTPVideoHeaderVP8>(video_header.video_type_header).pictureId,
         42);
   }
   {
@@ -331,7 +343,7 @@ TEST(RTPVideoHeaderTest, RTPVideoHeaderCodecSpecifics_FromMetadata) {
     vp9_specifics.max_picture_id = 42;
     metadata.SetRTPVideoHeaderCodecSpecifics(vp9_specifics);
     RTPVideoHeader video_header = RTPVideoHeader::FromMetadata(metadata);
-    EXPECT_EQ(absl::get<RTPVideoHeaderVP9>(video_header.video_type_header)
+    EXPECT_EQ(std::get<RTPVideoHeaderVP9>(video_header.video_type_header)
                   .max_picture_id,
               42);
   }
@@ -342,7 +354,7 @@ TEST(RTPVideoHeaderTest, RTPVideoHeaderCodecSpecifics_FromMetadata) {
     metadata.SetRTPVideoHeaderCodecSpecifics(h264_specifics);
     RTPVideoHeader video_header = RTPVideoHeader::FromMetadata(metadata);
     EXPECT_EQ(
-        absl::get<RTPVideoHeaderH264>(video_header.video_type_header).nalu_type,
+        std::get<RTPVideoHeaderH264>(video_header.video_type_header).nalu_type,
         42);
   }
 }

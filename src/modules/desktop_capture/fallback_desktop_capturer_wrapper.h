@@ -13,6 +13,7 @@
 
 #include <memory>
 
+#include "absl/strings/string_view.h"
 #include "modules/desktop_capture/desktop_capture_types.h"
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/desktop_frame.h"
@@ -31,9 +32,33 @@ namespace webrtc {
 class FallbackDesktopCapturerWrapper final : public DesktopCapturer,
                                              public DesktopCapturer::Callback {
  public:
+  // How a capture session started, recorded at most once to `start_histogram`:
+  // - `Accepted` / `Rejected`: capturer's SelectSource() result.
+  // - `StartError`: main returned ERROR_PERMANENT before its first frame.
+  // - `Worked`: capturer delivered a frame (Result::SUCCESS).
+  // - `Failed`: secondary returned ERROR_PERMANENT, or returned
+  //   ERROR_TEMPORARY on every CaptureFrame() call before destruction.
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  enum class StartOutcome {
+    kMainWorked = 0,
+    kMainAcceptedSecondaryRejected = 1,
+    kMainRejectedSecondaryRejected = 2,
+    kMainRejectedSecondaryWorked = 3,
+    kMainRejectedSecondaryFailed = 4,
+    kMainStartErrorSecondaryWorked = 5,
+    kMainStartErrorSecondaryFailed = 6,
+    kMaxValue = kMainStartErrorSecondaryFailed,
+  };
+
+  // If `start_histogram` is non-empty, records the first StartOutcome to it
+  // (assuming SelectSource() is called at least once before CaptureFrame()):
+  // in SelectSource() if the secondary capturer rejects the source, or
+  // otherwise after CaptureFrame() starts.
   FallbackDesktopCapturerWrapper(
       std::unique_ptr<DesktopCapturer> main_capturer,
-      std::unique_ptr<DesktopCapturer> secondary_capturer);
+      std::unique_ptr<DesktopCapturer> secondary_capturer,
+      absl::string_view start_histogram = "");
   ~FallbackDesktopCapturerWrapper() override;
 
   // DesktopCapturer interface.
@@ -48,10 +73,14 @@ class FallbackDesktopCapturerWrapper final : public DesktopCapturer,
   bool IsOccluded(const DesktopVector& pos) override;
 
  private:
+  class OutcomeRecorder;
+
   // DesktopCapturer::Callback interface.
   void OnCaptureResult(Result result,
                        std::unique_ptr<DesktopFrame> frame) override;
 
+  // Declared before `secondary_capturer_`, which holds a raw pointer to it.
+  const std::unique_ptr<OutcomeRecorder> outcome_recorder_;
   const std::unique_ptr<DesktopCapturer> main_capturer_;
   const std::unique_ptr<DesktopCapturer> secondary_capturer_;
   std::unique_ptr<SharedMemoryFactory> shared_memory_factory_;

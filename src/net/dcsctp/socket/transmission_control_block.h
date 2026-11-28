@@ -10,19 +10,20 @@
 #ifndef NET_DCSCTP_SOCKET_TRANSMISSION_CONTROL_BLOCK_H_
 #define NET_DCSCTP_SOCKET_TRANSMISSION_CONTROL_BLOCK_H_
 
-#include <cstdint>
+#include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
-#include "absl/functional/bind_front.h"
 #include "absl/strings/string_view.h"
-#include "api/task_queue/task_queue_base.h"
-#include "net/dcsctp/common/sequence_numbers.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/packet/chunk/cookie_echo_chunk.h"
 #include "net/dcsctp/packet/sctp_packet.h"
+#include "net/dcsctp/public/dcsctp_handover_state.h"
 #include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
 #include "net/dcsctp/rx/data_tracker.h"
@@ -80,8 +81,9 @@ class TransmissionControlBlock : public Context {
     return tx_error_counter_.IsExhausted();
   }
   void Send(SctpPacket::Builder& builder) override {
-    packet_sender_.Send(builder,
-                        /*write_checksum=*/!capabilities_.zero_checksum);
+    packet_sender_.Send(
+        builder,
+        /*write_checksum=*/!capabilities_.zero_checksum_enabled());
   }
 
   // Other accessors
@@ -120,11 +122,11 @@ class TransmissionControlBlock : public Context {
 
   // Called when the COOKIE ACK chunk has been received, to allow further
   // packets to be sent.
-  void ClearCookieEchoChunk() { cookie_echo_chunk_ = absl::nullopt; }
+  void ClearCookieEchoChunk() { cookie_echo_chunk_ = std::nullopt; }
 
   bool has_cookie_echo_chunk() const { return cookie_echo_chunk_.has_value(); }
 
-  void MaybeSendFastRetransmit();
+  void MaybeSendFastRetransmit(webrtc::Timestamp now);
 
   // Fills `builder` (which may already be filled with control chunks) with
   // other control and data chunks, and sends packets as much as can be
@@ -144,14 +146,20 @@ class TransmissionControlBlock : public Context {
 
   HandoverReadinessStatus GetHandoverReadiness() const;
 
-  void AddHandoverState(DcSctpSocketHandoverState& state);
-  void RestoreFromState(const DcSctpSocketHandoverState& handover_state);
+  void AddHandoverState(webrtc::Timestamp now,
+                        DcSctpSocketHandoverState& state);
+  void RestoreFromState(webrtc::Timestamp now,
+                        const DcSctpSocketHandoverState& handover_state);
 
  private:
   // Will be called when the retransmission timer (t3-rtx) expires.
   webrtc::TimeDelta OnRtxTimerExpiry();
   // Will be called when the delayed ack timer expires.
   webrtc::TimeDelta OnDelayedAckTimerExpiry();
+  // Returns true if a FORWARD-TSN with `new_cumulative_tsn` should be sent
+  // now, taking rate limiting of duplicate FORWARD-TSN chunks into account. If
+  // it returns true, the caller is expected to send it.
+  bool ShouldSendForwardTsnChunk(TSN new_cumulative_tsn, webrtc::Timestamp now);
 
   const absl::string_view log_prefix_;
   const DcSctpOptions options_;
@@ -171,8 +179,11 @@ class TransmissionControlBlock : public Context {
   const TieTag tie_tag_;
   const std::function<bool()> is_connection_established_;
   PacketSender& packet_sender_;
-  // Rate limiting of FORWARD-TSN. Next can be sent at or after this timestamp.
+  // Rate limiting of duplicate FORWARD-TSN. A FORWARD-TSN with the same
+  // cumulative TSN as `last_sent_forward_tsn_` can be sent at or after this
+  // timestamp.
   webrtc::Timestamp limit_forward_tsn_until_ = webrtc::Timestamp::Zero();
+  TSN last_sent_forward_tsn_ = TSN(*my_initial_tsn_ - 1);
 
   RetransmissionTimeout rto_;
   RetransmissionErrorCounter tx_error_counter_;
@@ -187,7 +198,7 @@ class TransmissionControlBlock : public Context {
   // including a COOKIE ECHO). So if `cookie_echo_chunk_` is present, the
   // SendBufferedChunks will always only just send one packet, with this chunk
   // as the first chunk in the packet.
-  absl::optional<CookieEchoChunk> cookie_echo_chunk_ = absl::nullopt;
+  std::optional<CookieEchoChunk> cookie_echo_chunk_ = std::nullopt;
 };
 }  // namespace dcsctp
 

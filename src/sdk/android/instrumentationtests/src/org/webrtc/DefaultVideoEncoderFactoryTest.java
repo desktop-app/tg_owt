@@ -22,7 +22,7 @@ import org.junit.Test;
 /** Unit tests for {@link DefaultVideoEncoderFactory}. */
 public class DefaultVideoEncoderFactoryTest {
   static class CustomHardwareVideoEncoderFactory implements VideoEncoderFactory {
-    private VideoCodecInfo supportedCodec;
+    private final VideoCodecInfo supportedCodec;
 
     public CustomHardwareVideoEncoderFactory(VideoCodecInfo supportedCodec) {
       this.supportedCodec = supportedCodec;
@@ -60,9 +60,9 @@ public class DefaultVideoEncoderFactoryTest {
   @SmallTest
   @Test
   public void getSupportedCodecs_hwVp8WithDifferentParams_twoVp8() {
-    VideoCodecInfo hwVp8Encoder = new VideoCodecInfo("VP8", new HashMap<String, String>() {
-      { put("param", "value"); }
-    });
+    HashMap<String, String> hwVp8EncoderParams = new HashMap<String, String>(1);
+    hwVp8EncoderParams.put("param", "value");
+    VideoCodecInfo hwVp8Encoder = new VideoCodecInfo("VP8", hwVp8EncoderParams);
     VideoEncoderFactory hwFactory = new CustomHardwareVideoEncoderFactory(hwVp8Encoder);
     DefaultVideoEncoderFactory defFactory = new DefaultVideoEncoderFactory(hwFactory);
     VideoCodecInfo[] supportedCodecs = defFactory.getSupportedCodecs();

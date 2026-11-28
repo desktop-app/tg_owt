@@ -10,32 +10,35 @@
 
 #include "modules/video_coding/codecs/vp8/libvpx_vp8_decoder.h"
 
-#include <stdio.h>
-#include <string.h>
-
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 
-#include "absl/types/optional.h"
 #include "api/environment/environment.h"
 #include "api/field_trials_view.h"
 #include "api/scoped_refptr.h"
-#include "api/transport/field_trial_based_config.h"
+#include "api/units/timestamp.h"
+#include "api/video/color_space.h"
+#include "api/video/encoded_image.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
-#include "api/video/video_rotation.h"
+#include "api/video_codecs/video_decoder.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/numerics/exp_filter.h"
-#include "rtc_base/time_utils.h"
 #include "system_wrappers/include/metrics.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_image.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
-#include "vpx/vp8.h"
-#include "vpx/vp8dx.h"
-#include "vpx/vpx_decoder.h"
 
 namespace webrtc {
 namespace {
@@ -54,13 +57,13 @@ constexpr bool kIsArm = true;
 constexpr bool kIsArm = false;
 #endif
 
-absl::optional<LibvpxVp8Decoder::DeblockParams> DefaultDeblockParams() {
+std::optional<LibvpxVp8Decoder::DeblockParams> DefaultDeblockParams() {
   return LibvpxVp8Decoder::DeblockParams(/*max_level=*/8,
                                          /*degrade_qp=*/60,
                                          /*min_qp=*/30);
 }
 
-absl::optional<LibvpxVp8Decoder::DeblockParams>
+std::optional<LibvpxVp8Decoder::DeblockParams>
 GetPostProcParamsFromFieldTrialGroup(const FieldTrialsView& field_trials) {
   std::string group = field_trials.Lookup(kIsArm ? kVp8PostProcArmFieldTrial
                                                  : kVp8PostProcFieldTrial);
@@ -87,58 +90,54 @@ GetPostProcParamsFromFieldTrialGroup(const FieldTrialsView& field_trials) {
 
 }  // namespace
 
-std::unique_ptr<VideoDecoder> VP8Decoder::Create() {
-  return std::make_unique<LibvpxVp8Decoder>();
-}
-
 std::unique_ptr<VideoDecoder> CreateVp8Decoder(const Environment& env) {
   return std::make_unique<LibvpxVp8Decoder>(env);
 }
 
 class LibvpxVp8Decoder::QpSmoother {
  public:
-  QpSmoother() : last_sample_ms_(rtc::TimeMillis()), smoother_(kAlpha) {}
+  explicit QpSmoother(const Environment& env)
+      : env_(env),
+        last_sample_(env_.clock().CurrentTime()),
+        smoother_(kAlpha) {}
 
   int GetAvg() const {
     float value = smoother_.filtered();
-    return (value == rtc::ExpFilter::kValueUndefined) ? 0
-                                                      : static_cast<int>(value);
+    return (value == ExpFilter::kValueUndefined) ? 0 : static_cast<int>(value);
   }
 
   void Add(float sample) {
-    int64_t now_ms = rtc::TimeMillis();
-    smoother_.Apply(static_cast<float>(now_ms - last_sample_ms_), sample);
-    last_sample_ms_ = now_ms;
+    Timestamp now = env_.clock().CurrentTime();
+    smoother_.Apply((now - last_sample_).ms<float>(), sample);
+    last_sample_ = now;
   }
 
   void Reset() { smoother_.Reset(kAlpha); }
 
  private:
-  const float kAlpha = 0.95f;
-  int64_t last_sample_ms_;
-  rtc::ExpFilter smoother_;
+  static constexpr float kAlpha = 0.95f;
+
+  const Environment env_;
+  Timestamp last_sample_;
+  ExpFilter smoother_;
 };
 
-LibvpxVp8Decoder::LibvpxVp8Decoder()
-    : LibvpxVp8Decoder(FieldTrialBasedConfig()) {}
-
 LibvpxVp8Decoder::LibvpxVp8Decoder(const Environment& env)
-    : LibvpxVp8Decoder(env.field_trials()) {}
-
-LibvpxVp8Decoder::LibvpxVp8Decoder(const FieldTrialsView& field_trials)
-    : use_postproc_(kIsArm ? field_trials.IsEnabled(kVp8PostProcArmFieldTrial)
-                           : true),
+    : use_postproc_(
+          kIsArm ? env.field_trials().IsEnabled(kVp8PostProcArmFieldTrial)
+                 : true),
       buffer_pool_(false, 300 /* max_number_of_buffers*/),
-      decode_complete_callback_(NULL),
+      decode_complete_callback_(nullptr),
       inited_(false),
-      decoder_(NULL),
+      decoder_(nullptr),
       last_frame_width_(0),
       last_frame_height_(0),
       key_frame_required_(true),
-      deblock_params_(use_postproc_
-                          ? GetPostProcParamsFromFieldTrialGroup(field_trials)
-                          : absl::nullopt),
-      qp_smoother_(use_postproc_ ? new QpSmoother() : nullptr) {}
+      deblock_params_(use_postproc_ ? GetPostProcParamsFromFieldTrialGroup(
+                                          env.field_trials())
+                                    : std::nullopt),
+      qp_smoother_(use_postproc_ ? std::make_unique<QpSmoother>(env)
+                                 : nullptr) {}
 
 LibvpxVp8Decoder::~LibvpxVp8Decoder() {
   inited_ = true;  // in order to do the actual release
@@ -149,7 +148,7 @@ bool LibvpxVp8Decoder::Configure(const Settings& settings) {
   if (Release() < 0) {
     return false;
   }
-  if (decoder_ == NULL) {
+  if (decoder_ == nullptr) {
     decoder_ = new vpx_codec_ctx_t;
     memset(decoder_, 0, sizeof(*decoder_));
   }
@@ -170,7 +169,7 @@ bool LibvpxVp8Decoder::Configure(const Settings& settings) {
 
   // Always start with a complete key frame.
   key_frame_required_ = true;
-  if (absl::optional<int> buffer_pool_size = settings.buffer_pool_size()) {
+  if (std::optional<int> buffer_pool_size = settings.buffer_pool_size()) {
     if (!buffer_pool_.Resize(*buffer_pool_size)) {
       return false;
     }
@@ -189,10 +188,10 @@ int LibvpxVp8Decoder::Decode(const EncodedImage& input_image,
   if (!inited_) {
     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
   }
-  if (decode_complete_callback_ == NULL) {
+  if (decode_complete_callback_ == nullptr) {
     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
   }
-  if (input_image.data() == NULL && input_image.size() > 0) {
+  if (input_image.data() == nullptr && input_image.size() > 0) {
     return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
   }
 
@@ -241,21 +240,30 @@ int LibvpxVp8Decoder::Decode(const EncodedImage& input_image,
 
   // Always start with a complete key frame.
   if (key_frame_required_) {
-    if (input_image._frameType != VideoFrameType::kVideoFrameKey)
+    if (!input_image.IsKey()) {
       return WEBRTC_VIDEO_CODEC_ERROR;
+    }
     key_frame_required_ = false;
   }
 
   const uint8_t* buffer = input_image.data();
   if (input_image.size() == 0) {
-    buffer = NULL;  // Triggers full frame concealment.
+    buffer = nullptr;  // Triggers full frame concealment.
   }
-  if (vpx_codec_decode(decoder_, buffer, input_image.size(), 0,
+  if (vpx_codec_decode(decoder_, buffer, input_image.size(), nullptr,
                        kDecodeDeadlineRealtime)) {
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
 
-  vpx_codec_iter_t iter = NULL;
+  int corrupted = 0;
+  if (vpx_codec_control(decoder_, VP8D_GET_FRAME_CORRUPTED, &corrupted) !=
+          VPX_CODEC_OK ||
+      corrupted != 0) {
+    RTC_LOG(LS_WARNING) << "Rejecting corrupted VP8 frame.";
+    return WEBRTC_VIDEO_CODEC_ERROR;
+  }
+
+  vpx_codec_iter_t iter = nullptr;
   vpx_image_t* img = vpx_codec_get_frame(decoder_, &iter);
   int qp;
   vpx_codec_err_t vpx_ret =
@@ -269,12 +277,11 @@ int LibvpxVp8Decoder::Decode(const EncodedImage& input_image,
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
-int LibvpxVp8Decoder::ReturnFrame(
-    const vpx_image_t* img,
-    uint32_t timestamp,
-    int qp,
-    const webrtc::ColorSpace* explicit_color_space) {
-  if (img == NULL) {
+int LibvpxVp8Decoder::ReturnFrame(const vpx_image_t* img,
+                                  uint32_t timestamp,
+                                  int qp,
+                                  const ColorSpace* explicit_color_space) {
+  if (img == nullptr) {
     // Decoder OK and NULL image => No show frame
     return WEBRTC_VIDEO_CODEC_NO_OUTPUT;
   }
@@ -288,12 +295,12 @@ int LibvpxVp8Decoder::ReturnFrame(
   last_frame_width_ = img->d_w;
   last_frame_height_ = img->d_h;
   // Allocate memory for decoded image.
-  rtc::scoped_refptr<VideoFrameBuffer> buffer;
+  scoped_refptr<VideoFrameBuffer> buffer;
 
-  rtc::scoped_refptr<I420Buffer> i420_buffer =
+  scoped_refptr<I420Buffer> i420_buffer =
       buffer_pool_.CreateI420Buffer(img->d_w, img->d_h);
   buffer = i420_buffer;
-  if (i420_buffer.get()) {
+  if (i420_buffer) {
     libyuv::I420Copy(img->planes[VPX_PLANE_Y], img->stride[VPX_PLANE_Y],
                      img->planes[VPX_PLANE_U], img->stride[VPX_PLANE_U],
                      img->planes[VPX_PLANE_V], img->stride[VPX_PLANE_V],
@@ -303,7 +310,7 @@ int LibvpxVp8Decoder::ReturnFrame(
                      img->d_w, img->d_h);
   }
 
-  if (!buffer.get()) {
+  if (!buffer) {
     // Pool has too many pending frames.
     RTC_HISTOGRAM_BOOLEAN("WebRTC.Video.LibvpxVp8Decoder.TooManyPendingFrames",
                           1);
@@ -312,10 +319,10 @@ int LibvpxVp8Decoder::ReturnFrame(
 
   VideoFrame decoded_image = VideoFrame::Builder()
                                  .set_video_frame_buffer(buffer)
-                                 .set_timestamp_rtp(timestamp)
+                                 .set_rtp_timestamp(timestamp)
                                  .set_color_space(explicit_color_space)
                                  .build();
-  decode_complete_callback_->Decoded(decoded_image, absl::nullopt, qp);
+  decode_complete_callback_->Decoded(decoded_image, std::nullopt, qp);
 
   return WEBRTC_VIDEO_CODEC_OK;
 }
@@ -329,14 +336,14 @@ int LibvpxVp8Decoder::RegisterDecodeCompleteCallback(
 int LibvpxVp8Decoder::Release() {
   int ret_val = WEBRTC_VIDEO_CODEC_OK;
 
-  if (decoder_ != NULL) {
+  if (decoder_ != nullptr) {
     if (inited_) {
       if (vpx_codec_destroy(decoder_)) {
         ret_val = WEBRTC_VIDEO_CODEC_MEMORY;
       }
     }
     delete decoder_;
-    decoder_ = NULL;
+    decoder_ = nullptr;
   }
   buffer_pool_.Release();
   inited_ = false;

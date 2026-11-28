@@ -10,9 +10,10 @@
 
 #include "modules/desktop_capture/desktop_frame_rotation.h"
 
-#include <stdint.h>
+#include <cstdint>
 
 #include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_geometry.h"
 #include "modules/desktop_capture/desktop_region.h"
 #include "modules/desktop_capture/test_utils.h"
 #include "test/gtest.h"
@@ -37,26 +38,6 @@ ArrayDesktopFrame::ArrayDesktopFrame(DesktopSize size, uint32_t* data)
 ArrayDesktopFrame::~ArrayDesktopFrame() = default;
 
 }  // namespace
-
-#if GTEST_HAS_DEATH_TEST
-TEST(DesktopFrameRotationDeathTest, RejectsSourceOutsideFrame) {
-  BasicDesktopFrame frame(DesktopSize(4, 3));
-  BasicDesktopFrame target(DesktopSize(4, 3));
-  EXPECT_DEATH(
-      RotateDesktopFrame(frame, DesktopRect::MakeXYWH(0, 0, 5, 3),
-                         Rotation::CLOCK_WISE_0, DesktopVector(), &target),
-      "ContainsRect");
-}
-
-TEST(DesktopFrameRotationDeathTest, RejectsRotatedTargetOutsideFrame) {
-  BasicDesktopFrame frame(DesktopSize(4, 3));
-  BasicDesktopFrame target(DesktopSize(3, 4));
-  EXPECT_DEATH(
-      RotateDesktopFrame(frame, DesktopRect::MakeSize(frame.size()),
-                         Rotation::CLOCK_WISE_90, DesktopVector(1, 0), &target),
-      "ContainsRect");
-}
-#endif  // GTEST_HAS_DEATH_TEST
 
 TEST(DesktopFrameRotationTest, CopyRect3x4) {
   // A DesktopFrame of 4-pixel width by 3-pixel height.

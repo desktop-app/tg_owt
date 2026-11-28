@@ -10,10 +10,24 @@
 
 #include "modules/audio_processing/aec3/aec_state.h"
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <tuple>
+#include <vector>
+
+#include "api/audio/echo_canceller3_config.h"
+#include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/aec3/aec3_fft.h"
+#include "modules/audio_processing/aec3/block.h"
+#include "modules/audio_processing/aec3/delay_estimate.h"
+#include "modules/audio_processing/aec3/echo_path_variability.h"
 #include "modules/audio_processing/aec3/render_delay_buffer.h"
+#include "modules/audio_processing/aec3/subtractor_output.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
-#include "rtc_base/strings/string_builder.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -27,8 +41,8 @@ void RunNormalUsageTest(size_t num_render_channels,
   constexpr size_t kNumBands = NumBandsForRate(kSampleRateHz);
   ApmDataDumper data_dumper(42);
   EchoCanceller3Config config;
-  AecState state(config, num_capture_channels);
-  absl::optional<DelayEstimate> delay_estimate =
+  AecState state(CreateTestEnvironment(), config, num_capture_channels);
+  std::optional<DelayEstimate> delay_estimate =
       DelayEstimate(DelayEstimate::Quality::kRefined, 10);
   std::unique_ptr<RenderDelayBuffer> render_delay_buffer(
       RenderDelayBuffer::Create(config, kSampleRateHz, num_render_channels));
@@ -244,10 +258,10 @@ TEST(AecState, ConvergedFilterDelay) {
   constexpr int kFilterLengthBlocks = 10;
   constexpr size_t kNumCaptureChannels = 1;
   EchoCanceller3Config config;
-  AecState state(config, kNumCaptureChannels);
+  AecState state(CreateTestEnvironment(), config, kNumCaptureChannels);
   std::unique_ptr<RenderDelayBuffer> render_delay_buffer(
       RenderDelayBuffer::Create(config, 48000, 1));
-  absl::optional<DelayEstimate> delay_estimate;
+  std::optional<DelayEstimate> delay_estimate;
   std::vector<std::array<float, kFftLengthBy2Plus1>> E2_refined(
       kNumCaptureChannels);
   std::vector<std::array<float, kFftLengthBy2Plus1>> Y2(kNumCaptureChannels);

@@ -10,29 +10,32 @@
 
 #include "modules/audio_processing/aec3/adaptive_fir_filter.h"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <span>
+#include <vector>
+
+#include "modules/audio_processing/aec3/aec3_common.h"
+#include "modules/audio_processing/aec3/fft_data.h"
+#include "modules/audio_processing/aec3/render_buffer.h"
+#include "modules/audio_processing/logging/apm_data_dumper.h"
+#include "rtc_base/checks.h"
+
 // Defines WEBRTC_ARCH_X86_FAMILY, used below.
 #include "rtc_base/system/arch.h"
-
 #if defined(WEBRTC_HAS_NEON)
 #include <arm_neon.h>
 #endif
 #if defined(WEBRTC_ARCH_X86_FAMILY)
 #include <emmintrin.h>
 #endif
-#include <math.h>
-
-#include <algorithm>
-#include <functional>
-
-#include "modules/audio_processing/aec3/fft_data.h"
-#include "rtc_base/checks.h"
 
 namespace webrtc {
 
-namespace aec3 {
-
 // Computes and stores the frequency response of the filter.
-void ComputeFrequencyResponse(
+void ComputeFrequencyResponse_C(
     size_t num_partitions,
     const std::vector<std::vector<FftData>>& H,
     std::vector<std::array<float, kFftLengthBy2Plus1>>* H2) {
@@ -41,7 +44,8 @@ void ComputeFrequencyResponse(
   }
 
   const size_t num_render_channels = H[0].size();
-  RTC_DCHECK_EQ(H.size(), H2->capacity());
+  RTC_DCHECK_GE(H.size(), num_partitions);
+  RTC_DCHECK_GE(H2->size(), num_partitions);
   for (size_t p = 0; p < num_partitions; ++p) {
     RTC_DCHECK_EQ(kFftLengthBy2Plus1, (*H2)[p].size());
     for (size_t ch = 0; ch < num_render_channels; ++ch) {
@@ -65,7 +69,8 @@ void ComputeFrequencyResponse_Neon(
   }
 
   const size_t num_render_channels = H[0].size();
-  RTC_DCHECK_EQ(H.size(), H2->capacity());
+  RTC_DCHECK_GE(H.size(), num_partitions);
+  RTC_DCHECK_GE(H2->size(), num_partitions);
   for (size_t p = 0; p < num_partitions; ++p) {
     RTC_DCHECK_EQ(kFftLengthBy2Plus1, (*H2)[p].size());
     auto& H2_p = (*H2)[p];
@@ -99,7 +104,8 @@ void ComputeFrequencyResponse_Sse2(
   }
 
   const size_t num_render_channels = H[0].size();
-  RTC_DCHECK_EQ(H.size(), H2->capacity());
+  RTC_DCHECK_GE(H.size(), num_partitions);
+  RTC_DCHECK_GE(H2->size(), num_partitions);
   // constexpr __mmmask8 kMaxMask = static_cast<__mmmask8>(256u);
   for (size_t p = 0; p < num_partitions; ++p) {
     RTC_DCHECK_EQ(kFftLengthBy2Plus1, (*H2)[p].size());
@@ -129,7 +135,7 @@ void AdaptPartitions(const RenderBuffer& render_buffer,
                      const FftData& G,
                      size_t num_partitions,
                      std::vector<std::vector<FftData>>* H) {
-  rtc::ArrayView<const std::vector<FftData>> render_buffer_data =
+  std::span<const std::vector<FftData>> render_buffer_data =
       render_buffer.GetFftBuffer();
   size_t index = render_buffer.Position();
   const size_t num_render_channels = render_buffer_data[index].size();
@@ -152,7 +158,7 @@ void AdaptPartitions_Neon(const RenderBuffer& render_buffer,
                           const FftData& G,
                           size_t num_partitions,
                           std::vector<std::vector<FftData>>* H) {
-  rtc::ArrayView<const std::vector<FftData>> render_buffer_data =
+  std::span<const std::vector<FftData>> render_buffer_data =
       render_buffer.GetFftBuffer();
   const size_t num_render_channels = render_buffer_data[0].size();
   const size_t lim1 = std::min(
@@ -218,7 +224,7 @@ void AdaptPartitions_Sse2(const RenderBuffer& render_buffer,
                           const FftData& G,
                           size_t num_partitions,
                           std::vector<std::vector<FftData>>* H) {
-  rtc::ArrayView<const std::vector<FftData>> render_buffer_data =
+  std::span<const std::vector<FftData>> render_buffer_data =
       render_buffer.GetFftBuffer();
   const size_t num_render_channels = render_buffer_data[0].size();
   const size_t lim1 = std::min(
@@ -289,7 +295,7 @@ void ApplyFilter(const RenderBuffer& render_buffer,
   S->re.fill(0.f);
   S->im.fill(0.f);
 
-  rtc::ArrayView<const std::vector<FftData>> render_buffer_data =
+  std::span<const std::vector<FftData>> render_buffer_data =
       render_buffer.GetFftBuffer();
   size_t index = render_buffer.Position();
   const size_t num_render_channels = render_buffer_data[index].size();
@@ -314,12 +320,12 @@ void ApplyFilter_Neon(const RenderBuffer& render_buffer,
                       const std::vector<std::vector<FftData>>& H,
                       FftData* S) {
   // const RenderBuffer& render_buffer,
-  //                     rtc::ArrayView<const FftData> H,
+  //                     std::span<const FftData> H,
   //                     FftData* S) {
   RTC_DCHECK_GE(H.size(), H.size() - 1);
   S->Clear();
 
-  rtc::ArrayView<const std::vector<FftData>> render_buffer_data =
+  std::span<const std::vector<FftData>> render_buffer_data =
       render_buffer.GetFftBuffer();
   const size_t num_render_channels = render_buffer_data[0].size();
   const size_t lim1 = std::min(
@@ -384,13 +390,13 @@ void ApplyFilter_Sse2(const RenderBuffer& render_buffer,
                       const std::vector<std::vector<FftData>>& H,
                       FftData* S) {
   // const RenderBuffer& render_buffer,
-  //                     rtc::ArrayView<const FftData> H,
+  //                     std::span<const FftData> H,
   //                     FftData* S) {
   RTC_DCHECK_GE(H.size(), H.size() - 1);
   S->re.fill(0.f);
   S->im.fill(0.f);
 
-  rtc::ArrayView<const std::vector<FftData>> render_buffer_data =
+  std::span<const std::vector<FftData>> render_buffer_data =
       render_buffer.GetFftBuffer();
   const size_t num_render_channels = render_buffer_data[0].size();
   const size_t lim1 = std::min(
@@ -450,8 +456,6 @@ void ApplyFilter_Sse2(const RenderBuffer& render_buffer,
 }
 #endif
 
-}  // namespace aec3
-
 namespace {
 
 // Ensures that the newly added filter partitions after a size increase are set
@@ -508,7 +512,7 @@ void AdaptiveFirFilter::HandleEchoPathChange() {
 }
 
 void AdaptiveFirFilter::SetSizePartitions(size_t size, bool immediate_effect) {
-  RTC_DCHECK_EQ(max_size_partitions_, H_.capacity());
+  RTC_DCHECK_EQ(max_size_partitions_, H_.size());
   RTC_DCHECK_LE(size, max_size_partitions_);
 
   target_size_partitions_ = std::min(max_size_partitions_, size);
@@ -558,19 +562,19 @@ void AdaptiveFirFilter::Filter(const RenderBuffer& render_buffer,
   switch (optimization_) {
 #if defined(WEBRTC_ARCH_X86_FAMILY)
     case Aec3Optimization::kSse2:
-      aec3::ApplyFilter_Sse2(render_buffer, current_size_partitions_, H_, S);
+      ApplyFilter_Sse2(render_buffer, current_size_partitions_, H_, S);
       break;
     case Aec3Optimization::kAvx2:
-      aec3::ApplyFilter_Avx2(render_buffer, current_size_partitions_, H_, S);
+      ApplyFilter_Avx2(render_buffer, current_size_partitions_, H_, S);
       break;
 #endif
 #if defined(WEBRTC_HAS_NEON)
     case Aec3Optimization::kNeon:
-      aec3::ApplyFilter_Neon(render_buffer, current_size_partitions_, H_, S);
+      ApplyFilter_Neon(render_buffer, current_size_partitions_, H_, S);
       break;
 #endif
     default:
-      aec3::ApplyFilter(render_buffer, current_size_partitions_, H_, S);
+      ApplyFilter(render_buffer, current_size_partitions_, H_, S);
   }
 }
 
@@ -595,26 +599,26 @@ void AdaptiveFirFilter::Adapt(const RenderBuffer& render_buffer,
 
 void AdaptiveFirFilter::ComputeFrequencyResponse(
     std::vector<std::array<float, kFftLengthBy2Plus1>>* H2) const {
-  RTC_DCHECK_GE(max_size_partitions_, H2->capacity());
+  RTC_DCHECK_GE(H2->capacity(), max_size_partitions_);
 
   H2->resize(current_size_partitions_);
 
   switch (optimization_) {
 #if defined(WEBRTC_ARCH_X86_FAMILY)
     case Aec3Optimization::kSse2:
-      aec3::ComputeFrequencyResponse_Sse2(current_size_partitions_, H_, H2);
+      ComputeFrequencyResponse_Sse2(current_size_partitions_, H_, H2);
       break;
     case Aec3Optimization::kAvx2:
-      aec3::ComputeFrequencyResponse_Avx2(current_size_partitions_, H_, H2);
+      ComputeFrequencyResponse_Avx2(current_size_partitions_, H_, H2);
       break;
 #endif
 #if defined(WEBRTC_HAS_NEON)
     case Aec3Optimization::kNeon:
-      aec3::ComputeFrequencyResponse_Neon(current_size_partitions_, H_, H2);
+      ComputeFrequencyResponse_Neon(current_size_partitions_, H_, H2);
       break;
 #endif
     default:
-      aec3::ComputeFrequencyResponse(current_size_partitions_, H_, H2);
+      ComputeFrequencyResponse_C(current_size_partitions_, H_, H2);
   }
 }
 
@@ -627,22 +631,19 @@ void AdaptiveFirFilter::AdaptAndUpdateSize(const RenderBuffer& render_buffer,
   switch (optimization_) {
 #if defined(WEBRTC_ARCH_X86_FAMILY)
     case Aec3Optimization::kSse2:
-      aec3::AdaptPartitions_Sse2(render_buffer, G, current_size_partitions_,
-                                 &H_);
+      AdaptPartitions_Sse2(render_buffer, G, current_size_partitions_, &H_);
       break;
     case Aec3Optimization::kAvx2:
-      aec3::AdaptPartitions_Avx2(render_buffer, G, current_size_partitions_,
-                                 &H_);
+      AdaptPartitions_Avx2(render_buffer, G, current_size_partitions_, &H_);
       break;
 #endif
 #if defined(WEBRTC_HAS_NEON)
     case Aec3Optimization::kNeon:
-      aec3::AdaptPartitions_Neon(render_buffer, G, current_size_partitions_,
-                                 &H_);
+      AdaptPartitions_Neon(render_buffer, G, current_size_partitions_, &H_);
       break;
 #endif
     default:
-      aec3::AdaptPartitions(render_buffer, G, current_size_partitions_, &H_);
+      AdaptPartitions(render_buffer, G, current_size_partitions_, &H_);
   }
 }
 
@@ -651,8 +652,8 @@ void AdaptiveFirFilter::AdaptAndUpdateSize(const RenderBuffer& render_buffer,
 // the corresponding values in an externally stored impulse response estimate.
 void AdaptiveFirFilter::ConstrainAndUpdateImpulseResponse(
     std::vector<float>* impulse_response) {
-  RTC_DCHECK_EQ(GetTimeDomainLength(max_size_partitions_),
-                impulse_response->capacity());
+  RTC_DCHECK_GE(impulse_response->capacity(),
+                GetTimeDomainLength(max_size_partitions_));
   impulse_response->resize(GetTimeDomainLength(current_size_partitions_));
   std::array<float, kFftLength> h;
   impulse_response->resize(GetTimeDomainLength(current_size_partitions_));

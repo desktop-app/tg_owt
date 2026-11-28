@@ -9,12 +9,15 @@
  */
 #include "net/dcsctp/packet/parameter/zero_checksum_acceptable_chunk_parameter.h"
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "net/dcsctp/packet/bounded_byte_reader.h"
+#include "net/dcsctp/packet/bounded_byte_writer.h"
+#include "net/dcsctp/public/types.h"
 #include "rtc_base/strings/string_builder.h"
 
 namespace dcsctp {
@@ -27,19 +30,17 @@ namespace dcsctp {
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |           Error Detection Method Identifier (EDMID)           |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int ZeroChecksumAcceptableChunkParameter::kType;
 
-absl::optional<ZeroChecksumAcceptableChunkParameter>
-ZeroChecksumAcceptableChunkParameter::Parse(
-    rtc::ArrayView<const uint8_t> data) {
-  absl::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
+std::optional<ZeroChecksumAcceptableChunkParameter>
+ZeroChecksumAcceptableChunkParameter::Parse(std::span<const uint8_t> data) {
+  std::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
   if (!reader.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   ZeroChecksumAlternateErrorDetectionMethod method(reader->Load32<4>());
   if (method == ZeroChecksumAlternateErrorDetectionMethod::None()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return ZeroChecksumAcceptableChunkParameter(method);
 }
@@ -51,7 +52,7 @@ void ZeroChecksumAcceptableChunkParameter::SerializeTo(
 }
 
 std::string ZeroChecksumAcceptableChunkParameter::ToString() const {
-  rtc::StringBuilder sb;
+  webrtc::StringBuilder sb;
   sb << "Zero Checksum Acceptable (" << *error_detection_method_ << ")";
   return sb.Release();
 }

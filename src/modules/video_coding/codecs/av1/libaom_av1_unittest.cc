@@ -8,19 +8,33 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <ostream>
+#include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
+#include "api/environment/environment.h"
+#include "api/make_ref_counted.h"
+#include "api/scoped_refptr.h"
+#include "api/test/mock_video_encoder.h"
+#include "api/transport/rtp/dependency_descriptor.h"
+#include "api/units/data_rate.h"
 #include "api/units/data_size.h"
 #include "api/units/time_delta.h"
+#include "api/video/encoded_image.h"
+#include "api/video/i420_buffer.h"
+#include "api/video/video_bitrate_allocation.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_decoder.h"
 #include "api/video_codecs/video_encoder.h"
 #include "modules/video_coding/codecs/av1/dav1d_decoder.h"
 #include "modules/video_coding/codecs/av1/libaom_av1_encoder.h"
@@ -30,7 +44,9 @@
 #include "modules/video_coding/svc/create_scalability_structure.h"
 #include "modules/video_coding/svc/scalability_mode_util.h"
 #include "modules/video_coding/svc/scalable_video_controller.h"
-#include "modules/video_coding/svc/scalable_video_controller_no_layering.h"
+#include "modules/video_coding/svc/svc_rate_allocator.h"
+#include "rtc_base/checks.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -67,15 +83,14 @@ VideoCodec DefaultCodecSettings() {
   return codec_settings;
 }
 VideoEncoder::Settings DefaultEncoderSettings() {
-  return VideoEncoder::Settings(
-      VideoEncoder::Capabilities(/*loss_notification=*/false),
-      /*number_of_cores=*/1, /*max_payload_size=*/1200);
+  return VideoEncoder::Settings(/*number_of_cores=*/1,
+                                /*max_payload_size=*/1200);
 }
 
 class TestAv1Decoder {
  public:
-  explicit TestAv1Decoder(int decoder_id)
-      : decoder_id_(decoder_id), decoder_(CreateDav1dDecoder()) {
+  explicit TestAv1Decoder(const Environment& env, int decoder_id)
+      : decoder_id_(decoder_id), decoder_(CreateDav1dDecoder(env)) {
     if (decoder_ == nullptr) {
       ADD_FAILURE() << "Failed to create a decoder#" << decoder_id_;
       return;
@@ -119,8 +134,8 @@ class TestAv1Decoder {
       return 0;
     }
     void Decoded(VideoFrame& /*decoded_image*/,
-                 absl::optional<int32_t> /*decode_time_ms*/,
-                 absl::optional<uint8_t> /*qp*/) override {
+                 std::optional<int32_t> /*decode_time_ms*/,
+                 std::optional<uint8_t> /*qp*/) override {
       ++num_called_;
     }
 
@@ -134,8 +149,9 @@ class TestAv1Decoder {
 };
 
 TEST(LibaomAv1Test, EncodeDecode) {
-  TestAv1Decoder decoder(0);
-  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder();
+  const Environment env = CreateTestEnvironment();
+  TestAv1Decoder decoder(env, /*decoder_id=*/0);
+  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder(env);
   VideoCodec codec_settings = DefaultCodecSettings();
   ASSERT_EQ(encoder->InitEncode(&codec_settings, DefaultEncoderSettings()),
             WEBRTC_VIDEO_CODEC_OK);
@@ -160,6 +176,139 @@ TEST(LibaomAv1Test, EncodeDecode) {
   EXPECT_EQ(decoder.num_output_frames(), decoder.decoded_frame_ids().size());
 }
 
+TEST(LibaomAv1Test, EncodeDecodeWithSpeedController) {
+  const Environment env = CreateTestEnvironment(
+      {.field_trials =
+           "WebRTC-EncoderSpeed/"
+           "dynamic_speed:true,av1_camera:high,av1_screenshare:low/"});
+
+  TestAv1Decoder decoder(env, /*decoder_id=*/0);
+  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder(env);
+  VideoCodec codec_settings = DefaultCodecSettings();
+  ASSERT_EQ(encoder->InitEncode(&codec_settings, DefaultEncoderSettings()),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  VideoBitrateAllocation allocation;
+  allocation.SetBitrate(0, 0, 300000);
+  encoder->SetRates(VideoEncoder::RateControlParameters(
+      allocation, codec_settings.maxFramerate));
+
+  std::vector<EncodedVideoFrameProducer::EncodedFrame> encoded_frames =
+      EncodedVideoFrameProducer(*encoder).SetNumInputFrames(4).Encode();
+  for (size_t frame_id = 0; frame_id < encoded_frames.size(); ++frame_id) {
+    decoder.Decode(static_cast<int64_t>(frame_id),
+                   encoded_frames[frame_id].encoded_image);
+  }
+
+  // Check encoder produced some frames for decoder to decode.
+  ASSERT_THAT(encoded_frames, Not(IsEmpty()));
+  // Check decoder found all of them valid.
+  EXPECT_THAT(decoder.decoded_frame_ids(), SizeIs(encoded_frames.size()));
+  // Check each of them produced an output frame.
+  EXPECT_EQ(decoder.num_output_frames(), decoder.decoded_frame_ids().size());
+}
+
+TEST(LibaomAv1Test, InitReleaseRepeatedly) {
+  const Environment env = CreateTestEnvironment(
+      {.field_trials =
+           "WebRTC-EncoderSpeed/"
+           "dynamic_speed:true,av1_camera:high,av1_screenshare:low/"});
+
+  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder(env);
+  VideoCodec codec_settings = DefaultCodecSettings();
+  codec_settings.SetScalabilityMode(ScalabilityMode::kL3T3_KEY);
+
+  SvcRateAllocator rate_allocator(codec_settings, env.field_trials());
+
+  VideoBitrateAllocation allocation =
+      rate_allocator.GetAllocation(3'000'000, 30);
+
+  for (int i = 0; i < 10; ++i) {
+    ASSERT_EQ(encoder->InitEncode(&codec_settings, DefaultEncoderSettings()),
+              WEBRTC_VIDEO_CODEC_OK);
+    encoder->SetRates(VideoEncoder::RateControlParameters(
+        allocation, codec_settings.maxFramerate));
+    EXPECT_THAT(
+        EncodedVideoFrameProducer(*encoder).SetNumInputFrames(1).Encode(),
+        Not(IsEmpty()));
+    EXPECT_EQ(encoder->Release(), WEBRTC_VIDEO_CODEC_OK);
+  }
+}
+
+TEST(LibaomAv1Test, RejectsNativeFramesWithUnequalChromaStrides) {
+  const Environment env = CreateTestEnvironment();
+  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder(env);
+  VideoCodec codec_settings = DefaultCodecSettings();
+  ASSERT_EQ(encoder->InitEncode(&codec_settings, DefaultEncoderSettings()),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  VideoBitrateAllocation allocation;
+  allocation.SetBitrate(0, 0, 300000);
+  encoder->SetRates(VideoEncoder::RateControlParameters(
+      allocation, codec_settings.maxFramerate));
+
+  MockEncodedImageCallback callback;
+  encoder->RegisterEncodeCompleteCallback(&callback);
+
+  class FakeNativeBuffer : public VideoFrameBuffer {
+   public:
+    FakeNativeBuffer(int width, int height) : width_(width), height_(height) {}
+    Type type() const override { return Type::kNative; }
+    int width() const override { return width_; }
+    int height() const override { return height_; }
+    scoped_refptr<I420BufferInterface> ToI420() override {
+      return I420Buffer::Create(width_, height_, width_, (width_ + 1) / 2,
+                                (width_ + 1) / 2 + 1);
+    }
+
+   private:
+    int width_;
+    int height_;
+  };
+
+  auto buffer = make_ref_counted<FakeNativeBuffer>(codec_settings.width,
+                                                   codec_settings.height);
+
+  VideoFrame frame = VideoFrame::Builder()
+                         .set_video_frame_buffer(buffer)
+                         .set_rtp_timestamp(0)
+                         .build();
+
+  EXPECT_EQ(WEBRTC_VIDEO_CODEC_ENCODER_FAILURE,
+            encoder->Encode(frame, nullptr));
+}
+
+TEST(LibaomAv1Test, RejectsI420FramesWithUnequalChromaStrides) {
+  const Environment env = CreateTestEnvironment();
+  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder(env);
+  VideoCodec codec_settings = DefaultCodecSettings();
+  ASSERT_EQ(encoder->InitEncode(&codec_settings, DefaultEncoderSettings()),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  VideoBitrateAllocation allocation;
+  allocation.SetBitrate(0, 0, 300000);
+  encoder->SetRates(VideoEncoder::RateControlParameters(
+      allocation, codec_settings.maxFramerate));
+
+  MockEncodedImageCallback callback;
+  encoder->RegisterEncodeCompleteCallback(&callback);
+
+  auto buffer = I420Buffer::Create(
+      /*width=*/codec_settings.width,
+      /*height=*/codec_settings.height,
+      /*stride_y=*/codec_settings.width,
+      /*stride_u=*/(codec_settings.width + 1) / 2,
+      /*stride_v=*/(codec_settings.width + 1) / 2 + 1);
+
+  VideoFrame frame = VideoFrame::Builder()
+                         .set_video_frame_buffer(buffer)
+                         .set_rtp_timestamp(0)
+                         .build();
+
+  EXPECT_EQ(WEBRTC_VIDEO_CODEC_ENCODER_FAILURE,
+            encoder->Encode(frame, nullptr));
+}
+
 struct LayerId {
   friend bool operator==(const LayerId& lhs, const LayerId& rhs) {
     return std::tie(lhs.spatial_id, lhs.temporal_id) ==
@@ -179,7 +328,7 @@ struct LayerId {
 
 struct SvcTestParam {
   ScalabilityMode GetScalabilityMode() const {
-    absl::optional<ScalabilityMode> scalability_mode =
+    std::optional<ScalabilityMode> scalability_mode =
         ScalabilityModeFromString(name);
     RTC_CHECK(scalability_mode.has_value());
     return *scalability_mode;
@@ -216,7 +365,8 @@ TEST_P(LibaomAv1SvcTest, EncodeAndDecodeAllDecodeTargets) {
   size_t num_decode_targets =
       svc_controller->DependencyStructure().num_decode_targets;
 
-  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder();
+  const Environment env = CreateTestEnvironment();
+  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder(env);
   VideoCodec codec_settings = DefaultCodecSettings();
   codec_settings.SetScalabilityMode(GetParam().GetScalabilityMode());
   ASSERT_EQ(encoder->InitEncode(&codec_settings, DefaultEncoderSettings()),
@@ -238,7 +388,7 @@ TEST_P(LibaomAv1SvcTest, EncodeAndDecodeAllDecodeTargets) {
       })));
 
   for (size_t dt = 0; dt < num_decode_targets; ++dt) {
-    TestAv1Decoder decoder(dt);
+    TestAv1Decoder decoder(env, dt);
     std::vector<int64_t> requested_ids;
     for (int64_t frame_id = 0;
          frame_id < static_cast<int64_t>(encoded_frames.size()); ++frame_id) {
@@ -287,7 +437,8 @@ TEST_P(LibaomAv1SvcTest, SetRatesMatchMeasuredBitrate) {
                           kv.second.bps());
   }
 
-  std::unique_ptr<VideoEncoder> encoder = CreateLibaomAv1Encoder();
+  std::unique_ptr<VideoEncoder> encoder =
+      CreateLibaomAv1Encoder(CreateTestEnvironment());
   ASSERT_TRUE(encoder);
   VideoCodec codec_settings = DefaultCodecSettings();
   codec_settings.SetScalabilityMode(param.GetScalabilityMode());
@@ -311,7 +462,8 @@ TEST_P(LibaomAv1SvcTest, SetRatesMatchMeasuredBitrate) {
   for (const auto& frame : encoded_frames) {
     ASSERT_TRUE(frame.codec_specific_info.generic_frame_info);
     const auto& layer = *frame.codec_specific_info.generic_frame_info;
-    LayerId layer_id = {layer.spatial_id, layer.temporal_id};
+    LayerId layer_id = {.spatial_id = layer.spatial_id,
+                        .temporal_id = layer.temporal_id};
     // This is almost same as
     // layer_size[layer_id] += DataSize::Bytes(frame.encoded_image.size());
     // but avoids calling deleted default constructor for DataSize.

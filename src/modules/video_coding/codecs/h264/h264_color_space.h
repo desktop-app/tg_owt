@@ -16,11 +16,15 @@
 // #ifdef unless needed and tested.
 #ifdef WEBRTC_USE_H264
 
-#include "api/video/color_space.h"
+#if defined(WEBRTC_WIN) && !defined(__clang__)
+#error "See: bugs.webrtc.org/9213#c13."
+#endif
 
 extern "C" {
-#include "libavcodec/avcodec.h"
+#include <libavcodec/avcodec.h>
 }  // extern "C"
+
+#include "api/video/color_space.h"
 
 namespace webrtc {
 

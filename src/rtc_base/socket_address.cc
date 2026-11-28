@@ -10,35 +10,26 @@
 
 #include "rtc_base/socket_address.h"
 
-#include "absl/strings/string_view.h"
-#include "rtc_base/numerics/safe_conversions.h"
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <string>
 
 #if defined(WEBRTC_POSIX)
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #if defined(OPENBSD)
 #include <netinet/in_systm.h>
 #endif
-#if !defined(__native_client__)
-#include <netinet/ip.h>
-#endif
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
 #endif
 
+#include "absl/strings/string_view.h"
 #include "rtc_base/byte_order.h"
-#include "rtc_base/checks.h"
-#include "rtc_base/logging.h"
+#include "rtc_base/ip_address.h"
 #include "rtc_base/net_helpers.h"
+#include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/strings/string_builder.h"
 
-#if defined(WEBRTC_WIN)
-#include "rtc_base/win32.h"
-#endif
-
-namespace rtc {
+namespace webrtc {
 
 SocketAddress::SocketAddress() {
   Clear();
@@ -122,7 +113,7 @@ void SocketAddress::SetResolvedIP(const IPAddress& ip) {
 }
 
 void SocketAddress::SetPort(int port) {
-  port_ = rtc::dchecked_cast<uint16_t>(port);
+  port_ = dchecked_cast<uint16_t>(port);
 }
 
 uint32_t SocketAddress::ip() const {
@@ -166,25 +157,25 @@ std::string SocketAddress::PortAsString() const {
 }
 
 std::string SocketAddress::ToString() const {
-  char buf[1024];
-  rtc::SimpleStringBuilder sb(buf);
+  StringBuilder sb;
   sb << HostAsURIString() << ":" << port();
-  return sb.str();
+  return sb.Release();
 }
 
 std::string SocketAddress::ToSensitiveString() const {
-  char buf[1024];
-  rtc::SimpleStringBuilder sb(buf);
-  sb << HostAsSensitiveURIString() << ":" << port();
-  return sb.str();
+  StringBuilder sb;
+  // Room for a hostname, ":" and the port, so that the string is allocated at
+  // most once, also when it holds a long hostname.
+  sb.Reserve(hostname_.size() + 6);
+  sb << Sensitive(*this);
+  return sb.Release();
 }
 
 std::string SocketAddress::ToSensitiveNameAndAddressString() const {
   if (IsUnresolvedIP() || literal_ || hostname_.empty()) {
     return ToSensitiveString();
   }
-  char buf[1024];
-  rtc::SimpleStringBuilder sb(buf);
+  StringBuilder sb;
   sb << HostAsSensitiveURIString() << ":" << port();
   sb << " (";
   if (ip_.family() == AF_INET6) {
@@ -194,7 +185,7 @@ std::string SocketAddress::ToSensitiveNameAndAddressString() const {
   }
   sb << ":" << port() << ")";
 
-  return sb.str();
+  return sb.Release();
 }
 
 bool SocketAddress::FromString(absl::string_view str) {
@@ -235,6 +226,22 @@ bool SocketAddress::IsPrivateIP() const {
 
 bool SocketAddress::IsUnresolvedIP() const {
   return IPIsUnspec(ip_) && !literal_ && !hostname_.empty();
+}
+
+IPAddressType SocketAddress::GetIPAddressType() const {
+  if (IsUnresolvedIP()) {
+    return IPAddressType::kUnknown;
+  }
+  if (IsAnyIP()) {
+    return IPAddressType::kAny;
+  }
+  if (IsLoopbackIP()) {
+    return IPAddressType::kLoopback;
+  }
+  if (IsPrivateIP()) {
+    return IPAddressType::kPrivate;
+  }
+  return IPAddressType::kPublic;
 }
 
 bool SocketAddress::operator==(const SocketAddress& addr) const {
@@ -351,4 +358,4 @@ SocketAddress EmptySocketAddressWithFamily(int family) {
   return SocketAddress();
 }
 
-}  // namespace rtc
+}  // namespace webrtc

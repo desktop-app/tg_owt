@@ -9,16 +9,14 @@
  */
 #include "net/dcsctp/packet/error_cause/restart_of_an_association_with_new_address_cause.h"
 
-#include <stdint.h>
-
-#include <type_traits>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "net/dcsctp/packet/bounded_byte_reader.h"
 #include "net/dcsctp/packet/bounded_byte_writer.h"
-#include "net/dcsctp/packet/tlv_trait.h"
 
 namespace dcsctp {
 
@@ -32,14 +30,13 @@ namespace dcsctp {
 //  /                       New Address TLVs                        /
 //  \                                                               \
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int RestartOfAnAssociationWithNewAddressesCause::kType;
 
-absl::optional<RestartOfAnAssociationWithNewAddressesCause>
+std::optional<RestartOfAnAssociationWithNewAddressesCause>
 RestartOfAnAssociationWithNewAddressesCause::Parse(
-    rtc::ArrayView<const uint8_t> data) {
-  absl::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
+    std::span<const uint8_t> data) {
+  std::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
   if (!reader.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return RestartOfAnAssociationWithNewAddressesCause(reader->variable_data());
 }

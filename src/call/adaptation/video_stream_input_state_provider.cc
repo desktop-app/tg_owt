@@ -10,7 +10,12 @@
 
 #include "call/adaptation/video_stream_input_state_provider.h"
 
+#include "call/adaptation/encoder_settings.h"
 #include "call/adaptation/video_stream_adapter.h"
+#include "call/adaptation/video_stream_input_state.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "video/video_stream_encoder_observer.h"
 
 namespace webrtc {
 
@@ -32,7 +37,7 @@ void VideoStreamInputStateProvider::OnFrameSizeObserved(int frame_size_pixels) {
 }
 
 void VideoStreamInputStateProvider::OnEncoderSettingsChanged(
-    EncoderSettings encoder_settings) {
+    const EncoderSettings& encoder_settings) {
   MutexLock lock(&mutex_);
   input_state_.set_video_codec_type(
       encoder_settings.encoder_config().codec_type);

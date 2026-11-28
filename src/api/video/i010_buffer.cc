@@ -9,14 +9,22 @@
  */
 #include "api/video/i010_buffer.h"
 
-#include <string.h>
-
+#include <algorithm>
+#include <cstdint>
+#include <span>
 #include <utility>
 
 #include "api/make_ref_counted.h"
+#include "api/scoped_refptr.h"
 #include "api/video/i420_buffer.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_rotation.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/memory/aligned_malloc.h"
+#include "rtc_base/numerics/safe_conversions.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
+#include "third_party/libyuv/include/libyuv/convert_from.h"
+#include "third_party/libyuv/include/libyuv/rotate.h"
 #include "third_party/libyuv/include/libyuv/scale.h"
 
 // Aligning pointer to 64 bytes for improved performance, e.g. use SIMD.
@@ -27,9 +35,14 @@ namespace webrtc {
 
 namespace {
 
-int I010DataSize(int height, int stride_y, int stride_u, int stride_v) {
-  return kBytesPerPixel *
-         (stride_y * height + (stride_u + stride_v) * ((height + 1) / 2));
+int I010DataSize(int width,
+                 int height,
+                 int stride_y,
+                 int stride_u,
+                 int stride_v) {
+  CheckValidDimensions(width, height, stride_y, stride_u, stride_v);
+  int64_t h = height, y = stride_y, u = stride_u, v = stride_v;
+  return checked_cast<int>(kBytesPerPixel * (y * h + (u + v) * ((h + 1) / 2)));
 }
 
 }  // namespace
@@ -44,12 +57,9 @@ I010Buffer::I010Buffer(int width,
       stride_y_(stride_y),
       stride_u_(stride_u),
       stride_v_(stride_v),
-      data_(static_cast<uint16_t*>(
-          AlignedMalloc(I010DataSize(height, stride_y, stride_u, stride_v),
-                        kBufferAlignment))) {
-  RTC_DCHECK_GT(width, 0);
-  RTC_DCHECK_GT(height, 0);
-  RTC_DCHECK_GE(stride_y, width);
+      data_(static_cast<uint16_t*>(AlignedMalloc(
+          I010DataSize(width, height, stride_y, stride_u, stride_v),
+          kBufferAlignment))) {
   RTC_DCHECK_GE(stride_u, (width + 1) / 2);
   RTC_DCHECK_GE(stride_v, (width + 1) / 2);
 }
@@ -57,48 +67,45 @@ I010Buffer::I010Buffer(int width,
 I010Buffer::~I010Buffer() {}
 
 // static
-rtc::scoped_refptr<I010Buffer> I010Buffer::Create(int width, int height) {
-  return rtc::make_ref_counted<I010Buffer>(width, height, width,
-                                           (width + 1) / 2, (width + 1) / 2);
+scoped_refptr<I010Buffer> I010Buffer::Create(int width, int height) {
+  return make_ref_counted<I010Buffer>(width, height, width, (width + 1) / 2,
+                                      (width + 1) / 2);
 }
 
 // static
-rtc::scoped_refptr<I010Buffer> I010Buffer::Copy(
-    const I010BufferInterface& source) {
+scoped_refptr<I010Buffer> I010Buffer::Copy(const I010BufferInterface& source) {
   const int width = source.width();
   const int height = source.height();
-  rtc::scoped_refptr<I010Buffer> buffer = Create(width, height);
+  scoped_refptr<I010Buffer> buffer = Create(width, height);
   int res = libyuv::I010Copy(
       source.DataY(), source.StrideY(), source.DataU(), source.StrideU(),
       source.DataV(), source.StrideV(), buffer->MutableDataY(),
       buffer->StrideY(), buffer->MutableDataU(), buffer->StrideU(),
       buffer->MutableDataV(), buffer->StrideV(), width, height);
-  RTC_DCHECK_EQ(res, 0);
+  RTC_CHECK_EQ(res, 0);
 
   return buffer;
 }
 
 // static
-rtc::scoped_refptr<I010Buffer> I010Buffer::Copy(
-    const I420BufferInterface& source) {
+scoped_refptr<I010Buffer> I010Buffer::Copy(const I420BufferInterface& source) {
   const int width = source.width();
   const int height = source.height();
-  rtc::scoped_refptr<I010Buffer> buffer = Create(width, height);
+  scoped_refptr<I010Buffer> buffer = Create(width, height);
   int res = libyuv::I420ToI010(
       source.DataY(), source.StrideY(), source.DataU(), source.StrideU(),
       source.DataV(), source.StrideV(), buffer->MutableDataY(),
       buffer->StrideY(), buffer->MutableDataU(), buffer->StrideU(),
       buffer->MutableDataV(), buffer->StrideV(), width, height);
-  RTC_DCHECK_EQ(res, 0);
+  RTC_CHECK_EQ(res, 0);
 
   return buffer;
 }
 
 // static
-rtc::scoped_refptr<I010Buffer> I010Buffer::Rotate(
-    const I010BufferInterface& src,
-    VideoRotation rotation) {
-  if (rotation == webrtc::kVideoRotation_0)
+scoped_refptr<I010Buffer> I010Buffer::Rotate(const I010BufferInterface& src,
+                                             VideoRotation rotation) {
+  if (rotation == kVideoRotation_0)
     return Copy(src);
 
   RTC_CHECK(src.DataY());
@@ -106,13 +113,11 @@ rtc::scoped_refptr<I010Buffer> I010Buffer::Rotate(
   RTC_CHECK(src.DataV());
   int rotated_width = src.width();
   int rotated_height = src.height();
-  if (rotation == webrtc::kVideoRotation_90 ||
-      rotation == webrtc::kVideoRotation_270) {
+  if (rotation == kVideoRotation_90 || rotation == kVideoRotation_270) {
     std::swap(rotated_width, rotated_height);
   }
 
-  rtc::scoped_refptr<webrtc::I010Buffer> buffer =
-      Create(rotated_width, rotated_height);
+  scoped_refptr<I010Buffer> buffer = Create(rotated_width, rotated_height);
 
   int res = libyuv::I010Rotate(
       src.DataY(), src.StrideY(), src.DataU(), src.StrideU(), src.DataV(),
@@ -120,27 +125,31 @@ rtc::scoped_refptr<I010Buffer> I010Buffer::Rotate(
       buffer->MutableDataU(), buffer->StrideU(), buffer->MutableDataV(),
       buffer->StrideV(), src.width(), src.height(),
       static_cast<libyuv::RotationMode>(rotation));
-  RTC_DCHECK_EQ(res, 0);
+  RTC_CHECK_EQ(res, 0);
 
   return buffer;
 }
 
-rtc::scoped_refptr<I420BufferInterface> I010Buffer::ToI420() {
-  rtc::scoped_refptr<I420Buffer> i420_buffer =
-      I420Buffer::Create(width(), height());
+scoped_refptr<I420BufferInterface> I010Buffer::ToI420() {
+  scoped_refptr<I420Buffer> i420_buffer = I420Buffer::Create(width(), height());
   int res = libyuv::I010ToI420(
       DataY(), StrideY(), DataU(), StrideU(), DataV(), StrideV(),
       i420_buffer->MutableDataY(), i420_buffer->StrideY(),
       i420_buffer->MutableDataU(), i420_buffer->StrideU(),
       i420_buffer->MutableDataV(), i420_buffer->StrideV(), width(), height());
-  RTC_DCHECK_EQ(res, 0);
+  if (res != 0) {
+    return nullptr;
+  }
 
   return i420_buffer;
 }
 
 void I010Buffer::InitializeData() {
-  memset(data_.get(), 0,
-         I010DataSize(height_, stride_y_, stride_u_, stride_v_));
+  std::ranges::fill(
+      std::span(data_.get(),
+                I010DataSize(width_, height_, stride_y_, stride_u_, stride_v_) /
+                    kBytesPerPixel),
+      0);
 }
 
 int I010Buffer::width() const {
@@ -210,7 +219,7 @@ void I010Buffer::CropAndScaleFrom(const I010BufferInterface& src,
       StrideU(), MutableDataV(), StrideV(), width(), height(),
       libyuv::kFilterBox);
 
-  RTC_DCHECK_EQ(res, 0);
+  RTC_CHECK_EQ(res, 0);
 }
 
 void I010Buffer::ScaleFrom(const I010BufferInterface& src) {

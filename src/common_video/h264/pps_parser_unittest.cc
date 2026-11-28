@@ -10,6 +10,10 @@
 
 #include "common_video/h264/pps_parser.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
 #include <vector>
 
 #include "common_video/h264/h264_common.h"
@@ -22,23 +26,23 @@ namespace webrtc {
 
 namespace {
 // Contains enough of the image slice to contain slice QP.
-const uint8_t kH264BitstreamChunk[] = {
+constexpr uint8_t kH264BitstreamChunk[] = {
     0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x80, 0x20, 0xda, 0x01, 0x40, 0x16,
     0xe8, 0x06, 0xd0, 0xa1, 0x35, 0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x06,
     0xe2, 0x00, 0x00, 0x00, 0x01, 0x65, 0xb8, 0x40, 0xf0, 0x8c, 0x03, 0xf2,
     0x75, 0x67, 0xad, 0x41, 0x64, 0x24, 0x0e, 0xa0, 0xb2, 0x12, 0x1e, 0xf8,
 };
-const size_t kPpsBufferMaxSize = 256;
-const uint32_t kIgnored = 0;
+constexpr size_t kPpsBufferMaxSize = 256;
+constexpr uint32_t kIgnored = 0;
 }  // namespace
 
 void WritePps(const PpsParser::PpsState& pps,
               int slice_group_map_type,
               int num_slice_groups,
               int pic_size_in_map_units,
-              rtc::Buffer* out_buffer) {
+              Buffer* out_buffer) {
   uint8_t data[kPpsBufferMaxSize] = {0};
-  rtc::BitBufferWriter bit_buffer(data, kPpsBufferMaxSize);
+  BitBufferWriter bit_buffer(data, kPpsBufferMaxSize);
 
   // pic_parameter_set_id: ue(v)
   bit_buffer.WriteExponentialGolomb(pps.id);
@@ -106,9 +110,9 @@ void WritePps(const PpsParser::PpsState& pps,
   }
 
   // num_ref_idx_l0_default_active_minus1: ue(v)
-  bit_buffer.WriteExponentialGolomb(kIgnored);
+  bit_buffer.WriteExponentialGolomb(pps.num_ref_idx_l0_default_active_minus1);
   // num_ref_idx_l1_default_active_minus1: ue(v)
-  bit_buffer.WriteExponentialGolomb(kIgnored);
+  bit_buffer.WriteExponentialGolomb(pps.num_ref_idx_l1_default_active_minus1);
   // weighted_pred_flag: u(1)
   bit_buffer.WriteBits(pps.weighted_pred_flag ? 1 : 0, 1);
   // weighted_bipred_idc: u(2)
@@ -134,7 +138,7 @@ void WritePps(const PpsParser::PpsState& pps,
     bit_buffer.GetCurrentOffset(&byte_offset, &bit_offset);
   }
 
-  H264::WriteRbsp(data, byte_offset, out_buffer);
+  H264::WriteRbsp(std::span(data, byte_offset), out_buffer);
 }
 
 class PpsParserTest : public ::testing::Test {
@@ -175,10 +179,14 @@ class PpsParserTest : public ::testing::Test {
     buffer_.Clear();
     WritePps(pps, slice_group_map_type, num_slice_groups, pic_size_in_map_units,
              &buffer_);
-    parsed_pps_ = PpsParser::ParsePps(buffer_.data(), buffer_.size());
+    parsed_pps_ = PpsParser::ParsePps(buffer_);
     ASSERT_TRUE(parsed_pps_);
     EXPECT_EQ(pps.bottom_field_pic_order_in_frame_present_flag,
               parsed_pps_->bottom_field_pic_order_in_frame_present_flag);
+    EXPECT_EQ(pps.num_ref_idx_l0_default_active_minus1,
+              parsed_pps_->num_ref_idx_l0_default_active_minus1);
+    EXPECT_EQ(pps.num_ref_idx_l1_default_active_minus1,
+              parsed_pps_->num_ref_idx_l1_default_active_minus1);
     EXPECT_EQ(pps.weighted_pred_flag, parsed_pps_->weighted_pred_flag);
     EXPECT_EQ(pps.weighted_bipred_idc, parsed_pps_->weighted_bipred_idc);
     EXPECT_EQ(pps.entropy_coding_mode_flag,
@@ -191,8 +199,8 @@ class PpsParserTest : public ::testing::Test {
   }
 
   PpsParser::PpsState generated_pps_;
-  rtc::Buffer buffer_;
-  absl::optional<PpsParser::PpsState> parsed_pps_;
+  Buffer buffer_;
+  std::optional<PpsParser::PpsState> parsed_pps_;
 };
 
 TEST_F(PpsParserTest, ZeroPps) {
@@ -214,20 +222,66 @@ TEST_F(PpsParserTest, MaxPps) {
   RunTest();
 }
 
-TEST_F(PpsParserTest, PpsIdFromSlice) {
-  std::vector<H264::NaluIndex> nalu_indices =
-      H264::FindNaluIndices(kH264BitstreamChunk, sizeof(kH264BitstreamChunk));
+TEST_F(PpsParserTest, ParseSliceHeader) {
+  std::span<const uint8_t> chunk(kH264BitstreamChunk);
+  std::vector<H264::NaluIndex> nalu_indices = H264::FindNaluIndices(chunk);
   EXPECT_EQ(nalu_indices.size(), 3ull);
   for (const auto& index : nalu_indices) {
     H264::NaluType nalu_type =
-        H264::ParseNaluType(kH264BitstreamChunk[index.payload_start_offset]);
+        H264::ParseNaluType(chunk[index.payload_start_offset]);
     if (nalu_type == H264::NaluType::kIdr) {
-      absl::optional<uint32_t> pps_id = PpsParser::ParsePpsIdFromSlice(
-          kH264BitstreamChunk + index.payload_start_offset, index.payload_size);
-      EXPECT_EQ(pps_id, 0u);
+      // Skip NAL type header and parse slice header.
+      std::optional<PpsParser::SliceHeader> slice_header =
+          PpsParser::ParseSliceHeader(chunk.subspan(
+              index.payload_start_offset + 1, index.payload_size - 1));
+      ASSERT_TRUE(slice_header.has_value());
+      EXPECT_EQ(slice_header->first_mb_in_slice, 0u);
+      EXPECT_EQ(slice_header->pic_parameter_set_id, 0u);
       break;
     }
   }
+}
+
+TEST_F(PpsParserTest, ParsePpsIdsInvalid) {
+  uint32_t pps_id;
+  uint32_t sps_id;
+
+  // Valid pps_id=255, sps_id=31
+  buffer_.Clear();
+  generated_pps_.id = 255;
+  generated_pps_.sps_id = 31;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_TRUE(PpsParser::ParsePpsIds(buffer_, &pps_id, &sps_id));
+
+  // Invalid pps_id=256
+  buffer_.Clear();
+  generated_pps_.id = 256;
+  generated_pps_.sps_id = 0;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_FALSE(PpsParser::ParsePpsIds(buffer_, &pps_id, &sps_id));
+
+  // Invalid sps_id=32
+  buffer_.Clear();
+  generated_pps_.id = 0;
+  generated_pps_.sps_id = 32;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_FALSE(PpsParser::ParsePpsIds(buffer_, &pps_id, &sps_id));
+}
+
+TEST_F(PpsParserTest, ParsePpsInvalidSpsPpsId) {
+  // Invalid pps_id=256
+  buffer_.Clear();
+  generated_pps_.id = 256;
+  generated_pps_.sps_id = 0;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_EQ(PpsParser::ParsePps(buffer_), std::nullopt);
+
+  // Invalid sps_id=32
+  buffer_.Clear();
+  generated_pps_.id = 0;
+  generated_pps_.sps_id = 32;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_EQ(PpsParser::ParsePps(buffer_), std::nullopt);
 }
 
 }  // namespace webrtc

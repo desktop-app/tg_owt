@@ -58,7 +58,7 @@ import org.webrtc.NetworkMonitorAutoDetect.SimpleNetworkCallback;
 public class NetworkMonitorTest {
   private static final long INVALID_NET_ID = -1;
   private NetworkChangeDetector detector;
-  private String fieldTrialsString = "";
+  private final String fieldTrialsString = "";
 
   /**
    * Listens for alerts fired by the NetworkMonitor when network status changes.
@@ -128,18 +128,6 @@ public class NetworkMonitorTest {
     public void setNetworkType(int networkType) {
       this.networkType = networkType;
     }
-
-    public void setNetworkSubtype(int networkSubtype) {
-      this.networkSubtype = networkSubtype;
-    }
-
-    public void setUnderlyingNetworkType(int underlyingNetworkTypeForVpn) {
-      this.underlyingNetworkTypeForVpn = underlyingNetworkTypeForVpn;
-    }
-
-    public void setUnderlyingNetworkSubype(int underlyingNetworkSubtypeForVpn) {
-      this.underlyingNetworkSubtypeForVpn = underlyingNetworkSubtypeForVpn;
-    }
   }
 
   /**
@@ -161,7 +149,7 @@ public class NetworkMonitorTest {
 
   // A dummy NetworkMonitorAutoDetect.Observer.
   private static class TestNetworkMonitorAutoDetectObserver
-      extends NetworkMonitorAutoDetect.Observer {
+      extends NetworkChangeDetector.Observer {
     final String fieldTrialsString;
 
     TestNetworkMonitorAutoDetectObserver(String fieldTrialsString) {
@@ -219,11 +207,6 @@ public class NetworkMonitorTest {
     wifiDelegate.setWifiSSID("foo");
   }
 
-  private NetworkMonitorAutoDetect.ConnectionType getCurrentConnectionType() {
-    final NetworkMonitorAutoDetect.NetworkState networkState = receiver.getCurrentNetworkState();
-    return NetworkMonitorAutoDetect.getConnectionType(networkState);
-  }
-
   @Before
   public void setUp() {
     ContextUtils.initialize(InstrumentationRegistry.getTargetContext());
@@ -238,7 +221,7 @@ public class NetworkMonitorTest {
   public void testNetworkMonitorRegistersInConstructor() throws InterruptedException {
     Context context = InstrumentationRegistry.getTargetContext();
 
-    NetworkMonitorAutoDetect.Observer observer =
+    NetworkChangeDetector.Observer observer =
         new TestNetworkMonitorAutoDetectObserver(fieldTrialsString);
 
     NetworkMonitorAutoDetect receiver = new NetworkMonitorAutoDetect(observer, context);
@@ -354,7 +337,8 @@ public class NetworkMonitorTest {
   @Test
   @SmallTest
   public void testConnectivityManager_includeOtherUidNetworks_disabled() {
-    NetworkRequest request = getNetworkRequestForFieldTrials("includeOtherUidNetworks:false");
+    NetworkRequest request = getNetworkRequestForFieldTrials(
+        "requestVPN:false,includeOtherUidNetworks:false");
     assertTrue(request.equals(new NetworkRequest.Builder()
                                   .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                                   .build()));
@@ -363,7 +347,8 @@ public class NetworkMonitorTest {
   @Test
   @SmallTest
   public void testConnectivityManager_includeOtherUidNetworks_enabled() {
-    NetworkRequest request = getNetworkRequestForFieldTrials("includeOtherUidNetworks:true");
+    NetworkRequest request = getNetworkRequestForFieldTrials(
+        "requestVPN:false,includeOtherUidNetworks:true");
     NetworkRequest.Builder builder =
         new NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -386,7 +371,7 @@ public class NetworkMonitorTest {
   @Test
   @SmallTest
   public void testQueryableAPIsDoNotCrash() {
-    NetworkMonitorAutoDetect.Observer observer =
+    NetworkChangeDetector.Observer observer =
         new TestNetworkMonitorAutoDetectObserver(fieldTrialsString);
     NetworkMonitorAutoDetect ncn =
         new NetworkMonitorAutoDetect(observer, InstrumentationRegistry.getTargetContext());

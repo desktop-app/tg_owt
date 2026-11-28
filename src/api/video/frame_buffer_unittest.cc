@@ -9,13 +9,15 @@
  */
 #include "api/video/frame_buffer.h"
 
+#include <cstdint>
+#include <optional>
 #include <vector>
 
-#include "api/video/encoded_frame.h"
+#include "api/field_trials.h"
+#include "test/create_test_field_trials.h"
 #include "test/fake_encoded_frame.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
-#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 namespace {
@@ -30,13 +32,13 @@ MATCHER_P(FrameWithId, id, "") {
 }
 
 TEST(FrameBuffer3Test, RejectInvalidRefs) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
   // Ref must be less than the id of this frame.
   EXPECT_FALSE(buffer.InsertFrame(
       test::FakeFrameBuilder().Time(0).Id(0).Refs({0}).AsLast().Build()));
-  EXPECT_THAT(buffer.LastContinuousFrameId(), Eq(absl::nullopt));
+  EXPECT_THAT(buffer.LastContinuousFrameId(), Eq(std::nullopt));
 
   // Duplicate ids are also invalid.
   EXPECT_TRUE(buffer.InsertFrame(
@@ -47,16 +49,16 @@ TEST(FrameBuffer3Test, RejectInvalidRefs) {
 }
 
 TEST(FrameBuffer3Test, LastContinuousUpdatesOnInsertedFrames) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
-  EXPECT_THAT(buffer.LastContinuousFrameId(), Eq(absl::nullopt));
-  EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(absl::nullopt));
+  EXPECT_THAT(buffer.LastContinuousFrameId(), Eq(std::nullopt));
+  EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(std::nullopt));
 
   EXPECT_TRUE(
       buffer.InsertFrame(test::FakeFrameBuilder().Time(10).Id(1).Build()));
   EXPECT_THAT(buffer.LastContinuousFrameId(), Eq(1));
-  EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(absl::nullopt));
+  EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(std::nullopt));
 
   EXPECT_TRUE(buffer.InsertFrame(
       test::FakeFrameBuilder().Time(10).Id(2).Refs({1}).AsLast().Build()));
@@ -65,7 +67,7 @@ TEST(FrameBuffer3Test, LastContinuousUpdatesOnInsertedFrames) {
 }
 
 TEST(FrameBuffer3Test, LastContinuousFrameReordering) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
 
@@ -81,20 +83,20 @@ TEST(FrameBuffer3Test, LastContinuousFrameReordering) {
 }
 
 TEST(FrameBuffer3Test, LastContinuousTemporalUnit) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
 
   EXPECT_TRUE(
       buffer.InsertFrame(test::FakeFrameBuilder().Time(10).Id(1).Build()));
-  EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(absl::nullopt));
+  EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(std::nullopt));
   EXPECT_TRUE(buffer.InsertFrame(
       test::FakeFrameBuilder().Time(10).Id(2).Refs({1}).AsLast().Build()));
   EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(2));
 }
 
 TEST(FrameBuffer3Test, LastContinuousTemporalUnitReordering) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
 
@@ -104,7 +106,7 @@ TEST(FrameBuffer3Test, LastContinuousTemporalUnitReordering) {
       test::FakeFrameBuilder().Time(20).Id(3).Refs({1}).Build()));
   EXPECT_TRUE(buffer.InsertFrame(
       test::FakeFrameBuilder().Time(20).Id(4).Refs({2, 3}).AsLast().Build()));
-  EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(absl::nullopt));
+  EXPECT_THAT(buffer.LastContinuousTemporalUnitFrameId(), Eq(std::nullopt));
 
   EXPECT_TRUE(buffer.InsertFrame(
       test::FakeFrameBuilder().Time(10).Id(2).Refs({1}).AsLast().Build()));
@@ -112,18 +114,18 @@ TEST(FrameBuffer3Test, LastContinuousTemporalUnitReordering) {
 }
 
 TEST(FrameBuffer3Test, NextDecodable) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
 
-  EXPECT_THAT(buffer.DecodableTemporalUnitsInfo(), Eq(absl::nullopt));
+  EXPECT_THAT(buffer.DecodableTemporalUnitsInfo(), Eq(std::nullopt));
   EXPECT_TRUE(buffer.InsertFrame(
       test::FakeFrameBuilder().Time(10).Id(1).AsLast().Build()));
   EXPECT_THAT(buffer.DecodableTemporalUnitsInfo()->next_rtp_timestamp, Eq(10U));
 }
 
 TEST(FrameBuffer3Test, AdvanceNextDecodableOnExtraction) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
 
@@ -146,7 +148,7 @@ TEST(FrameBuffer3Test, AdvanceNextDecodableOnExtraction) {
 }
 
 TEST(FrameBuffer3Test, AdvanceLastDecodableOnExtraction) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
 
@@ -164,7 +166,7 @@ TEST(FrameBuffer3Test, AdvanceLastDecodableOnExtraction) {
 }
 
 TEST(FrameBuffer3Test, FrameUpdatesNextDecodable) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
 
@@ -178,7 +180,7 @@ TEST(FrameBuffer3Test, FrameUpdatesNextDecodable) {
 }
 
 TEST(FrameBuffer3Test, KeyframeClearsFullBuffer) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/5, /*max_decode_history=*/10,
                      field_trials);
   EXPECT_TRUE(buffer.InsertFrame(
@@ -204,7 +206,7 @@ TEST(FrameBuffer3Test, KeyframeClearsFullBuffer) {
 }
 
 TEST(FrameBuffer3Test, DropNextDecodableTemporalUnit) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
   EXPECT_TRUE(buffer.InsertFrame(
@@ -221,7 +223,7 @@ TEST(FrameBuffer3Test, DropNextDecodableTemporalUnit) {
 }
 
 TEST(FrameBuffer3Test, OldFramesAreIgnored) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
   EXPECT_TRUE(buffer.InsertFrame(
@@ -243,7 +245,7 @@ TEST(FrameBuffer3Test, OldFramesAreIgnored) {
 }
 
 TEST(FrameBuffer3Test, ReturnFullTemporalUnitKSVC) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
   EXPECT_TRUE(
@@ -262,7 +264,7 @@ TEST(FrameBuffer3Test, ReturnFullTemporalUnitKSVC) {
 }
 
 TEST(FrameBuffer3Test, InterleavedStream) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
   EXPECT_TRUE(buffer.InsertFrame(
@@ -301,43 +303,25 @@ TEST(FrameBuffer3Test, InterleavedStream) {
 }
 
 TEST(FrameBuffer3Test, LegacyFrameIdJumpBehavior) {
-  {
-    test::ScopedKeyValueConfig field_trials(
-        "WebRTC-LegacyFrameIdJumpBehavior/Disabled/");
-    FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
-                       field_trials);
+  FieldTrials field_trials = CreateTestFieldTrials();
+  FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
+                     field_trials);
 
-    EXPECT_TRUE(buffer.InsertFrame(
-        test::FakeFrameBuilder().Time(20).Id(3).AsLast().Build()));
-    EXPECT_THAT(buffer.ExtractNextDecodableTemporalUnit(),
-                ElementsAre(FrameWithId(3)));
-    EXPECT_FALSE(buffer.InsertFrame(
-        test::FakeFrameBuilder().Time(30).Id(2).AsLast().Build()));
-    EXPECT_THAT(buffer.ExtractNextDecodableTemporalUnit(), IsEmpty());
-  }
-
-  {
-    // WebRTC-LegacyFrameIdJumpBehavior is disabled by default.
-    test::ScopedKeyValueConfig field_trials;
-    FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
-                       field_trials);
-
-    EXPECT_TRUE(buffer.InsertFrame(
-        test::FakeFrameBuilder().Time(20).Id(3).AsLast().Build()));
-    EXPECT_THAT(buffer.ExtractNextDecodableTemporalUnit(),
-                ElementsAre(FrameWithId(3)));
-    EXPECT_FALSE(buffer.InsertFrame(
-        test::FakeFrameBuilder().Time(30).Id(2).Refs({1}).AsLast().Build()));
-    EXPECT_THAT(buffer.ExtractNextDecodableTemporalUnit(), IsEmpty());
-    EXPECT_TRUE(buffer.InsertFrame(
-        test::FakeFrameBuilder().Time(40).Id(1).AsLast().Build()));
-    EXPECT_THAT(buffer.ExtractNextDecodableTemporalUnit(),
-                ElementsAre(FrameWithId(1)));
-  }
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(20).Id(3).AsLast().Build()));
+  EXPECT_THAT(buffer.ExtractNextDecodableTemporalUnit(),
+              ElementsAre(FrameWithId(3)));
+  EXPECT_FALSE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(30).Id(2).Refs({1}).AsLast().Build()));
+  EXPECT_THAT(buffer.ExtractNextDecodableTemporalUnit(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(40).Id(1).AsLast().Build()));
+  EXPECT_THAT(buffer.ExtractNextDecodableTemporalUnit(),
+              ElementsAre(FrameWithId(1)));
 }
 
 TEST(FrameBuffer3Test, TotalNumberOfContinuousTemporalUnits) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
   EXPECT_THAT(buffer.GetTotalNumberOfContinuousTemporalUnits(), Eq(0));
@@ -363,7 +347,7 @@ TEST(FrameBuffer3Test, TotalNumberOfContinuousTemporalUnits) {
 }
 
 TEST(FrameBuffer3Test, TotalNumberOfDroppedFrames) {
-  test::ScopedKeyValueConfig field_trials;
+  FieldTrials field_trials = CreateTestFieldTrials();
   FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
                      field_trials);
   EXPECT_THAT(buffer.GetTotalNumberOfDroppedFrames(), Eq(0));
@@ -387,6 +371,100 @@ TEST(FrameBuffer3Test, TotalNumberOfDroppedFrames) {
 
   buffer.ExtractNextDecodableTemporalUnit();
   EXPECT_THAT(buffer.GetTotalNumberOfDroppedFrames(), Eq(2));
+}
+
+TEST(FrameBuffer3Test, NewContinuousTemporalUnits) {
+  FieldTrials field_trials = CreateTestFieldTrials();
+  FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
+                     field_trials);
+
+  EXPECT_TRUE(
+      buffer.InsertFrame(test::FakeFrameBuilder().Time(10).Id(1).Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(10).Id(2).Refs({1}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), ElementsAre(10U));
+
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(20).Id(3).Refs({2}).Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(20).Id(4).Refs({2, 3}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), ElementsAre(20U));
+}
+
+TEST(FrameBuffer3Test, NewContinuousTemporalUnitsWithReordering) {
+  FieldTrials field_trials = CreateTestFieldTrials();
+  FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
+                     field_trials);
+
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(10).Id(1).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), ElementsAre(10U));
+
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(30).Id(3).Refs({2}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(40).Id(4).Refs({3}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(60).Id(6).Refs({5}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(20).Id(2).Refs({1}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), ElementsAre(20U, 30U, 40U));
+
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(50).Id(5).Refs({4}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), ElementsAre(50U, 60U));
+}
+
+TEST(FrameBuffer3Test, NewContinuousTemporalUnitsReportsOlderFrames) {
+  FieldTrials field_trials = CreateTestFieldTrials();
+  FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
+                     field_trials);
+
+  EXPECT_TRUE(
+      buffer.InsertFrame(test::FakeFrameBuilder().Time(10).Id(1).Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(20).Id(3).Refs({1}).Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(20).Id(4).Refs({2, 3}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(30).Id(5).Refs({3}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), ElementsAre(30U));
+
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(10).Id(2).Refs({1}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), ElementsAre(10U, 20U));
+}
+
+TEST(FrameBuffer3Test, NewContinuousTemporalUnitsWithWraparound) {
+  FieldTrials field_trials = CreateTestFieldTrials();
+  FrameBuffer buffer(/*max_frame_slots=*/10, /*max_decode_history=*/100,
+                     field_trials);
+  uint32_t rtp1 = 0xFFFFFFF0;
+  uint32_t rtp2 = 2000;
+
+  EXPECT_TRUE(
+      buffer.InsertFrame(test::FakeFrameBuilder().Time(rtp1).Id(1).Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(rtp2).Id(3).Refs({1}).Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(rtp2).Id(4).Refs({2, 3}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), IsEmpty());
+
+  EXPECT_TRUE(buffer.InsertFrame(
+      test::FakeFrameBuilder().Time(rtp1).Id(2).Refs({1}).AsLast().Build()));
+  EXPECT_THAT(buffer.NewContinuousTemporalUnits(), ElementsAre(rtp1, rtp2));
 }
 
 }  // namespace

@@ -10,16 +10,22 @@
 
 #include "rtc_base/byte_buffer.h"
 
-#include <string.h>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <string>
 
-namespace rtc {
+#include "absl/strings/string_view.h"
+#include "rtc_base/byte_order.h"
+
+namespace webrtc {
 
 ByteBufferWriter::ByteBufferWriter() : ByteBufferWriterT() {}
 
 ByteBufferWriter::ByteBufferWriter(const uint8_t* bytes, size_t len)
     : ByteBufferWriterT(bytes, len) {}
 
-ByteBufferReader::ByteBufferReader(rtc::ArrayView<const uint8_t> bytes) {
+ByteBufferReader::ByteBufferReader(std::span<const uint8_t> bytes) {
   Construct(bytes.data(), bytes.size());
 }
 
@@ -140,8 +146,8 @@ bool ByteBufferReader::ReadStringView(absl::string_view* val, size_t len) {
   return true;
 }
 
-bool ByteBufferReader::ReadBytes(rtc::ArrayView<uint8_t> val) {
-  if (val.size() == 0) {
+bool ByteBufferReader::ReadBytes(std::span<uint8_t> val) {
+  if (val.empty()) {
     return true;
   }
   return ReadBytes(val.data(), val.size());
@@ -167,4 +173,4 @@ bool ByteBufferReader::Consume(size_t size) {
   return true;
 }
 
-}  // namespace rtc
+}  // namespace webrtc

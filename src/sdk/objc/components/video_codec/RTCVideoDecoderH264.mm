@@ -11,7 +11,11 @@
 
 #import "RTCVideoDecoderH264.h"
 
+#import "RTCH264ProfileLevelId.h"
+
 #import <VideoToolbox/VideoToolbox.h>
+
+#include <span>
 
 #import "base/RTCVideoFrame.h"
 #import "base/RTCVideoFrameBuffer.h"
@@ -32,7 +36,8 @@
 // Struct that we pass to the decoder per frame to decode. We receive it again
 // in the decoder callback.
 struct RTCFrameDecodeParams {
-  RTCFrameDecodeParams(RTCVideoDecoderCallback cb, int64_t ts) : callback(cb), timestamp(ts) {}
+  RTCFrameDecodeParams(RTCVideoDecoderCallback cb, int64_t ts)
+      : callback(cb), timestamp(ts) {}
   RTCVideoDecoderCallback callback;
   int64_t timestamp;
 };
@@ -62,10 +67,11 @@ void decompressionOutputCallback(void *decoderRef,
   // TODO(tkchin): Handle CVO properly.
   RTC_OBJC_TYPE(RTCCVPixelBuffer) *frameBuffer =
       [[RTC_OBJC_TYPE(RTCCVPixelBuffer) alloc] initWithPixelBuffer:imageBuffer];
-  RTC_OBJC_TYPE(RTCVideoFrame) *decodedFrame = [[RTC_OBJC_TYPE(RTCVideoFrame) alloc]
+  RTC_OBJC_TYPE(
+      RTCVideoFrame) *decodedFrame = [[RTC_OBJC_TYPE(RTCVideoFrame) alloc]
       initWithBuffer:frameBuffer
             rotation:RTCVideoRotation_0
-         timeStampNs:CMTimeGetSeconds(timestamp) * rtc::kNumNanosecsPerSec];
+         timeStampNs:CMTimeGetSeconds(timestamp) * webrtc::kNumNanosecsPerSec];
   decodedFrame.timeStamp = decodeParams->timestamp;
   decodeParams->callback(decodedFrame);
 }
@@ -77,6 +83,30 @@ void decompressionOutputCallback(void *decoderRef,
   VTDecompressionSessionRef _decompressionSession;
   RTCVideoDecoderCallback _callback;
   OSStatus _error;
+}
+
++ (NSArray<RTC_OBJC_TYPE(RTCVideoCodecInfo) *> *)supportedCodecs {
+  NSDictionary<NSString *, NSString *> *constrainedHighParams = @{
+    @"profile-level-id" : kRTCMaxSupportedH264ProfileLevelConstrainedHigh,
+    @"level-asymmetry-allowed" : @"1",
+    @"packetization-mode" : @"1",
+  };
+  RTC_OBJC_TYPE(RTCVideoCodecInfo) *constrainedHighInfo =
+      [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc]
+          initWithName:kRTCVideoCodecH264Name
+            parameters:constrainedHighParams];
+
+  NSDictionary<NSString *, NSString *> *constrainedBaselineParams = @{
+    @"profile-level-id" : kRTCMaxSupportedH264ProfileLevelConstrainedBaseline,
+    @"level-asymmetry-allowed" : @"1",
+    @"packetization-mode" : @"1",
+  };
+  RTC_OBJC_TYPE(RTCVideoCodecInfo) *constrainedBaselineInfo =
+      [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc]
+          initWithName:kRTCVideoCodecH264Name
+            parameters:constrainedBaselineParams];
+
+  return @[ constrainedHighInfo, constrainedBaselineInfo ];
 }
 
 - (instancetype)init {
@@ -111,9 +141,10 @@ void decompressionOutputCallback(void *decoderRef,
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
 
-  rtc::ScopedCFTypeRef<CMVideoFormatDescriptionRef> inputFormat =
-      rtc::ScopedCF(webrtc::CreateVideoFormatDescription((uint8_t *)inputImage.buffer.bytes,
-                                                         inputImage.buffer.length));
+  webrtc::ScopedCFTypeRef<CMVideoFormatDescriptionRef> inputFormat =
+      webrtc::ScopedCF(
+          webrtc::CreateVideoFormatDescription(std::span<const uint8_t>(
+              (uint8_t *)inputImage.buffer.bytes, inputImage.buffer.length)));
   if (inputFormat) {
     // Check if the video format has changed, and reinitialize decoder if
     // needed.
@@ -135,29 +166,41 @@ void decompressionOutputCallback(void *decoderRef,
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
   CMSampleBufferRef sampleBuffer = nullptr;
-  if (!webrtc::H264AnnexBBufferToCMSampleBuffer((uint8_t *)inputImage.buffer.bytes,
-                                                inputImage.buffer.length,
-                                                _videoFormat,
-                                                &sampleBuffer,
-                                                _memoryPool)) {
+  if (!webrtc::H264AnnexBBufferToCMSampleBuffer(
+          std::span<const uint8_t>((uint8_t *)inputImage.buffer.bytes,
+                                   inputImage.buffer.length),
+          _videoFormat,
+          &sampleBuffer,
+          _memoryPool)) {
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
   RTC_DCHECK(sampleBuffer);
-  VTDecodeFrameFlags decodeFlags = kVTDecodeFrame_EnableAsynchronousDecompression;
+  VTDecodeFrameFlags decodeFlags =
+      kVTDecodeFrame_EnableAsynchronousDecompression;
   std::unique_ptr<RTCFrameDecodeParams> frameDecodeParams;
-  frameDecodeParams.reset(new RTCFrameDecodeParams(_callback, inputImage.timeStamp));
-  OSStatus status = VTDecompressionSessionDecodeFrame(
-      _decompressionSession, sampleBuffer, decodeFlags, frameDecodeParams.release(), nullptr);
+  frameDecodeParams.reset(
+      new RTCFrameDecodeParams(_callback, inputImage.timeStamp));
+  OSStatus status =
+      VTDecompressionSessionDecodeFrame(_decompressionSession,
+                                        sampleBuffer,
+                                        decodeFlags,
+                                        frameDecodeParams.release(),
+                                        nullptr);
 #if defined(WEBRTC_IOS)
   // Re-initialize the decoder if we have an invalid session while the app is
   // active or decoder malfunctions and retry the decode request.
-  if ((status == kVTInvalidSessionErr || status == kVTVideoDecoderMalfunctionErr) &&
+  if ((status == kVTInvalidSessionErr ||
+       status == kVTVideoDecoderMalfunctionErr) &&
       [self resetDecompressionSession] == WEBRTC_VIDEO_CODEC_OK) {
     RTC_LOG(LS_INFO) << "Failed to decode frame with code: " << status
                      << " retrying decode after decompression session reset";
-    frameDecodeParams.reset(new RTCFrameDecodeParams(_callback, inputImage.timeStamp));
-    status = VTDecompressionSessionDecodeFrame(
-        _decompressionSession, sampleBuffer, decodeFlags, frameDecodeParams.release(), nullptr);
+    frameDecodeParams.reset(
+        new RTCFrameDecodeParams(_callback, inputImage.timeStamp));
+    status = VTDecompressionSessionDecodeFrame(_decompressionSession,
+                                               sampleBuffer,
+                                               decodeFlags,
+                                               frameDecodeParams.release(),
+                                               nullptr);
   }
 #endif
   CFRelease(sampleBuffer);
@@ -214,19 +257,21 @@ void decompressionOutputCallback(void *decoderRef,
 #if !(TARGET_OS_SIMULATOR)
     (NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{},
 #endif
-    (NSString *)
-    kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange),
+    (NSString *)kCVPixelBufferPixelFormatTypeKey :
+        @(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange),
   };
 
   VTDecompressionOutputCallbackRecord record = {
-      decompressionOutputCallback, (__bridge void *)self,
+      decompressionOutputCallback,
+      (__bridge void *)self,
   };
-  OSStatus status = VTDecompressionSessionCreate(nullptr,
-                                                 _videoFormat,
-                                                 nullptr,
-                                                 (__bridge CFDictionaryRef)attributes,
-                                                 &record,
-                                                 &_decompressionSession);
+  OSStatus status =
+      VTDecompressionSessionCreate(nullptr,
+                                   _videoFormat,
+                                   nullptr,
+                                   (__bridge CFDictionaryRef)attributes,
+                                   &record,
+                                   &_decompressionSession);
   if (status != noErr) {
     RTC_LOG(LS_ERROR) << "Failed to create decompression session: " << status;
     [self destroyDecompressionSession];
@@ -240,7 +285,9 @@ void decompressionOutputCallback(void *decoderRef,
 - (void)configureDecompressionSession {
   RTC_DCHECK(_decompressionSession);
 #if defined(WEBRTC_IOS)
-  VTSessionSetProperty(_decompressionSession, kVTDecompressionPropertyKey_RealTime, kCFBooleanTrue);
+  VTSessionSetProperty(_decompressionSession,
+                       kVTDecompressionPropertyKey_RealTime,
+                       kCFBooleanTrue);
 #endif
 }
 

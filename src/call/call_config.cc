@@ -10,27 +10,46 @@
 
 #include "call/call_config.h"
 
+#include "absl/base/nullability.h"
 #include "api/environment/environment.h"
 #include "api/task_queue/task_queue_base.h"
+#include "api/transport/network_types.h"
+#include "call/rtp_transport_config.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
 CallConfig::CallConfig(const Environment& env,
                        TaskQueueBase* network_task_queue)
     : env(env),
-      network_task_queue_(network_task_queue) {}
+      network_task_queue_(network_task_queue ? network_task_queue
+                                             : TaskQueueBase::Current()) {
+  RTC_DCHECK(network_task_queue_ != nullptr);
+}
 
-CallConfig::CallConfig(const CallConfig& config) = default;
+CallConfig CallConfig::CreateWithJoinedWorkerAndNetworkQueue(
+    const Environment& env,
+    TaskQueueBase* absl_nonnull worker_and_network_queue) {
+  return CallConfig(env, worker_and_network_queue);
+}
+
+CallConfig CallConfig::CreateSingleThreaded(const Environment& env) {
+  return CallConfig(env, TaskQueueBase::Current());
+}
 
 RtpTransportConfig CallConfig::ExtractTransportConfig() const {
-  RtpTransportConfig transport_config = {.env = env};
-  transport_config.bitrate_config = bitrate_config;
-  transport_config.network_controller_factory = network_controller_factory;
-  transport_config.network_state_predictor_factory =
-      network_state_predictor_factory;
-  transport_config.pacer_burst_interval = pacer_burst_interval;
-
-  return transport_config;
+  return RtpTransportConfig{
+      .env = env,
+      .bitrate_config = bitrate_config,
+      .network_state_predictor_factory = network_state_predictor_factory,
+      .network_controller_factory =
+          per_call_network_controller_factory
+              ? per_call_network_controller_factory.get()
+              : network_controller_factory,
+      .default_pacing_time_window =
+          pacer_burst_interval.value_or(PacerConfig::kDefaultTimeInterval),
+      .network_thread = network_task_queue_,
+  };
 }
 
 CallConfig::~CallConfig() = default;

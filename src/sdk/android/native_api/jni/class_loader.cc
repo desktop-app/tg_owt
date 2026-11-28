@@ -10,6 +10,8 @@
 
 #include "sdk/android/native_api/jni/class_loader.h"
 
+#include <jni.h>
+
 #include <algorithm>
 #include <string>
 
@@ -17,6 +19,7 @@
 #include "sdk/android/generated_native_api_jni/WebRtcClassLoader_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 // Abort the process if `jni` has a Java exception pending. This macros uses the
 // comma operator to execute ExceptionDescribe and ExceptionClear ignoring their
@@ -51,7 +54,7 @@ class ClassLoader {
     const jclass clazz = static_cast<jclass>(env->CallObjectMethod(
         class_loader_.obj(), load_class_method_, j_name.obj()));
     CHECK_EXCEPTION(env);
-    return ScopedJavaLocalRef<jclass>(env, clazz);
+    return ScopedJavaLocalRef<jclass>::Adopt(env, clazz);
   }
 
  private:
@@ -62,11 +65,26 @@ class ClassLoader {
 
 static ClassLoader* g_class_loader = nullptr;
 
+[[maybe_unused]] jclass GetClass(JNIEnv* env, const char* class_name) {
+  RTC_CHECK(g_class_loader);
+  return static_cast<jclass>(
+      g_class_loader->FindClass(env, class_name).Release());
+}
+
+[[maybe_unused]] jclass GetClass(JNIEnv* env,
+                                 const char* class_name,
+                                 const char* unused) {
+  RTC_CHECK(g_class_loader);
+  return static_cast<jclass>(
+      g_class_loader->FindClass(env, class_name).Release());
+}
+
 }  // namespace
 
 void InitClassLoader(JNIEnv* env) {
   RTC_CHECK(g_class_loader == nullptr);
   g_class_loader = new ClassLoader(env);
+  jni_zero::SetClassResolver(&GetClass);
 }
 
 ScopedJavaLocalRef<jclass> GetClass(JNIEnv* env, const char* c_name) {
@@ -82,7 +100,9 @@ ScopedJavaLocalRef<jclass> GetClass(JNIEnv* env, const char* c_name) {
 
   std::string name(c_name);
   std::replace(name.begin(), name.end(), '.', '/');
-  return ScopedJavaLocalRef<jclass>(env, env->FindClass(name.c_str()));
+  return ScopedJavaLocalRef<jclass>::Adopt(env, env->FindClass(name.c_str()));
 }
 
 }  // namespace webrtc
+
+DEFINE_JNI(WebRtcClassLoader)

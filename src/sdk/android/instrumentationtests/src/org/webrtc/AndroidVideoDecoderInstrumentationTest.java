@@ -65,14 +65,14 @@ public final class AndroidVideoDecoderInstrumentationTest {
   private static final VideoEncoder.Settings ENCODER_SETTINGS =
       new VideoEncoder.Settings(1 /* core */, TEST_FRAME_WIDTH, TEST_FRAME_HEIGHT, 300 /* kbps */,
           30 /* fps */, 1 /* numberOfSimulcastStreams */, true /* automaticResizeOn */,
-          /* capabilities= */ new VideoEncoder.Capabilities(false /* lossNotification */));
+          /* capabilities= */ new VideoEncoder.Capabilities());
 
   private static final int DECODE_TIMEOUT_MS = 1000;
   private static final VideoDecoder.Settings SETTINGS =
       new VideoDecoder.Settings(1 /* core */, TEST_FRAME_WIDTH, TEST_FRAME_HEIGHT);
 
   private static class MockDecodeCallback implements VideoDecoder.Callback {
-    private BlockingQueue<VideoFrame> frameQueue = new LinkedBlockingQueue<>();
+    private final BlockingQueue<VideoFrame> frameQueue = new LinkedBlockingQueue<>();
 
     @Override
     public void onDecodedFrame(VideoFrame frame, Integer decodeTimeMs, Integer qp) {

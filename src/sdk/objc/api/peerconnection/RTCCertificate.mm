@@ -10,10 +10,12 @@
 
 #import "RTCCertificate.h"
 
+#import "RTCDtlsFingerprint.h"
 #import "base/RTCLogging.h"
 
-#include "rtc_base/logging.h"
+#include "rtc_base/rtc_certificate.h"
 #include "rtc_base/rtc_certificate_generator.h"
+#include "rtc_base/ssl_fingerprint.h"
 #include "rtc_base/ssl_identity.h"
 
 @implementation RTC_OBJC_TYPE (RTCCertificate)
@@ -22,50 +24,89 @@
 @synthesize certificate = _certificate;
 
 - (id)copyWithZone:(NSZone *)zone {
-  id copy = [[[self class] alloc] initWithPrivateKey:[self.private_key copyWithZone:zone]
-                                         certificate:[self.certificate copyWithZone:zone]];
+  id copy = [[[self class] alloc]
+      initWithPrivateKey:[self.private_key copyWithZone:zone]
+             certificate:[self.certificate copyWithZone:zone]];
   return copy;
 }
 
-- (instancetype)initWithPrivateKey:(NSString *)private_key certificate:(NSString *)certificate {
-  if (self = [super init]) {
+- (instancetype)initWithPrivateKey:(NSString *)private_key
+                       certificate:(NSString *)certificate {
+  self = [super init];
+  if (self) {
     _private_key = [private_key copy];
     _certificate = [certificate copy];
   }
   return self;
 }
 
-+ (nullable RTC_OBJC_TYPE(RTCCertificate) *)generateCertificateWithParams:(NSDictionary *)params {
-  rtc::KeyType keyType = rtc::KT_ECDSA;
+- (NSArray<RTC_OBJC_TYPE(RTCDtlsFingerprint) *> *)getFingerprints {
+  // The fingerprints are not stored on the PEM representation, so the native
+  // certificate is reconstructed from the PEM strings in order to compute them.
+  // Native WebRTC tracks a single fingerprint per certificate (the one matching
+  // the signature algorithm), so the returned array holds at most one entry.
+  webrtc::RTCCertificatePEM pem(_private_key.UTF8String,
+                                _certificate.UTF8String);
+  webrtc::scoped_refptr<webrtc::RTCCertificate> certificate =
+      webrtc::RTCCertificate::FromPEM(pem);
+  if (!certificate) {
+    RTCLogError(@"Failed to reconstruct certificate from PEM.");
+    return @[];
+  }
+  std::unique_ptr<webrtc::SSLFingerprint> fingerprint =
+      webrtc::SSLFingerprint::CreateFromCertificate(*certificate);
+  if (!fingerprint) {
+    RTCLogError(@"Failed to compute fingerprint for certificate.");
+    return @[];
+  }
+  const std::string &algorithm = fingerprint->algorithm;
+  std::string value = fingerprint->GetRfc4572Fingerprint();
+  return @[ [[RTC_OBJC_TYPE(RTCDtlsFingerprint) alloc]
+      initWithAlgorithm:[[NSString alloc] initWithBytes:algorithm.data()
+                                                 length:algorithm.length()
+                                               encoding:NSUTF8StringEncoding]
+                  value:[[NSString alloc]
+                            initWithBytes:value.data()
+                                   length:value.length()
+                                 encoding:NSUTF8StringEncoding]] ];
+}
+
++ (nullable RTC_OBJC_TYPE(RTCCertificate) *)generateCertificateWithParams:
+    (NSDictionary *)params {
+  webrtc::KeyType keyType = webrtc::KT_ECDSA;
   NSString *keyTypeString = [params valueForKey:@"name"];
   if (keyTypeString && [keyTypeString isEqualToString:@"RSASSA-PKCS1-v1_5"]) {
-    keyType = rtc::KT_RSA;
+    keyType = webrtc::KT_RSA;
   }
 
   NSNumber *expires = [params valueForKey:@"expires"];
-  rtc::scoped_refptr<rtc::RTCCertificate> cc_certificate = nullptr;
+  webrtc::scoped_refptr<webrtc::RTCCertificate> cc_certificate = nullptr;
   if (expires != nil) {
     uint64_t expirationTimestamp = [expires unsignedLongLongValue];
-    cc_certificate = rtc::RTCCertificateGenerator::GenerateCertificate(rtc::KeyParams(keyType),
-                                                                       expirationTimestamp);
+    cc_certificate = webrtc::RTCCertificateGenerator::GenerateCertificate(
+        webrtc::KeyParams(keyType), expirationTimestamp);
   } else {
-    cc_certificate =
-        rtc::RTCCertificateGenerator::GenerateCertificate(rtc::KeyParams(keyType), absl::nullopt);
+    cc_certificate = webrtc::RTCCertificateGenerator::GenerateCertificate(
+        webrtc::KeyParams(keyType), std::nullopt);
   }
   if (!cc_certificate) {
     RTCLogError(@"Failed to generate certificate.");
     return nullptr;
   }
   // grab PEMs and create an NS RTCCerticicate
-  rtc::RTCCertificatePEM pem = cc_certificate->ToPEM();
+  webrtc::RTCCertificatePEM pem = cc_certificate->ToPEM();
   std::string pem_private_key = pem.private_key();
   std::string pem_certificate = pem.certificate();
-  RTC_LOG(LS_INFO) << "CERT PEM ";
-  RTC_LOG(LS_INFO) << pem_certificate;
 
-  RTC_OBJC_TYPE(RTCCertificate) *cert =
-      [[RTC_OBJC_TYPE(RTCCertificate) alloc] initWithPrivateKey:@(pem_private_key.c_str())
-                                                    certificate:@(pem_certificate.c_str())];
+  RTC_OBJC_TYPE(RTCCertificate) *cert = [[RTC_OBJC_TYPE(RTCCertificate) alloc]
+      initWithPrivateKey:[[NSString alloc]
+                             initWithBytes:pem_private_key.data()
+                                    length:pem_private_key.length()
+                                  encoding:NSUTF8StringEncoding]
+             certificate:[[NSString alloc]
+                             initWithBytes:pem_certificate.data()
+                                    length:pem_certificate.length()
+                                  encoding:NSUTF8StringEncoding]];
   return cert;
 }
 

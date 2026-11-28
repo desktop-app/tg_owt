@@ -10,24 +10,39 @@
 
 #include "modules/audio_processing/test/audioproc_float_impl.h"
 
-#include <string.h>
-
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/strings/string_view.h"
-#include "modules/audio_processing/include/audio_processing.h"
+#include "api/audio/audio_processing.h"
+#include "api/audio/builtin_audio_processing_builder.h"
+#include "api/audio/echo_canceller3_config.h"
+#include "api/audio/echo_detector_creator.h"
+#include "api/audio/neural_residual_echo_estimator.h"
+#include "api/audio/neural_residual_echo_estimator_creator.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
+#include "api/field_trials.h"
+#include "api/scoped_refptr.h"
+#include "common_audio/wav_file.h"
 #include "modules/audio_processing/test/aec_dump_based_simulator.h"
 #include "modules/audio_processing/test/audio_processing_simulator.h"
+#include "modules/audio_processing/test/echo_canceller3_config_json.h"
 #include "modules/audio_processing/test/wav_based_simulator.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/strings/string_builder.h"
-#include "system_wrappers/include/field_trial.h"
+#include "third_party/tflite/src/tensorflow/lite/kernels/register.h"
+#include "third_party/tflite/src/tensorflow/lite/model_builder.h"
 
 constexpr int kParameterNotSpecifiedValue = -10000;
 
@@ -66,10 +81,6 @@ ABSL_FLAG(int,
           aec,
           kParameterNotSpecifiedValue,
           "Activate (1) or deactivate (0) the echo canceller");
-ABSL_FLAG(int,
-          aecm,
-          kParameterNotSpecifiedValue,
-          "Activate (1) or deactivate (0) the mobile echo controller");
 ABSL_FLAG(int,
           ed,
           kParameterNotSpecifiedValue,
@@ -122,6 +133,11 @@ ABSL_FLAG(bool,
           "Activate all of the default components (will be overridden by any "
           "other settings)");
 ABSL_FLAG(int,
+          use_adaptive_stereo_downmixing_for_aec,
+          kParameterNotSpecifiedValue,
+          "Activate (1) or deactivate (0) adaptive downmixing for stereo "
+          "microphones when aec is active");
+ABSL_FLAG(int,
           analog_agc_use_digital_adaptive_controller,
           kParameterNotSpecifiedValue,
           "Activate (1) or deactivate (0) digital adaptation in AGC1. "
@@ -150,6 +166,10 @@ ABSL_FLAG(float,
           agc2_fixed_gain_db,
           kParameterNotSpecifiedValue,
           "AGC2 fixed gain (dB) to apply");
+ABSL_FLAG(int,
+          agc2_enable_input_volume_controller,
+          kParameterNotSpecifiedValue,
+          "Activate (1) or deactivate (0) the AGC2 input volume adjustments");
 ABSL_FLAG(float,
           pre_amplifier_gain_factor,
           kParameterNotSpecifiedValue,
@@ -244,10 +264,6 @@ ABSL_FLAG(bool,
           false,
           "Avoid producing information about the progress.");
 ABSL_FLAG(bool,
-          bitexactness_report,
-          false,
-          "Report bitexactness for aec dump result reproduction");
-ABSL_FLAG(bool,
           discard_settings_in_aecdump,
           false,
           "Discard any config settings specified in the aec dump");
@@ -318,8 +334,14 @@ ABSL_FLAG(std::string,
           force_fieldtrials,
           "",
           "Field trials control experimental feature code which can be forced. "
-          "E.g. running with --force_fieldtrials=WebRTC-FooFeature/Enable/"
-          " will assign the group Enable to field trial WebRTC-FooFeature.");
+          "E.g. running with --force_fieldtrials=WebRTC-FooFeature/Enabled/"
+          " will assign the group Enabled to field trial WebRTC-FooFeature.");
+
+ABSL_FLAG(std::string,
+          ree_model,
+          "",
+          "When running with a neural residual echo estimator, the path to the "
+          "model binary.");
 
 namespace webrtc {
 namespace test {
@@ -335,19 +357,19 @@ const char kUsageDescription[] =
     "protobuf debug dump recordings.\n";
 
 void SetSettingIfSpecified(absl::string_view value,
-                           absl::optional<std::string>* parameter) {
+                           std::optional<std::string>* parameter) {
   if (value.compare("") != 0) {
     *parameter = std::string(value);
   }
 }
 
-void SetSettingIfSpecified(int value, absl::optional<int>* parameter) {
+void SetSettingIfSpecified(int value, std::optional<int>* parameter) {
   if (value != kParameterNotSpecifiedValue) {
     *parameter = value;
   }
 }
 
-void SetSettingIfSpecified(float value, absl::optional<float>* parameter) {
+void SetSettingIfSpecified(float value, std::optional<float>* parameter) {
   constexpr float kFloatParameterNotSpecifiedValue =
       kParameterNotSpecifiedValue;
   if (value != kFloatParameterNotSpecifiedValue) {
@@ -355,7 +377,7 @@ void SetSettingIfSpecified(float value, absl::optional<float>* parameter) {
   }
 }
 
-void SetSettingIfFlagSet(int32_t flag, absl::optional<bool>* parameter) {
+void SetSettingIfFlagSet(int32_t flag, std::optional<bool>* parameter) {
   if (flag == 0) {
     *parameter = false;
   } else if (flag == 1) {
@@ -374,7 +396,6 @@ SimulationSettings CreateSettings() {
     settings.use_agc2 = false;
     settings.use_pre_amplifier = false;
     settings.use_aec = true;
-    settings.use_aecm = false;
     settings.use_ed = false;
   }
   SetSettingIfSpecified(absl::GetFlag(FLAGS_dump_input),
@@ -400,7 +421,6 @@ SimulationSettings CreateSettings() {
   SetSettingIfSpecified(absl::GetFlag(FLAGS_reverse_output_sample_rate_hz),
                         &settings.reverse_output_sample_rate_hz);
   SetSettingIfFlagSet(absl::GetFlag(FLAGS_aec), &settings.use_aec);
-  SetSettingIfFlagSet(absl::GetFlag(FLAGS_aecm), &settings.use_aecm);
   SetSettingIfFlagSet(absl::GetFlag(FLAGS_ed), &settings.use_ed);
   SetSettingIfSpecified(absl::GetFlag(FLAGS_ed_graph),
                         &settings.ed_graph_output_filename);
@@ -429,9 +449,10 @@ SimulationSettings CreateSettings() {
                         &settings.agc_compression_gain);
   SetSettingIfFlagSet(absl::GetFlag(FLAGS_agc2_enable_adaptive_gain),
                       &settings.agc2_use_adaptive_gain);
-
   SetSettingIfSpecified(absl::GetFlag(FLAGS_agc2_fixed_gain_db),
                         &settings.agc2_fixed_gain_db);
+  SetSettingIfFlagSet(absl::GetFlag(FLAGS_agc2_enable_input_volume_controller),
+                      &settings.agc2_use_input_volume_controller);
   SetSettingIfSpecified(absl::GetFlag(FLAGS_pre_amplifier_gain_factor),
                         &settings.pre_amplifier_gain_factor);
   SetSettingIfSpecified(absl::GetFlag(FLAGS_pre_gain_factor),
@@ -475,9 +496,11 @@ SimulationSettings CreateSettings() {
   settings.report_performance = absl::GetFlag(FLAGS_performance_report);
   SetSettingIfSpecified(absl::GetFlag(FLAGS_performance_report_output_file),
                         &settings.performance_report_output_filename);
+  SetSettingIfFlagSet(
+      absl::GetFlag(FLAGS_use_adaptive_stereo_downmixing_for_aec),
+      &settings.use_adaptive_stereo_downmixing_for_aec);
   settings.use_verbose_logging = absl::GetFlag(FLAGS_verbose);
   settings.use_quiet_output = absl::GetFlag(FLAGS_quiet);
-  settings.report_bitexactness = absl::GetFlag(FLAGS_bitexactness_report);
   settings.discard_all_settings_in_aecdump =
       absl::GetFlag(FLAGS_discard_settings_in_aecdump);
   settings.fixed_interface = absl::GetFlag(FLAGS_fixed_interface);
@@ -502,14 +525,14 @@ SimulationSettings CreateSettings() {
                         &settings.dump_end_frame);
 
   constexpr int kFramesPerSecond = 100;
-  absl::optional<float> start_seconds;
+  std::optional<float> start_seconds;
   SetSettingIfSpecified(absl::GetFlag(FLAGS_dump_start_seconds),
                         &start_seconds);
   if (start_seconds) {
     settings.dump_start_frame = *start_seconds * kFramesPerSecond;
   }
 
-  absl::optional<float> end_seconds;
+  std::optional<float> end_seconds;
   SetSettingIfSpecified(absl::GetFlag(FLAGS_dump_end_seconds), &end_seconds);
   if (end_seconds) {
     settings.dump_end_frame = *end_seconds * kFramesPerSecond;
@@ -517,6 +540,8 @@ SimulationSettings CreateSettings() {
 
   SetSettingIfSpecified(absl::GetFlag(FLAGS_init_to_process),
                         &settings.init_to_process);
+  SetSettingIfSpecified(absl::GetFlag(FLAGS_ree_model),
+                        &settings.neural_echo_residual_estimator_model);
 
   return settings;
 }
@@ -528,19 +553,11 @@ void ReportConditionalErrorAndExit(bool condition, absl::string_view message) {
   }
 }
 
-void PerformBasicParameterSanityChecks(
-    const SimulationSettings& settings,
-    bool pre_constructed_ap_provided,
-    bool pre_constructed_ap_builder_provided) {
+void PerformBasicParameterSanityChecks(const SimulationSettings& settings) {
   if (settings.input_filename || settings.reverse_input_filename) {
     ReportConditionalErrorAndExit(
         !!settings.aec_dump_input_filename,
         "Error: The aec dump file cannot be specified "
-        "together with input wav files!\n");
-
-    ReportConditionalErrorAndExit(
-        !!settings.aec_dump_input_string,
-        "Error: The aec dump input string cannot be specified "
         "together with input wav files!\n");
 
     ReportConditionalErrorAndExit(!!settings.artificial_nearend_filename,
@@ -558,24 +575,14 @@ void PerformBasicParameterSanityChecks(
         "must be specified if the reverse output wav filename is specified!\n");
   } else {
     ReportConditionalErrorAndExit(
-        !settings.aec_dump_input_filename && !settings.aec_dump_input_string,
-        "Error: Either the aec dump input file, the wav "
-        "input file or the aec dump input string must be specified!\n");
-    ReportConditionalErrorAndExit(
-        settings.aec_dump_input_filename && settings.aec_dump_input_string,
-        "Error: The aec dump input file cannot be specified together with the "
-        "aec dump input string!\n");
+        !settings.aec_dump_input_filename,
+        "Error: The aec dump input file must be specified!\n");
   }
 
   ReportConditionalErrorAndExit(settings.use_aec && !(*settings.use_aec) &&
                                     settings.linear_aec_output_filename,
                                 "Error: The linear AEC ouput filename cannot "
                                 "be specified without the AEC being active");
-
-  ReportConditionalErrorAndExit(
-      settings.use_aec && *settings.use_aec && settings.use_aecm &&
-          *settings.use_aecm,
-      "Error: The AEC and the AECM cannot be activated at the same time!\n");
 
   ReportConditionalErrorAndExit(
       settings.output_sample_rate_hz && *settings.output_sample_rate_hz <= 0,
@@ -616,10 +623,6 @@ void PerformBasicParameterSanityChecks(
           ((*settings.ns_level) < 0 || (*settings.ns_level) > 3),
       "Error: --ns_level must be specified between 0 and 3.\n");
 
-  ReportConditionalErrorAndExit(
-      settings.report_bitexactness && !settings.aec_dump_input_filename,
-      "Error: --bitexactness_report can only be used when operating on an "
-      "aecdump\n");
 
   ReportConditionalErrorAndExit(
       settings.call_order_input_filename && settings.aec_dump_input_filename,
@@ -716,23 +719,21 @@ void PerformBasicParameterSanityChecks(
           settings.pre_amplifier_gain_factor.has_value(),
       "Error: --pre_amplifier_gain_factor needs --pre_amplifier to be "
       "specified and set.\n");
+}
 
+void CheckSettingsForBuiltinBuilderAreUnused(
+    const SimulationSettings& settings) {
   ReportConditionalErrorAndExit(
-      pre_constructed_ap_provided && pre_constructed_ap_builder_provided,
-      "Error: The AudioProcessing and the AudioProcessingBuilder cannot both "
-      "be specified at the same time.\n");
-
-  ReportConditionalErrorAndExit(
-      settings.aec_settings_filename && pre_constructed_ap_provided,
+      settings.aec_settings_filename.has_value(),
       "Error: The aec_settings_filename cannot be specified when a "
       "pre-constructed audio processing object is provided.\n");
 
   ReportConditionalErrorAndExit(
-      settings.aec_settings_filename && pre_constructed_ap_provided,
+      settings.print_aec_parameter_values,
       "Error: The print_aec_parameter_values cannot be set when a "
       "pre-constructed audio processing object is provided.\n");
 
-  if (settings.linear_aec_output_filename && pre_constructed_ap_provided) {
+  if (settings.linear_aec_output_filename) {
     std::cout << "Warning: For the linear AEC output to be stored, this must "
                  "be configured in the AEC that is part of the provided "
                  "AudioProcessing object."
@@ -740,37 +741,117 @@ void PerformBasicParameterSanityChecks(
   }
 }
 
-int RunSimulation(rtc::scoped_refptr<AudioProcessing> audio_processing,
-                  std::unique_ptr<AudioProcessingBuilder> ap_builder,
-                  int argc,
-                  char* argv[],
-                  absl::string_view input_aecdump,
-                  std::vector<float>* processed_capture_samples) {
+// Helper for reading JSON from a file and parsing it to an AEC3 configuration.
+EchoCanceller3Config ReadAec3ConfigFromJsonFile(absl::string_view filename) {
+  std::string json_string;
+  std::string s;
+  std::ifstream f(std::string(filename).c_str());
+  if (f.fail()) {
+    std::cout << "Failed to open the file " << filename << std::endl;
+    RTC_CHECK_NOTREACHED();
+  }
+  while (std::getline(f, s)) {
+    json_string += s;
+  }
+
+  bool parsing_successful;
+  EchoCanceller3Config cfg;
+  Aec3ConfigFromJsonString(json_string, &cfg, &parsing_successful);
+  if (!parsing_successful) {
+    std::cout << "Parsing of json string failed: " << std::endl
+              << json_string << std::endl;
+    RTC_CHECK_NOTREACHED();
+  }
+  RTC_CHECK(EchoCanceller3Config::Validate(&cfg));
+
+  return cfg;
+}
+
+void SetDependencies(const SimulationSettings& settings,
+                     BuiltinAudioProcessingBuilder& builder,
+                     AudioProcessingBuilderState& builder_state) {
+  EchoCanceller3Config aec3_config =
+      builder.echo_canceller_config().value_or(EchoCanceller3Config());
+  std::optional<EchoCanceller3Config> aec3_multichannel_config =
+      builder.echo_canceller_multichannel_config();
+  bool modify_aec_config = false;
+  if (settings.neural_echo_residual_estimator_model) {
+    tflite::ops::builtin::BuiltinOpResolver op_resolver;
+    builder_state.model = tflite::FlatBufferModel::BuildFromFile(
+        (*settings.neural_echo_residual_estimator_model).c_str());
+    RTC_CHECK(builder_state.model);
+    std::unique_ptr<NeuralResidualEchoEstimator> estimator =
+        CreateNeuralResidualEchoEstimator(builder_state.model.get(),
+                                          &op_resolver);
+    RTC_CHECK(estimator);
+    builder.SetNeuralResidualEchoEstimator(std::move(estimator));
+  }
+
+  if (settings.aec_settings_filename) {
+    if (settings.use_verbose_logging) {
+      std::cout << "Reading AEC Parameters from JSON input." << std::endl;
+    }
+    aec3_config = ReadAec3ConfigFromJsonFile(*settings.aec_settings_filename);
+    modify_aec_config = true;
+  }
+
+  if (settings.linear_aec_output_filename) {
+    aec3_config.filter.export_linear_aec_output = true;
+    if (aec3_multichannel_config) {
+      aec3_multichannel_config->filter.export_linear_aec_output = true;
+    }
+    modify_aec_config = true;
+  }
+
+  if (settings.print_aec_parameter_values) {
+    if (!settings.use_quiet_output) {
+      std::cout << "AEC settings:" << std::endl;
+    }
+    std::cout << Aec3ConfigToJsonString(aec3_config) << std::endl;
+  }
+
+  if (modify_aec_config) {
+    builder.SetEchoCancellerConfig(aec3_config, aec3_multichannel_config);
+  }
+
+  if (settings.use_ed && *settings.use_ed) {
+    builder.SetEchoDetector(CreateEchoDetector());
+  }
+}
+
+int RunSimulation(
+    absl_nonnull std::unique_ptr<AudioProcessingBuilderInterface> ap_builder,
+    bool builtin_builder_provided,
+    int argc,
+    char* argv[]) {
   std::vector<char*> args = absl::ParseCommandLine(argc, argv);
   if (args.size() != 1) {
     printf("%s", kUsageDescription);
     return 1;
   }
-  // InitFieldTrialsFromString stores the char*, so the char array must
-  // outlive the application.
-  const std::string field_trials = absl::GetFlag(FLAGS_force_fieldtrials);
-  webrtc::field_trial::InitFieldTrialsFromString(field_trials.c_str());
+  FieldTrials field_trials(absl::GetFlag(FLAGS_force_fieldtrials));
+  const Environment env = CreateEnvironment(&field_trials);
 
   SimulationSettings settings = CreateSettings();
-  if (!input_aecdump.empty()) {
-    settings.aec_dump_input_string = input_aecdump;
-    settings.processed_capture_samples = processed_capture_samples;
-    RTC_CHECK(settings.processed_capture_samples);
-  }
-  PerformBasicParameterSanityChecks(settings, !!audio_processing, !!ap_builder);
-  std::unique_ptr<AudioProcessingSimulator> processor;
-
-  if (settings.aec_dump_input_filename || settings.aec_dump_input_string) {
-    processor.reset(new AecDumpBasedSimulator(
-        settings, std::move(audio_processing), std::move(ap_builder)));
+  PerformBasicParameterSanityChecks(settings);
+  AudioProcessingBuilderState ap_builder_state;
+  if (builtin_builder_provided) {
+    SetDependencies(settings,
+                    static_cast<BuiltinAudioProcessingBuilder&>(*ap_builder),
+                    ap_builder_state);
   } else {
-    processor.reset(new WavBasedSimulator(settings, std::move(audio_processing),
-                                          std::move(ap_builder)));
+    CheckSettingsForBuiltinBuilderAreUnused(settings);
+  }
+  scoped_refptr<AudioProcessing> audio_processing = ap_builder->Build(env);
+  RTC_CHECK(audio_processing);
+
+  std::unique_ptr<AudioProcessingSimulator> processor;
+  if (settings.aec_dump_input_filename) {
+    processor = std::make_unique<AecDumpBasedSimulator>(
+        settings, std::move(audio_processing));
+  } else {
+    processor = std::make_unique<WavBasedSimulator>(
+        settings, std::move(audio_processing));
   }
 
   if (settings.analysis_only) {
@@ -787,34 +868,25 @@ int RunSimulation(rtc::scoped_refptr<AudioProcessing> audio_processing,
         *settings.performance_report_output_filename);
   }
 
-  if (settings.report_bitexactness && settings.aec_dump_input_filename) {
-    if (processor->OutputWasBitexact()) {
-      std::cout << "The processing was bitexact.";
-    } else {
-      std::cout << "The processing was not bitexact.";
-    }
-  }
-
   return 0;
 }
 
 }  // namespace
 
-int AudioprocFloatImpl(rtc::scoped_refptr<AudioProcessing> audio_processing,
-                       int argc,
-                       char* argv[]) {
-  return RunSimulation(
-      std::move(audio_processing), /*ap_builder=*/nullptr, argc, argv,
-      /*input_aecdump=*/"", /*processed_capture_samples=*/nullptr);
+int AudioprocFloatImpl(
+    absl_nonnull std::unique_ptr<BuiltinAudioProcessingBuilder> ap_builder,
+    int argc,
+    char* argv[]) {
+  return RunSimulation(std::move(ap_builder), /*builtin_builder_provided=*/true,
+                       argc, argv);
 }
 
-int AudioprocFloatImpl(std::unique_ptr<AudioProcessingBuilder> ap_builder,
-                       int argc,
-                       char* argv[],
-                       absl::string_view input_aecdump,
-                       std::vector<float>* processed_capture_samples) {
-  return RunSimulation(/*audio_processing=*/nullptr, std::move(ap_builder),
-                       argc, argv, input_aecdump, processed_capture_samples);
+int AudioprocFloatImpl(
+    absl_nonnull std::unique_ptr<AudioProcessingBuilderInterface> ap_builder,
+    int argc,
+    char* argv[]) {
+  return RunSimulation(std::move(ap_builder),
+                       /*builtin_builder_provided=*/false, argc, argv);
 }
 
 }  // namespace test

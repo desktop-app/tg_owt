@@ -12,12 +12,13 @@
 
 #include <jni.h>
 
-#include <memory>
-
+#include "api/environment/environment.h"
+#include "api/make_ref_counted.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
-#include "rtc_base/logging.h"
+#include "rtc_base/thread.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/android_video_track_source.h"
 #include "sdk/android/src/jni/video_decoder_factory_wrapper.h"
 #include "sdk/android/src/jni/video_encoder_factory_wrapper.h"
@@ -42,12 +43,13 @@ VideoDecoderFactory* CreateVideoDecoderFactory(
 }
 
 void* CreateVideoSource(JNIEnv* env,
-                        rtc::Thread* signaling_thread,
-                        rtc::Thread* worker_thread,
+                        Thread* signaling_thread,
+                        Thread* worker_thread,
                         jboolean is_screencast,
-                        jboolean align_timestamps) {
-  auto source = rtc::make_ref_counted<AndroidVideoTrackSource>(
-      signaling_thread, env, is_screencast, align_timestamps);
+                        jboolean align_timestamps,
+                        std::optional<Environment> env_webrtc) {
+  auto source = make_ref_counted<AndroidVideoTrackSource>(
+      signaling_thread, env, is_screencast, align_timestamps, env_webrtc);
   return source.release();
 }
 

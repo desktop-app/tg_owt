@@ -35,7 +35,7 @@ public class EncodedImage implements RefCounted {
       return nativeIndex;
     }
 
-    @CalledByNative("FrameType")
+    @CalledByNative
     static FrameType fromNativeIndex(int nativeIndex) {
       for (FrameType type : FrameType.values()) {
         if (type.getNative() == nativeIndex) {
@@ -82,36 +82,43 @@ public class EncodedImage implements RefCounted {
     this.refCountDelegate = new RefCountDelegate(releaseCallback);
   }
 
+  @SuppressWarnings("UnusedMethod")
   @CalledByNative
   private ByteBuffer getBuffer() {
     return buffer;
   }
 
+  @SuppressWarnings("UnusedMethod")
   @CalledByNative
   private int getEncodedWidth() {
     return encodedWidth;
   }
 
+  @SuppressWarnings("UnusedMethod")
   @CalledByNative
   private int getEncodedHeight() {
     return encodedHeight;
   }
 
+  @SuppressWarnings("UnusedMethod")
   @CalledByNative
   private long getCaptureTimeNs() {
     return captureTimeNs;
   }
 
+  @SuppressWarnings("UnusedMethod")
   @CalledByNative
   private int getFrameType() {
     return frameType.getNative();
   }
 
+  @SuppressWarnings("UnusedMethod")
   @CalledByNative
   private int getRotation() {
     return rotation;
   }
 
+  @SuppressWarnings("UnusedMethod")
   @CalledByNative
   private @Nullable Integer getQp() {
     return qp;

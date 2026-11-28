@@ -8,8 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdio.h>
-
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 
 #include "modules/remote_bitrate_estimator/tools/bwe_rtp.h"
@@ -37,7 +38,7 @@ int main(int argc, char* argv[]) {
   webrtc::test::RtpPacket packet;
   while (reader->NextPacket(&packet)) {
     webrtc::RtpPacket header(&rtp_header_extensions);
-    header.Parse(packet.data, packet.length);
+    header.Parse(packet.buffer);
     uint32_t abs_send_time = 0;
     if (header.GetExtension<webrtc::AbsoluteSendTime>(&abs_send_time) &&
         abs_send_time != 0)
@@ -47,13 +48,13 @@ int main(int argc, char* argv[]) {
         toffset != 0)
       ++non_zero_ts_offsets;
     if (arrival_time_only) {
-      rtc::StringBuilder ss;
+      webrtc::StringBuilder ss;
       ss << static_cast<int64_t>(packet.time_ms) * 1000000;
       fprintf(stdout, "%s\n", ss.str().c_str());
     } else {
       fprintf(stdout, "%u %u %d %u %u %d %u %zu %zu\n", header.SequenceNumber(),
               header.Timestamp(), toffset, abs_send_time, packet.time_ms,
-              header.Marker(), header.Ssrc(), packet.length,
+              header.Marker(), header.Ssrc(), packet.length(),
               packet.original_length);
     }
     ++packet_counter;

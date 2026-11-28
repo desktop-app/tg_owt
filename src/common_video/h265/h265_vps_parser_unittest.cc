@@ -10,10 +10,9 @@
 
 #include "common_video/h265/h265_vps_parser.h"
 
-#include "common_video/h265/h265_common.h"
-#include "rtc_base/arraysize.h"
-#include "rtc_base/bit_buffer.h"
-#include "rtc_base/buffer.h"
+#include <cstdint>
+#include <optional>
+
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -32,7 +31,7 @@ class H265VpsParserTest : public ::testing::Test {
   H265VpsParserTest() {}
   ~H265VpsParserTest() override {}
 
-  absl::optional<H265VpsParser::VpsState> vps_;
+  std::optional<H265VpsParser::VpsState> vps_;
 };
 
 TEST_F(H265VpsParserTest, TestSampleVPSId) {
@@ -41,8 +40,7 @@ TEST_F(H265VpsParserTest, TestSampleVPSId) {
       0x1c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00, 0x9d,
       0x08, 0x00, 0x00, 0x03, 0x00, 0x00, 0x78, 0x95, 0x98, 0x09,
   };
-  EXPECT_TRUE(static_cast<bool>(
-      vps_ = H265VpsParser::ParseVps(buffer, arraysize(buffer))));
+  EXPECT_TRUE(static_cast<bool>(vps_ = H265VpsParser::ParseVps(buffer)));
   EXPECT_EQ(1u, vps_->id);
 }
 

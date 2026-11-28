@@ -10,32 +10,46 @@
 
 package org.webrtc;
 
+import org.jni_zero.NativeMethods;
+
+/**
+ * Java wrapper for Logging::LogSink which is used to output logs to a call session file rotating
+ * log sink.
+ */
 public class CallSessionFileRotatingLogSink {
-  private long nativeSink;
+  private final NativeLifecycleLock lifecycleLock;
 
   public static byte[] getLogData(String dirPath) {
     if (dirPath == null) {
       throw new IllegalArgumentException("dirPath may not be null.");
     }
-    return nativeGetLogData(dirPath);
+    return CallSessionFileRotatingLogSinkJni.get().getLogData(dirPath);
   }
 
+  @SuppressWarnings("EnumOrdinal")
   public CallSessionFileRotatingLogSink(
       String dirPath, int maxFileSize, Logging.Severity severity) {
     if (dirPath == null) {
       throw new IllegalArgumentException("dirPath may not be null.");
     }
-    nativeSink = nativeAddSink(dirPath, maxFileSize, severity.ordinal());
+    this.lifecycleLock =
+        new NativeLifecycleLock(
+            "CallSessionFileRotatingLogSink",
+            CallSessionFileRotatingLogSinkJni.get()
+                .addSink(dirPath, maxFileSize, severity.ordinal()));
   }
 
   public void dispose() {
-    if (nativeSink != 0) {
-      nativeDeleteSink(nativeSink);
-      nativeSink = 0;
-    }
+    lifecycleLock.dispose(
+        nativeSink -> CallSessionFileRotatingLogSinkJni.get().deleteSink(nativeSink));
   }
 
-  private static native long nativeAddSink(String dirPath, int maxFileSize, int severity);
-  private static native void nativeDeleteSink(long sink);
-  private static native byte[] nativeGetLogData(String dirPath);
+  @NativeMethods
+  interface Natives {
+    long addSink(String dirPath, int maxFileSize, int severity);
+
+    void deleteSink(long sink);
+
+    byte[] getLogData(String dirPath);
+  }
 }

@@ -59,7 +59,7 @@ public class HardwareVideoEncoderTest {
   private static final VideoEncoder.Settings SETTINGS =
       new VideoEncoder.Settings(1 /* core */, 640 /* width */, 480 /* height */, 300 /* kbps */,
           30 /* fps */, 1 /* numberOfSimulcastStreams */, true /* automaticResizeOn */,
-          /* capabilities= */ new VideoEncoder.Capabilities(false /* lossNotification */));
+          /* capabilities= */ new VideoEncoder.Capabilities());
   private static final int ENCODE_TIMEOUT_MS = 1000;
   private static final int NUM_TEST_FRAMES = 10;
   private static final int NUM_ENCODE_TRIES = 100;
@@ -73,7 +73,7 @@ public class HardwareVideoEncoderTest {
    * frame such as width and height. Also used from AndroidVideoDecoderInstrumentationTest.
    */
   static class MockEncoderCallback implements VideoEncoder.Callback {
-    private BlockingQueue<EncodedImage> frameQueue = new LinkedBlockingQueue<>();
+    private final BlockingQueue<EncodedImage> frameQueue = new LinkedBlockingQueue<>();
 
     @Override
     public void onEncodedFrame(EncodedImage frame, VideoEncoder.CodecSpecificInfo info) {
@@ -264,7 +264,7 @@ public class HardwareVideoEncoderTest {
   private final Object referencedFramesLock = new Object();
   private int referencedFrames;
 
-  private Runnable releaseFrameCallback = new Runnable() {
+  private final Runnable releaseFrameCallback = new Runnable() {
     @Override
     public void run() {
       synchronized (referencedFramesLock) {

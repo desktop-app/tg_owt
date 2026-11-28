@@ -11,8 +11,12 @@
 #include "modules/audio_processing/aec3/subtractor_output_analyzer.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <span>
 
 #include "modules/audio_processing/aec3/aec3_common.h"
+#include "modules/audio_processing/aec3/subtractor_output.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -20,7 +24,7 @@ SubtractorOutputAnalyzer::SubtractorOutputAnalyzer(size_t num_capture_channels)
     : filters_converged_(num_capture_channels, false) {}
 
 void SubtractorOutputAnalyzer::Update(
-    rtc::ArrayView<const SubtractorOutput> subtractor_output,
+    std::span<const SubtractorOutput> subtractor_output,
     bool* any_filter_converged,
     bool* any_coarse_filter_converged,
     bool* all_filters_diverged) {
@@ -44,7 +48,7 @@ void SubtractorOutputAnalyzer::Update(
     bool coarse_filter_converged_strict =
         e2_coarse < 0.05f * y2 && y2 > kConvergenceThreshold;
     bool coarse_filter_converged_relaxed =
-        e2_coarse < 0.2f * y2 && y2 > kConvergenceThresholdLowLevel;
+        e2_coarse < 0.3f * y2 && y2 > kConvergenceThresholdLowLevel;
     float min_e2 = std::min(e2_refined, e2_coarse);
     bool filter_diverged = min_e2 > 1.5f * y2 && y2 > 30.f * 30.f * kBlockSize;
     filters_converged_[ch] =

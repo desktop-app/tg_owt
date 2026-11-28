@@ -10,16 +10,18 @@
 
 #include "modules/audio_coding/neteq/tools/rtp_file_source.h"
 
-#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <optional>
 
 #include "absl/strings/string_view.h"
-#ifndef WIN32
-#include <netinet/in.h>
-#endif
-
-#include <memory>
-
-#include "modules/audio_coding/neteq/tools/packet.h"
+#include "api/rtp_header_extension_id.h"
+#include "api/units/timestamp.h"
+#include "modules/audio_coding/neteq/tools/packet_source.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/checks.h"
 #include "test/rtp_file_reader.h"
 
@@ -27,7 +29,7 @@ namespace webrtc {
 namespace test {
 
 RtpFileSource* RtpFileSource::Create(absl::string_view file_name,
-                                     absl::optional<uint32_t> ssrc_filter) {
+                                     std::optional<uint32_t> ssrc_filter) {
   RtpFileSource* source = new RtpFileSource(ssrc_filter);
   RTC_CHECK(source->OpenFile(file_name));
   return source;
@@ -48,38 +50,50 @@ bool RtpFileSource::ValidPcap(absl::string_view file_name) {
 RtpFileSource::~RtpFileSource() {}
 
 bool RtpFileSource::RegisterRtpHeaderExtension(RTPExtensionType type,
-                                               uint8_t id) {
+                                               RtpHeaderExtensionId id) {
   return rtp_header_extension_map_.RegisterByType(id, type);
 }
 
-std::unique_ptr<Packet> RtpFileSource::NextPacket() {
+std::unique_ptr<RtpPacketReceived> RtpFileSource::NextPacket() {
   while (true) {
     RtpPacket temp_packet;
     if (!rtp_reader_->NextPacket(&temp_packet)) {
-      return NULL;
+      return nullptr;
     }
     if (temp_packet.original_length == 0) {
       // May be an RTCP packet.
       // Read the next one.
       continue;
     }
-    auto packet = std::make_unique<Packet>(
-        rtc::CopyOnWriteBuffer(temp_packet.data, temp_packet.length),
-        temp_packet.original_length, temp_packet.time_ms,
-        &rtp_header_extension_map_);
-    if (!packet->valid_header()) {
+    auto rtp_packet =
+        std::make_unique<RtpPacketReceived>(&rtp_header_extension_map_);
+    if (!rtp_packet->Parse(temp_packet.buffer)) {
       continue;
     }
-    if (filter_.test(packet->header().payloadType) ||
-        (ssrc_filter_ && packet->header().ssrc != *ssrc_filter_)) {
+    if (filter_.test(rtp_packet->PayloadType()) ||
+        (ssrc_filter_ && rtp_packet->Ssrc() != *ssrc_filter_)) {
       // This payload type should be filtered out. Continue to the next packet.
       continue;
     }
-    return packet;
+    rtp_packet->set_arrival_time(Timestamp::Millis(temp_packet.time_ms));
+
+    // Simulate payload if only the RTP header was written in the file.
+    if (temp_packet.original_length > rtp_packet->size()) {
+      size_t payload_size =
+          temp_packet.original_length - rtp_packet->headers_size();
+      if (rtp_packet->has_padding()) {
+        // If padding bit is set in the RTP header, assume it was a pure padding
+        // packet.
+        rtp_packet->SetPadding(payload_size);
+      } else {
+        std::fill_n(rtp_packet->AllocatePayload(payload_size), payload_size, 0);
+      }
+    }
+    return rtp_packet;
   }
 }
 
-RtpFileSource::RtpFileSource(absl::optional<uint32_t> ssrc_filter)
+RtpFileSource::RtpFileSource(std::optional<uint32_t> ssrc_filter)
     : PacketSource(), ssrc_filter_(ssrc_filter) {}
 
 bool RtpFileSource::OpenFile(absl::string_view file_name) {

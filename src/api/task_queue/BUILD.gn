@@ -10,24 +10,19 @@ import("../../webrtc.gni")
 
 rtc_library("task_queue") {
   visibility = [ "*" ]
-  public = [
+  sources = [
+    "task_queue_base.cc",
     "task_queue_base.h",
     "task_queue_factory.h",
   ]
-  sources = [ "task_queue_base.cc" ]
 
   deps = [
     "..:location",
-    "../../rtc_base:checks",
     "../../rtc_base:macromagic",
     "../../rtc_base/system:rtc_export",
     "../units:time_delta",
-  ]
-  absl_deps = [
-    "//third_party/abseil-cpp/absl/base:config",
-    "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/functional:any_invocable",
-    "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
 }
 
@@ -56,8 +51,6 @@ rtc_library("task_queue_test") {
     deps = [
       "../../../webrtc_overrides:webrtc_component",
       "../../test:test_support",
-    ]
-    absl_deps = [
       "//third_party/abseil-cpp/absl/cleanup",
       "//third_party/abseil-cpp/absl/strings",
     ]
@@ -67,14 +60,14 @@ rtc_library("task_queue_test") {
       ":task_queue",
       "../../api:field_trials_view",
       "../../api:make_ref_counted",
+      "../../api:ref_count",
       "../../api/units:time_delta",
       "../../rtc_base:refcount",
       "../../rtc_base:rtc_event",
       "../../rtc_base:timeutils",
       "../../test:test_support",
-    ]
-    absl_deps = [
       "//third_party/abseil-cpp/absl/cleanup",
+      "//third_party/abseil-cpp/absl/functional:any_invocable",
       "//third_party/abseil-cpp/absl/strings",
     ]
   }
@@ -82,12 +75,11 @@ rtc_library("task_queue_test") {
 
 rtc_library("default_task_queue_factory") {
   visibility = [ "*" ]
-  if (!is_ios && !is_android) {
-    # Internally webrtc shouldn't rely on any specific TaskQueue implementation
-    # and should create TaskQueue using TaskQueueFactory interface.
-    # TaskQueueFactory interface can be propagated with Environment.
-    poisonous = [ "environment_construction" ]
-  }
+
+  # Internally webrtc shouldn't rely on any specific TaskQueue implementation
+  # and should create TaskQueue using TaskQueueFactory interface.
+  # TaskQueueFactory interface can be propagated with Environment.
+  poisonous = [ "environment_construction" ]
   sources = [ "default_task_queue_factory.h" ]
   deps = [
     ":task_queue",
@@ -95,21 +87,7 @@ rtc_library("default_task_queue_factory") {
     "../../rtc_base/memory:always_valid_pointer",
   ]
 
-  if (rtc_enable_libevent) {
-    if (is_android) {
-      sources +=
-          [ "default_task_queue_factory_stdlib_or_libevent_experiment.cc" ]
-      deps += [
-        "../../api/transport:field_trial_based_config",
-        "../../rtc_base:logging",
-        "../../rtc_base:rtc_task_queue_libevent",
-        "../../rtc_base:rtc_task_queue_stdlib",
-      ]
-    } else {
-      sources += [ "default_task_queue_factory_libevent.cc" ]
-      deps += [ "../../rtc_base:rtc_task_queue_libevent" ]
-    }
-  } else if (is_mac || is_ios) {
+  if (is_mac || is_ios) {
     sources += [ "default_task_queue_factory_gcd.cc" ]
     deps += [ "../../rtc_base:rtc_task_queue_gcd" ]
   } else if (is_win && current_os != "winuwp" && !build_with_chromium) {
@@ -128,22 +106,20 @@ rtc_library("pending_task_safety_flag") {
     "pending_task_safety_flag.h",
   ]
   deps = [
-    "../../api:refcountedbase",
-    "../../api:scoped_refptr",
-    "../../api:sequence_checker",
+    ":task_queue",
+    "..:refcountedbase",
+    "..:scoped_refptr",
+    "..:sequence_checker",
     "../../rtc_base:checks",
     "../../rtc_base/system:no_unique_address",
     "../../rtc_base/system:rtc_export",
-  ]
-  absl_deps = [
     "//third_party/abseil-cpp/absl/base:nullability",
     "//third_party/abseil-cpp/absl/functional:any_invocable",
   ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("task_queue_default_factory_unittests") {
-    testonly = true
+  rtc_cc_test("default_task_queue_factory_unittest") {
     sources = [ "default_task_queue_factory_unittest.cc" ]
     deps = [
       ":default_task_queue_factory",
@@ -152,14 +128,14 @@ if (rtc_include_tests) {
     ]
   }
 
-  rtc_library("pending_task_safety_flag_unittests") {
-    testonly = true
+  rtc_cc_test("pending_task_safety_flag_unittest") {
     sources = [ "pending_task_safety_flag_unittest.cc" ]
     deps = [
       ":pending_task_safety_flag",
-      "../../rtc_base:logging",
+      ":task_queue",
+      "..:scoped_refptr",
+      "../../rtc_base:checks",
       "../../rtc_base:rtc_event",
-      "../../rtc_base:rtc_task_queue",
       "../../rtc_base:task_queue_for_test",
       "../../test:test_support",
     ]

@@ -9,16 +9,14 @@
  */
 #include "net/dcsctp/packet/error_cause/unrecognized_parameter_cause.h"
 
-#include <stdint.h>
-
-#include <type_traits>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "net/dcsctp/packet/bounded_byte_reader.h"
 #include "net/dcsctp/packet/bounded_byte_writer.h"
-#include "net/dcsctp/packet/tlv_trait.h"
 
 namespace dcsctp {
 
@@ -30,13 +28,12 @@ namespace dcsctp {
 //  /                  Unrecognized Parameters                      /
 //  \                                                               \
 //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-constexpr int UnrecognizedParametersCause::kType;
 
-absl::optional<UnrecognizedParametersCause> UnrecognizedParametersCause::Parse(
-    rtc::ArrayView<const uint8_t> data) {
-  absl::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
+std::optional<UnrecognizedParametersCause> UnrecognizedParametersCause::Parse(
+    std::span<const uint8_t> data) {
+  std::optional<BoundedByteReader<kHeaderSize>> reader = ParseTLV(data);
   if (!reader.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return UnrecognizedParametersCause(reader->variable_data());
 }

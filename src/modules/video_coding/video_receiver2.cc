@@ -10,15 +10,18 @@
 
 #include "modules/video_coding/video_receiver2.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <utility>
-#include <vector>
 
-#include "absl/algorithm/container.h"
-#include "api/video_codecs/video_codec.h"
+#include "absl/base/nullability.h"
+#include "api/field_trials_view.h"
+#include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/video/encoded_frame.h"
 #include "api/video_codecs/video_decoder.h"
+#include "common_video/include/corruption_score_calculator.h"
 #include "modules/video_coding/decoder_database.h"
 #include "modules/video_coding/generic_decoder.h"
 #include "modules/video_coding/include/video_coding_defines.h"
@@ -29,11 +32,16 @@
 
 namespace webrtc {
 
-VideoReceiver2::VideoReceiver2(Clock* clock,
-                               VCMTiming* timing,
-                               const FieldTrialsView& field_trials)
+VideoReceiver2::VideoReceiver2(
+    Clock* clock,
+    VCMTiming* timing,
+    const FieldTrialsView& field_trials,
+    CorruptionScoreCalculator* corruption_score_calculator)
     : clock_(clock),
-      decoded_frame_callback_(timing, clock_, field_trials),
+      decoded_frame_callback_(timing,
+                              clock_,
+                              field_trials,
+                              corruption_score_calculator),
       codec_database_() {
   decoder_sequence_checker_.Detach();
 }
@@ -72,6 +80,35 @@ bool VideoReceiver2::IsExternalDecoderRegistered(uint8_t payload_type) const {
   return codec_database_.IsExternalDecoderRegistered(payload_type);
 }
 
+VideoReceiver2::PhasedSequenceChecker::PhasedSequenceChecker()
+#if RTC_DCHECK_IS_ON
+    : construction_queue_(TaskQueueBase::Current()),
+      active_queue_(construction_queue_)
+#endif
+{
+}
+
+bool VideoReceiver2::PhasedSequenceChecker::IsCurrent() const {
+#if RTC_DCHECK_IS_ON
+  return TaskQueueBase::Current() == active_queue_;
+#else
+  return true;
+#endif
+}
+
+void VideoReceiver2::PhasedSequenceChecker::SetDecodeQueue(
+    TaskQueueBase* absl_nullable decode_queue) {
+#if RTC_DCHECK_IS_ON
+  RTC_DCHECK_RUN_ON(construction_queue_);
+  active_queue_ = decode_queue ? decode_queue : construction_queue_;
+#endif
+}
+
+void VideoReceiver2::SetDecodeQueue(TaskQueueBase* absl_nullable decode_queue) {
+  RTC_DCHECK_RUN_ON(&construction_sequence_checker_);
+  phased_sequence_checker_.SetDecodeQueue(decode_queue);
+}
+
 // Must be called from inside the receive side critical section.
 int32_t VideoReceiver2::Decode(const EncodedFrame* frame) {
   RTC_DCHECK_RUN_ON(&decoder_sequence_checker_);
@@ -90,17 +127,17 @@ int32_t VideoReceiver2::Decode(const EncodedFrame* frame) {
 void VideoReceiver2::RegisterReceiveCodec(
     uint8_t payload_type,
     const VideoDecoder::Settings& settings) {
-  RTC_DCHECK_RUN_ON(&construction_sequence_checker_);
+  RTC_DCHECK_RUN_ON(&phased_sequence_checker_);
   codec_database_.RegisterReceiveCodec(payload_type, settings);
 }
 
 void VideoReceiver2::DeregisterReceiveCodec(uint8_t payload_type) {
-  RTC_DCHECK_RUN_ON(&construction_sequence_checker_);
+  RTC_DCHECK_RUN_ON(&phased_sequence_checker_);
   codec_database_.DeregisterReceiveCodec(payload_type);
 }
 
 void VideoReceiver2::DeregisterReceiveCodecs() {
-  RTC_DCHECK_RUN_ON(&construction_sequence_checker_);
+  RTC_DCHECK_RUN_ON(&phased_sequence_checker_);
   codec_database_.DeregisterReceiveCodecs();
 }
 

@@ -10,7 +10,13 @@
 
 #include "call/adaptation/encoder_settings.h"
 
+#include <optional>
 #include <utility>
+
+#include "api/video/video_codec_type.h"
+#include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_encoder.h"
+#include "video/config/video_encoder_config.h"
 
 namespace webrtc {
 
@@ -26,12 +32,16 @@ EncoderSettings::EncoderSettings(const EncoderSettings& other)
       encoder_config_(other.encoder_config_.Copy()),
       video_codec_(other.video_codec_) {}
 
+EncoderSettings::EncoderSettings(EncoderSettings&&) = default;
+
 EncoderSettings& EncoderSettings::operator=(const EncoderSettings& other) {
   encoder_info_ = other.encoder_info_;
   encoder_config_ = other.encoder_config_.Copy();
   video_codec_ = other.video_codec_;
   return *this;
 }
+
+EncoderSettings& EncoderSettings::operator=(EncoderSettings&&) = default;
 
 const VideoEncoder::EncoderInfo& EncoderSettings::encoder_info() const {
   return encoder_info_;
@@ -46,7 +56,7 @@ const VideoCodec& EncoderSettings::video_codec() const {
 }
 
 VideoCodecType GetVideoCodecTypeOrGeneric(
-    const absl::optional<EncoderSettings>& settings) {
+    const std::optional<EncoderSettings>& settings) {
   return settings.has_value() ? settings->encoder_config().codec_type
                               : kVideoCodecGeneric;
 }

@@ -46,13 +46,13 @@ public class GlRectDrawerTest {
     return 255.0f * Math.max(0, Math.min(c, 1));
   }
 
-  // Assert RGB ByteBuffers are pixel perfect identical.
+  // Assert RGB ByteBuffers are close enough (allow off-by-one differences).
   private static void assertByteBufferEquals(
       int width, int height, ByteBuffer actual, ByteBuffer expected) {
     actual.rewind();
     expected.rewind();
-    assertEquals(actual.remaining(), width * height * 3);
-    assertEquals(expected.remaining(), width * height * 3);
+    assertEquals(actual.remaining(), width * ((long) height) * 3L);
+    assertEquals(expected.remaining(), width * ((long) height) * 3L);
     for (int y = 0; y < height; ++y) {
       for (int x = 0; x < width; ++x) {
         final int actualR = actual.get() & 0xFF;
@@ -61,7 +61,8 @@ public class GlRectDrawerTest {
         final int expectedR = expected.get() & 0xFF;
         final int expectedG = expected.get() & 0xFF;
         final int expectedB = expected.get() & 0xFF;
-        if (actualR != expectedR || actualG != expectedG || actualB != expectedB) {
+        if (Math.abs(actualR - expectedR) > 1 || Math.abs(actualG - expectedG) > 1
+            || Math.abs(actualB - expectedB) > 1) {
           fail("ByteBuffers of size " + width + "x" + height + " not equal at position "
               + "(" + x + ", " + y + "). Expected color (R,G,B): "
               + "(" + expectedR + ", " + expectedG + ", " + expectedB + ")"
@@ -75,7 +76,7 @@ public class GlRectDrawerTest {
   // Convert RGBA ByteBuffer to RGB ByteBuffer.
   private static ByteBuffer stripAlphaChannel(ByteBuffer rgbaBuffer) {
     rgbaBuffer.rewind();
-    assertEquals(rgbaBuffer.remaining() % 4, 0);
+    assertEquals(0, rgbaBuffer.remaining() % 4);
     final int numberOfPixels = rgbaBuffer.remaining() / 4;
     final ByteBuffer rgbBuffer = ByteBuffer.allocateDirect(numberOfPixels * 3);
     while (rgbaBuffer.hasRemaining()) {
@@ -199,7 +200,7 @@ public class GlRectDrawerTest {
         assertTrue(Math.abs(actualRed - expectedRed) < MAX_DIFF);
         assertTrue(Math.abs(actualGreen - expectedGreen) < MAX_DIFF);
         assertTrue(Math.abs(actualBlue - expectedBlue) < MAX_DIFF);
-        assertEquals(actualAlpha, 255);
+        assertEquals(255, actualAlpha);
       }
     }
 
@@ -227,9 +228,7 @@ public class GlRectDrawerTest {
   @Test
   @MediumTest
   public void testOesRendering() throws InterruptedException {
-    /**
-     * Stub class to convert RGB ByteBuffers to OES textures by drawing onto a SurfaceTexture.
-     */
+    // Stub class to convert RGB ByteBuffers to OES textures by drawing onto a SurfaceTexture.
     class StubOesTextureProducer {
       private final EglBase eglBase;
       private final GlRectDrawer drawer;

@@ -26,7 +26,8 @@
               sdpMLineIndex:(int)sdpMLineIndex
                      sdpMid:(NSString *)sdpMid {
   NSParameterAssert(sdp.length);
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     _sdpMid = [sdpMid copy];
     _sdpMLineIndex = sdpMLineIndex;
     _sdp = [sdp copy];
@@ -35,33 +36,34 @@
 }
 
 - (NSString *)description {
-  return [NSString stringWithFormat:@"RTC_OBJC_TYPE(RTCIceCandidate):\n%@\n%d\n%@\n%@",
-                                    _sdpMid,
-                                    _sdpMLineIndex,
-                                    _sdp,
-                                    _serverUrl];
+  return [NSString
+      stringWithFormat:@"RTC_OBJC_TYPE(RTCIceCandidate):\n%@\n%d\n%@\n%@",
+                       _sdpMid,
+                       _sdpMLineIndex,
+                       _sdp,
+                       _serverUrl];
 }
 
 #pragma mark - Private
 
 - (instancetype)initWithNativeCandidate:
-    (const webrtc::IceCandidateInterface *)candidate {
+    (const webrtc::IceCandidate *)candidate {
   NSParameterAssert(candidate);
-  std::string sdp;
-  candidate->ToString(&sdp);
+  std::string sdp = candidate->ToString();
 
   RTC_OBJC_TYPE(RTCIceCandidate) *rtcCandidate =
       [self initWithSdp:[NSString stringForStdString:sdp]
           sdpMLineIndex:candidate->sdp_mline_index()
                  sdpMid:[NSString stringForStdString:candidate->sdp_mid()]];
-  rtcCandidate->_serverUrl = [NSString stringForStdString:candidate->server_url()];
+  rtcCandidate->_serverUrl =
+      [NSString stringForStdString:candidate->server_url()];
   return rtcCandidate;
 }
 
-- (std::unique_ptr<webrtc::IceCandidateInterface>)nativeCandidate {
+- (std::unique_ptr<webrtc::IceCandidate>)nativeCandidate {
   webrtc::SdpParseError error;
 
-  webrtc::IceCandidateInterface *candidate = webrtc::CreateIceCandidate(
+  webrtc::IceCandidate *candidate = webrtc::CreateIceCandidate(
       _sdpMid.stdString, _sdpMLineIndex, _sdp.stdString, &error);
 
   if (!candidate) {
@@ -70,7 +72,7 @@
            error.line.c_str());
   }
 
-  return std::unique_ptr<webrtc::IceCandidateInterface>(candidate);
+  return std::unique_ptr<webrtc::IceCandidate>(candidate);
 }
 
 @end

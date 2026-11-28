@@ -7,36 +7,45 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
+#include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/memory/memory.h"
+#include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/test/create_network_emulation_manager.h"
+#include "api/test/network_emulation/network_emulation_interfaces.h"
 #include "api/test/network_emulation_manager.h"
+#include "api/test/simulated_network.h"
+#include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
-#include "call/simulated_network.h"
+#include "api/units/timestamp.h"
+#include "net/dcsctp/public/dcsctp_message.h"
 #include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
+#include "net/dcsctp/public/timeout.h"
 #include "net/dcsctp/public/types.h"
 #include "net/dcsctp/socket/dcsctp_socket.h"
 #include "net/dcsctp/testing/testing_macros.h"
 #include "net/dcsctp/timer/task_queue_timeout.h"
 #include "rtc_base/copy_on_write_buffer.h"
-#include "rtc_base/gunit.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/random.h"
 #include "rtc_base/socket_address.h"
+#include "rtc_base/strings/string_builder.h"
 #include "rtc_base/strings/string_format.h"
-#include "rtc_base/time_utils.h"
+#include "rtc_base/thread.h"
+#include "system_wrappers/include/clock.h"
 #include "test/gmock.h"
+#include "test/gtest.h"
 
 #if !defined(WEBRTC_ANDROID) && defined(NDEBUG) && \
     !defined(THREAD_SANITIZER) && !defined(MEMORY_SANITIZER)
@@ -55,6 +64,7 @@ using ::testing::AllOf;
 using ::testing::Ge;
 using ::testing::Le;
 using ::testing::SizeIs;
+using ::webrtc::DataRate;
 using ::webrtc::TimeDelta;
 using ::webrtc::Timestamp;
 
@@ -105,20 +115,20 @@ class BoundSocket : public webrtc::EmulatedNetworkReceiverInterface {
     endpoint_ = endpoint;
     uint16_t port = endpoint->BindReceiver(0, this).value();
     source_address_ =
-        rtc::SocketAddress(endpoint_->GetPeerLocalAddress(), port);
+        webrtc::SocketAddress(endpoint_->GetPeerLocalAddress(), port);
   }
 
   void SetDestination(const BoundSocket& socket) {
     dest_address_ = socket.source_address_;
   }
 
-  void SetReceiver(std::function<void(rtc::CopyOnWriteBuffer)> receiver) {
+  void SetReceiver(std::function<void(webrtc::CopyOnWriteBuffer)> receiver) {
     receiver_ = std::move(receiver);
   }
 
-  void SendPacket(rtc::ArrayView<const uint8_t> data) {
+  void SendPacket(std::span<const uint8_t> data) {
     endpoint_->SendPacket(source_address_, dest_address_,
-                          rtc::CopyOnWriteBuffer(data.data(), data.size()));
+                          webrtc::CopyOnWriteBuffer(data));
   }
 
  private:
@@ -127,10 +137,10 @@ class BoundSocket : public webrtc::EmulatedNetworkReceiverInterface {
     receiver_(std::move(packet.data));
   }
 
-  std::function<void(rtc::CopyOnWriteBuffer)> receiver_;
+  std::function<void(webrtc::CopyOnWriteBuffer)> receiver_;
   webrtc::EmulatedEndpoint* endpoint_ = nullptr;
-  rtc::SocketAddress source_address_;
-  rtc::SocketAddress dest_address_;
+  webrtc::SocketAddress source_address_;
+  webrtc::SocketAddress dest_address_;
 };
 
 // Sends at a constant rate but with random packet sizes.
@@ -138,10 +148,12 @@ class SctpActor : public DcSctpSocketCallbacks {
  public:
   SctpActor(absl::string_view name,
             BoundSocket& emulated_socket,
-            const DcSctpOptions& sctp_options)
+            const DcSctpOptions& sctp_options,
+            webrtc::Clock* absl_nonnull clock)
       : log_prefix_(std::string(name) + ": "),
-        thread_(rtc::Thread::Current()),
+        thread_(webrtc::Thread::Current()),
         emulated_socket_(emulated_socket),
+        clock_(*clock),
         timeout_factory_(
             *thread_,
             [this]() { return TimeMs(Now().ms()); },
@@ -151,10 +163,12 @@ class SctpActor : public DcSctpSocketCallbacks {
         random_(GetUniqueSeed()),
         sctp_socket_(name, *this, nullptr, sctp_options),
         last_bandwidth_printout_(Now()) {
-    emulated_socket.SetReceiver([this](rtc::CopyOnWriteBuffer buf) {
+    emulated_socket.SetReceiver([this](webrtc::CopyOnWriteBuffer buf) {
       // The receiver will be executed on the NetworkEmulation task queue, but
       // the dcSCTP socket is owned by `thread_` and is not thread-safe.
-      thread_->PostTask([this, buf] { this->sctp_socket_.ReceivePacket(buf); });
+      thread_->PostTask([this, buf = std::move(buf)] {
+        this->sctp_socket_.ReceivePacket(buf);
+      });
     });
   }
 
@@ -165,7 +179,8 @@ class SctpActor : public DcSctpSocketCallbacks {
     double bitrate_mbps =
         static_cast<double>(received_bytes_ * 8) / duration.ms() / 1000;
     RTC_LOG(LS_INFO) << log_prefix()
-                     << rtc::StringFormat("Received %0.2f Mbps", bitrate_mbps);
+                     << webrtc::StringFormat("Received %0.2f Mbps",
+                                             bitrate_mbps);
 
     received_bitrate_mbps_.push_back(bitrate_mbps);
     received_bytes_ = 0;
@@ -178,7 +193,7 @@ class SctpActor : public DcSctpSocketCallbacks {
     }
   }
 
-  void SendPacket(rtc::ArrayView<const uint8_t> data) override {
+  void SendPacket(std::span<const uint8_t> data) override {
     emulated_socket_.SendPacket(data);
   }
 
@@ -187,7 +202,7 @@ class SctpActor : public DcSctpSocketCallbacks {
     return timeout_factory_.CreateTimeout(precision);
   }
 
-  Timestamp Now() override { return Timestamp::Millis(rtc::TimeMillis()); }
+  Timestamp Now() override { return clock_.CurrentTime(); }
 
   uint32_t GetRandomInt(uint32_t low, uint32_t high) override {
     return random_.Rand(low, high);
@@ -214,18 +229,18 @@ class SctpActor : public DcSctpSocketCallbacks {
 
   void OnConnectionRestarted() override {}
 
-  void OnStreamsResetFailed(rtc::ArrayView<const StreamID> outgoing_streams,
-                            absl::string_view reason) override {}
+  void OnStreamsResetFailed(std::span<const StreamID> /* outgoing_streams */,
+                            absl::string_view /* reason */) override {}
 
   void OnStreamsResetPerformed(
-      rtc::ArrayView<const StreamID> outgoing_streams) override {}
+      std::span<const StreamID> /* outgoing_streams */) override {}
 
   void OnIncomingStreamsReset(
-      rtc::ArrayView<const StreamID> incoming_streams) override {}
+      std::span<const StreamID> /* incoming_streams */) override {}
 
   void NotifyOutgoingMessageBufferEmpty() override {}
 
-  void OnBufferedAmountLow(StreamID stream_id) override {
+  void OnBufferedAmountLow(StreamID /* stream_id */) override {
     if (mode_ == ActorMode::kThroughputSender) {
       std::vector<uint8_t> payload(kHugePayloadSize);
       sctp_socket_.Send(DcSctpMessage(kStreamId, kPpid, std::move(payload)),
@@ -241,7 +256,7 @@ class SctpActor : public DcSctpSocketCallbacks {
                           std::vector<uint8_t>(kLargePayloadSize)),
             send_options);
 
-        send_options.max_retransmissions = absl::nullopt;
+        send_options.max_retransmissions = std::nullopt;
         sctp_socket_.Send(
             DcSctpMessage(kStreamId, kPpid,
                           std::vector<uint8_t>(kSmallPayloadSize)),
@@ -250,12 +265,12 @@ class SctpActor : public DcSctpSocketCallbacks {
     }
   }
 
-  absl::optional<DcSctpMessage> ConsumeReceivedMessage() {
+  std::optional<DcSctpMessage> ConsumeReceivedMessage() {
     if (!last_received_message_.has_value()) {
-      return absl::nullopt;
+      return std::nullopt;
     }
     DcSctpMessage ret = *std::move(last_received_message_);
-    last_received_message_ = absl::nullopt;
+    last_received_message_ = std::nullopt;
     return ret;
   }
 
@@ -300,22 +315,23 @@ class SctpActor : public DcSctpSocketCallbacks {
 
  private:
   std::string log_prefix() const {
-    rtc::StringBuilder sb;
+    webrtc::StringBuilder sb;
     sb << log_prefix_;
-    sb << rtc::TimeMillis();
+    sb << clock_.CurrentTime().ms();
     sb << ": ";
     return sb.Release();
   }
 
   ActorMode mode_ = ActorMode::kAtRest;
   const std::string log_prefix_;
-  rtc::Thread* thread_;
+  webrtc::Thread* thread_;
   BoundSocket& emulated_socket_;
+  webrtc::Clock& clock_;
   TaskQueueTimeoutFactory timeout_factory_;
   webrtc::Random random_;
   DcSctpSocket sctp_socket_;
   size_t received_bytes_ = 0;
-  absl::optional<DcSctpMessage> last_received_message_;
+  std::optional<DcSctpMessage> last_received_message_;
   Timestamp last_bandwidth_printout_;
   // Per-second received bitrates, in Mbps
   std::vector<double> received_bitrate_mbps_;
@@ -327,7 +343,7 @@ class DcSctpSocketNetworkTest : public testing::Test {
   DcSctpSocketNetworkTest()
       : options_(MakeOptionsForTest()),
         emulation_(webrtc::CreateNetworkEmulationManager(
-            webrtc::TimeMode::kSimulated)) {}
+            {.time_mode = webrtc::TimeMode::kSimulated})) {}
 
   void MakeNetwork(const webrtc::BuiltInNetworkBehaviorConfig& config) {
     webrtc::EmulatedEndpoint* endpoint_a =
@@ -365,8 +381,10 @@ TEST_F(DcSctpSocketNetworkTest, CanConnectAndShutdown) {
   webrtc::BuiltInNetworkBehaviorConfig pipe_config;
   MakeNetwork(pipe_config);
 
-  SctpActor sender("A", emulated_socket_a_, options_);
-  SctpActor receiver("Z", emulated_socket_z_, options_);
+  SctpActor sender("A", emulated_socket_a_, options_,
+                   emulation_->time_controller()->GetClock());
+  SctpActor receiver("Z", emulated_socket_z_, options_,
+                     emulation_->time_controller()->GetClock());
   EXPECT_THAT(sender.sctp_socket().state(), SocketState::kClosed);
 
   sender.sctp_socket().Connect();
@@ -383,8 +401,10 @@ TEST_F(DcSctpSocketNetworkTest, CanSendLargeMessage) {
   pipe_config.queue_delay_ms = 30;
   MakeNetwork(pipe_config);
 
-  SctpActor sender("A", emulated_socket_a_, options_);
-  SctpActor receiver("Z", emulated_socket_z_, options_);
+  SctpActor sender("A", emulated_socket_a_, options_,
+                   emulation_->time_controller()->GetClock());
+  SctpActor receiver("Z", emulated_socket_z_, options_,
+                     emulation_->time_controller()->GetClock());
   sender.sctp_socket().Connect();
 
   constexpr size_t kPayloadSize = 100 * 1024;
@@ -407,11 +427,13 @@ TEST_F(DcSctpSocketNetworkTest, CanSendLargeMessage) {
 TEST_F(DcSctpSocketNetworkTest, CanSendMessagesReliablyWithLowBandwidth) {
   webrtc::BuiltInNetworkBehaviorConfig pipe_config;
   pipe_config.queue_delay_ms = 30;
-  pipe_config.link_capacity_kbps = 1000;
+  pipe_config.link_capacity = DataRate::KilobitsPerSec(1000);
   MakeNetwork(pipe_config);
 
-  SctpActor sender("A", emulated_socket_a_, options_);
-  SctpActor receiver("Z", emulated_socket_z_, options_);
+  SctpActor sender("A", emulated_socket_a_, options_,
+                   emulation_->time_controller()->GetClock());
+  SctpActor receiver("Z", emulated_socket_z_, options_,
+                     emulation_->time_controller()->GetClock());
   sender.sctp_socket().Connect();
 
   sender.SetActorMode(ActorMode::kThroughputSender);
@@ -436,11 +458,13 @@ TEST_F(DcSctpSocketNetworkTest,
        DCSCTP_NDEBUG_TEST(CanSendMessagesReliablyWithMediumBandwidth)) {
   webrtc::BuiltInNetworkBehaviorConfig pipe_config;
   pipe_config.queue_delay_ms = 30;
-  pipe_config.link_capacity_kbps = 18000;
+  pipe_config.link_capacity = DataRate::KilobitsPerSec(18000);
   MakeNetwork(pipe_config);
 
-  SctpActor sender("A", emulated_socket_a_, options_);
-  SctpActor receiver("Z", emulated_socket_z_, options_);
+  SctpActor sender("A", emulated_socket_a_, options_,
+                   emulation_->time_controller()->GetClock());
+  SctpActor receiver("Z", emulated_socket_z_, options_,
+                     emulation_->time_controller()->GetClock());
   sender.sctp_socket().Connect();
 
   sender.SetActorMode(ActorMode::kThroughputSender);
@@ -467,8 +491,10 @@ TEST_F(DcSctpSocketNetworkTest, CanSendMessagesReliablyWithMuchPacketLoss) {
   config.loss_percent = 1;
   MakeNetwork(config);
 
-  SctpActor sender("A", emulated_socket_a_, options_);
-  SctpActor receiver("Z", emulated_socket_z_, options_);
+  SctpActor sender("A", emulated_socket_a_, options_,
+                   emulation_->time_controller()->GetClock());
+  SctpActor receiver("Z", emulated_socket_z_, options_,
+                     emulation_->time_controller()->GetClock());
   sender.sctp_socket().Connect();
 
   sender.SetActorMode(ActorMode::kThroughputSender);
@@ -496,8 +522,10 @@ TEST_F(DcSctpSocketNetworkTest, DCSCTP_NDEBUG_TEST(HasHighBandwidth)) {
   pipe_config.queue_delay_ms = 30;
   MakeNetwork(pipe_config);
 
-  SctpActor sender("A", emulated_socket_a_, options_);
-  SctpActor receiver("Z", emulated_socket_z_, options_);
+  SctpActor sender("A", emulated_socket_a_, options_,
+                   emulation_->time_controller()->GetClock());
+  SctpActor receiver("Z", emulated_socket_z_, options_,
+                     emulation_->time_controller()->GetClock());
   sender.sctp_socket().Connect();
 
   sender.SetActorMode(ActorMode::kThroughputSender);

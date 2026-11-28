@@ -10,7 +10,15 @@
 
 #include "api/audio_codecs/opus/audio_encoder_multi_channel_opus.h"
 
+#include <memory>
+#include <optional>
+#include <utility>
+#include <vector>
+
+#include "api/audio_codecs/audio_encoder.h"
+#include "api/audio_codecs/audio_format.h"
 #include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 using ::testing::NiceMock;
@@ -26,7 +34,7 @@ TEST(AudioEncoderMultiOpusTest, CheckConfigValidity) {
                                     {{"channel_mapping", "3,0"},
                                      {"coupled_streams", "1"},
                                      {"num_streams", "2"}});
-    const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+    const std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
         AudioEncoderMultiChannelOpus::SdpToConfig(sdp_format);
 
     // Maps input channel 0 to coded channel 3, which doesn't exist.
@@ -38,7 +46,7 @@ TEST(AudioEncoderMultiOpusTest, CheckConfigValidity) {
                                     {{"channel_mapping", "0"},
                                      {"coupled_streams", "1"},
                                      {"num_streams", "2"}});
-    const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+    const std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
         AudioEncoderMultiChannelOpus::SdpToConfig(sdp_format);
 
     // The mapping is too short.
@@ -49,7 +57,7 @@ TEST(AudioEncoderMultiOpusTest, CheckConfigValidity) {
                                     {{"channel_mapping", "0,0,0"},
                                      {"coupled_streams", "0"},
                                      {"num_streams", "1"}});
-    const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+    const std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
         AudioEncoderMultiChannelOpus::SdpToConfig(sdp_format);
 
     // Coded channel 0 comes from both input channels 0, 1 and 2.
@@ -60,7 +68,7 @@ TEST(AudioEncoderMultiOpusTest, CheckConfigValidity) {
                                     {{"channel_mapping", "0,255,255"},
                                      {"coupled_streams", "0"},
                                      {"num_streams", "1"}});
-    const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+    const std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
         AudioEncoderMultiChannelOpus::SdpToConfig(sdp_format);
     ASSERT_TRUE(encoder_config.has_value());
 
@@ -72,7 +80,7 @@ TEST(AudioEncoderMultiOpusTest, CheckConfigValidity) {
                                     {{"channel_mapping", "0,255,255"},
                                      {"coupled_streams", "0"},
                                      {"num_streams", "2"}});
-    const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+    const std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
         AudioEncoderMultiChannelOpus::SdpToConfig(sdp_format);
 
     // This is NOT fine, because channels nothing says how coded channel 1
@@ -90,7 +98,7 @@ TEST(AudioEncoderMultiOpusTest, ConfigValuesAreParsedCorrectly) {
                               {"channel_mapping", "0,4,1,2,3,5"},
                               {"num_streams", "4"},
                               {"coupled_streams", "2"}}});
-  const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+  const std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
       AudioEncoderMultiChannelOpus::SdpToConfig(sdp_format);
   ASSERT_TRUE(encoder_config.has_value());
 
@@ -107,7 +115,7 @@ TEST(AudioEncoderMultiOpusTest, CreateFromValidConfig) {
                                     {{"channel_mapping", "0,255,255"},
                                      {"coupled_streams", "0"},
                                      {"num_streams", "2"}});
-    const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+    const std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
         AudioEncoderMultiChannelOpus::SdpToConfig(sdp_format);
     ASSERT_FALSE(encoder_config.has_value());
   }
@@ -116,7 +124,7 @@ TEST(AudioEncoderMultiOpusTest, CreateFromValidConfig) {
                                     {{"channel_mapping", "1,255,0"},
                                      {"coupled_streams", "1"},
                                      {"num_streams", "1"}});
-    const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+    std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
         AudioEncoderMultiChannelOpus::SdpToConfig(sdp_format);
     ASSERT_TRUE(encoder_config.has_value());
 
@@ -126,8 +134,8 @@ TEST(AudioEncoderMultiOpusTest, CreateFromValidConfig) {
     EXPECT_TRUE(encoder_config->IsOk());
 
     const std::unique_ptr<AudioEncoder> opus_encoder =
-        AudioEncoderMultiChannelOpus::MakeAudioEncoder(*encoder_config,
-                                                       kOpusPayloadType);
+        AudioEncoderMultiChannelOpus::MakeAudioEncoder(
+            std::move(*encoder_config), kOpusPayloadType);
 
     // Creating an encoder from a valid config should work.
     EXPECT_TRUE(opus_encoder);
@@ -141,13 +149,13 @@ TEST(AudioEncoderMultiOpusTest, AdvertisedCodecsCanBeCreated) {
   EXPECT_FALSE(specs.empty());
 
   for (const AudioCodecSpec& spec : specs) {
-    const absl::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
+    std::optional<AudioEncoderMultiChannelOpus::Config> encoder_config =
         AudioEncoderMultiChannelOpus::SdpToConfig(spec.format);
     ASSERT_TRUE(encoder_config.has_value());
 
     const std::unique_ptr<AudioEncoder> opus_encoder =
-        AudioEncoderMultiChannelOpus::MakeAudioEncoder(*encoder_config,
-                                                       kOpusPayloadType);
+        AudioEncoderMultiChannelOpus::MakeAudioEncoder(
+            std::move(*encoder_config), kOpusPayloadType);
 
     EXPECT_TRUE(opus_encoder);
   }

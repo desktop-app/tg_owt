@@ -13,10 +13,10 @@
 
 #include <stdint.h>
 
-#include <functional>
+#include <optional>
 
-#include "api/task_queue/pending_task_safety_flag.h"
-#include "api/task_queue/task_queue_base.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "modules/video_coding/timing/timing.h"
 #include "system_wrappers/include/clock.h"
 
@@ -24,7 +24,7 @@ namespace webrtc {
 
 class FrameDecodeTiming {
  public:
-  FrameDecodeTiming(Clock* clock, webrtc::VCMTiming const* timing);
+  FrameDecodeTiming(Clock* clock, VCMTiming const* timing);
   ~FrameDecodeTiming() = default;
   FrameDecodeTiming(const FrameDecodeTiming&) = delete;
   FrameDecodeTiming& operator=(const FrameDecodeTiming&) = delete;
@@ -32,21 +32,40 @@ class FrameDecodeTiming {
   // Any frame that has decode delay more than this in the past can be
   // fast-forwarded.
   static constexpr TimeDelta kMaxAllowedFrameDelay = TimeDelta::Millis(5);
+  static constexpr TimeDelta kZeroPlayoutDelayMinPacing = TimeDelta::Millis(8);
 
   struct FrameSchedule {
     Timestamp latest_decode_time;
     Timestamp render_time;
   };
 
-  absl::optional<FrameSchedule> OnFrameBufferUpdated(
+  std::optional<FrameSchedule> OnFrameBufferUpdated(
       uint32_t next_temporal_unit_rtp,
       uint32_t last_temporal_unit_rtp,
       TimeDelta max_wait_for_frame,
       bool too_many_frames_queued);
 
+  // Updates the last time a frame was scheduled for decoding.
+  void SetLastDecodeScheduledTimestamp(Timestamp last_decode_scheduled);
+
+  // Returns the maximum time that we can wait for a frame to become complete
+  // before it must be passed to the decoder. render_time==0 indicates that the
+  // frames should be processed as quickly as possible, with possibly only a
+  // small delay added to make sure that the decoder is not overloaded.
+  // The parameter too_many_frames_queued is used to signal that the decode
+  // queue is full and that the frame should be decoded as soon as possible.
+  TimeDelta MaxWaitingTime(Timestamp render_time,
+                           Timestamp now,
+                           bool too_many_frames_queued) const;
+
  private:
   Clock* const clock_;
-  webrtc::VCMTiming const* const timing_;
+  VCMTiming const* const timing_;
+
+  // Timestamp at which the last frame was scheduled to be sent to the decoder.
+  // Used only when the RTP header extension playout delay is set to min=0 ms
+  // which is indicated by a render time set to 0.
+  Timestamp last_decode_scheduled_ = Timestamp::Zero();
 };
 
 }  // namespace webrtc

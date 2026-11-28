@@ -10,27 +10,29 @@
 
 #include "rtc_base/openssl_certificate.h"
 
-#if defined(WEBRTC_WIN)
-// Must be included first before openssl headers.
-#include "rtc_base/win32.h"  // NOLINT
-#endif                       // WEBRTC_WIN
-
 #include <openssl/bio.h>
 #include <openssl/bn.h>
 #include <openssl/pem.h>
-#include <time.h>
+#include <openssl/asn1.h>
 
+#include <cstdint>
+#include <ctime>
 #include <memory>
+#include <string>
 
+#include "absl/strings/string_view.h"
+#include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/helpers.h"
+#include "rtc_base/crypto_random.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/message_digest.h"
 #include "rtc_base/openssl_digest.h"
-#include "rtc_base/openssl_identity.h"
+#include "rtc_base/openssl_key_pair.h"
 #include "rtc_base/openssl_utility.h"
+#include "rtc_base/ssl_certificate.h"
+#include "rtc_base/ssl_identity.h"
 
-namespace rtc {
+namespace webrtc {
 namespace {
 
 // Random bits for certificate serial number
@@ -56,6 +58,7 @@ static void PrintCert(X509* x509) {
 // Generate a self-signed certificate, with the public key from the
 // given key pair. Caller is responsible for freeing the returned object.
 static X509* MakeCertificate(EVP_PKEY* pkey, const SSLIdentityParams& params) {
+  RTC_DCHECK(pkey != nullptr);
   RTC_LOG(LS_INFO) << "Making certificate for " << params.common_name;
 
   ASN1_INTEGER* asn1_serial_number = nullptr;
@@ -95,8 +98,8 @@ static X509* MakeCertificate(EVP_PKEY* pkey, const SSLIdentityParams& params) {
   name.reset(X509_NAME_new());
   if (name == nullptr ||
       !X509_NAME_add_entry_by_NID(name.get(), NID_commonName, MBSTRING_UTF8,
-                                  (unsigned char*)params.common_name.c_str(),
-                                  -1, -1, 0) ||
+                                  (unsigned char*)params.common_name.data(), -1,
+                                  -1, 0) ||
       !X509_set_subject_name(x509.get(), name.get()) ||
       !X509_set_issuer_name(x509.get(), name.get())) {
     return nullptr;
@@ -209,27 +212,18 @@ bool OpenSSLCertificate::GetSignatureDigestAlgorithm(
 }
 
 bool OpenSSLCertificate::ComputeDigest(absl::string_view algorithm,
-                                       unsigned char* digest,
-                                       size_t size,
-                                       size_t* length) const {
-  return ComputeDigest(x509_, algorithm, digest, size, length);
-}
-
-bool OpenSSLCertificate::ComputeDigest(const X509* x509,
-                                       absl::string_view algorithm,
-                                       unsigned char* digest,
-                                       size_t size,
-                                       size_t* length) {
+                                       Buffer& digest) const {
+  RTC_DCHECK_GT(digest.capacity(), 0);
   const EVP_MD* md = nullptr;
   unsigned int n = 0;
   if (!OpenSSLDigest::GetDigestEVP(algorithm, &md)) {
     return false;
   }
-  if (size < static_cast<size_t>(EVP_MD_size(md))) {
+  if (digest.capacity() < static_cast<size_t>(EVP_MD_size(md))) {
     return false;
   }
-  X509_digest(x509, md, digest, &n);
-  *length = n;
+  X509_digest(x509_, md, digest.data(), &n);
+  digest.SetSize(n);
   return true;
 }
 
@@ -275,12 +269,12 @@ bool OpenSSLCertificate::operator!=(const OpenSSLCertificate& other) const {
 }
 
 int64_t OpenSSLCertificate::CertificateExpirationTime() const {
-  const ASN1_TIME* expire_time = X509_get0_notAfter(x509_);
+  const ASN1_TIME* expire_time = X509_get_notAfter(x509_);
   bool long_format;
-  const int time_type = ASN1_STRING_type(expire_time);
-  if (time_type == V_ASN1_UTCTIME) {
+  int type = ASN1_STRING_type(expire_time);
+  if (type == V_ASN1_UTCTIME) {
     long_format = false;
-  } else if (time_type == V_ASN1_GENERALIZEDTIME) {
+  } else if (type == V_ASN1_GENERALIZEDTIME) {
     long_format = true;
   } else {
     return -1;
@@ -289,4 +283,4 @@ int64_t OpenSSLCertificate::CertificateExpirationTime() const {
                        ASN1_STRING_length(expire_time), long_format);
 }
 
-}  // namespace rtc
+}  // namespace webrtc

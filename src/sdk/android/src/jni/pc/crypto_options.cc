@@ -10,34 +10,45 @@
 
 #include "sdk/android/src/jni/pc/crypto_options.h"
 
+#include <jni.h>
+
+#include <optional>
+
+#include "api/crypto/crypto_options.h"
 #include "sdk/android/generated_peerconnection_jni/CryptoOptions_jni.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 
 namespace webrtc {
 namespace jni {
 
-absl::optional<CryptoOptions> JavaToNativeOptionalCryptoOptions(
+CryptoOptions JavaToNativeCryptoOptions(
     JNIEnv* jni,
     const JavaRef<jobject>& j_crypto_options) {
+  CryptoOptions native_crypto_options;
   if (j_crypto_options.is_null()) {
-    return absl::nullopt;
+    return native_crypto_options;
   }
-
   ScopedJavaLocalRef<jobject> j_srtp =
       Java_CryptoOptions_getSrtp(jni, j_crypto_options);
   ScopedJavaLocalRef<jobject> j_sframe =
       Java_CryptoOptions_getSFrame(jni, j_crypto_options);
 
-  CryptoOptions native_crypto_options;
   native_crypto_options.srtp.enable_gcm_crypto_suites =
       Java_Srtp_getEnableGcmCryptoSuites(jni, j_srtp);
+  native_crypto_options.srtp.prefer_gcm_crypto_suites =
+      Java_Srtp_getPreferGcmCryptoSuites(jni, j_srtp);
   native_crypto_options.srtp.enable_aes128_sha1_32_crypto_cipher =
       Java_Srtp_getEnableAes128Sha1_32CryptoCipher(jni, j_srtp);
+  native_crypto_options.srtp.enable_aes128_sha1_80_crypto_cipher =
+      Java_Srtp_getEnableAes128Sha1_80CryptoCipher(jni, j_srtp);
   native_crypto_options.srtp.enable_encrypted_rtp_header_extensions =
       Java_Srtp_getEnableEncryptedRtpHeaderExtensions(jni, j_srtp);
   native_crypto_options.sframe.require_frame_encryption =
       Java_SFrame_getRequireFrameEncryption(jni, j_sframe);
-  return absl::optional<CryptoOptions>(native_crypto_options);
+  return native_crypto_options;
 }
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(CryptoOptions)

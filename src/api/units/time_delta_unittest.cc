@@ -10,6 +10,8 @@
 
 #include "api/units/time_delta.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 
 #include "test/gtest.h"
@@ -21,6 +23,7 @@ TEST(TimeDeltaTest, ConstExpr) {
   constexpr TimeDelta kTimeDeltaZero = TimeDelta::Zero();
   constexpr TimeDelta kTimeDeltaPlusInf = TimeDelta::PlusInfinity();
   constexpr TimeDelta kTimeDeltaMinusInf = TimeDelta::MinusInfinity();
+  static_assert(TimeDelta() == kTimeDeltaZero);
   static_assert(kTimeDeltaZero.IsZero(), "");
   static_assert(kTimeDeltaPlusInf.IsPlusInfinity(), "");
   static_assert(kTimeDeltaMinusInf.IsMinusInfinity(), "");
@@ -110,27 +113,6 @@ TEST(TimeDeltaTest, ComparisonOperators) {
 
   EXPECT_GT(TimeDelta::PlusInfinity(), large);
   EXPECT_LT(TimeDelta::MinusInfinity(), TimeDelta::Zero());
-}
-
-TEST(TimeDeltaTest, Clamping) {
-  const TimeDelta upper = TimeDelta::Millis(800);
-  const TimeDelta lower = TimeDelta::Millis(100);
-  const TimeDelta under = TimeDelta::Millis(100);
-  const TimeDelta inside = TimeDelta::Millis(500);
-  const TimeDelta over = TimeDelta::Millis(1000);
-  EXPECT_EQ(under.Clamped(lower, upper), lower);
-  EXPECT_EQ(inside.Clamped(lower, upper), inside);
-  EXPECT_EQ(over.Clamped(lower, upper), upper);
-
-  TimeDelta mutable_delta = lower;
-  mutable_delta.Clamp(lower, upper);
-  EXPECT_EQ(mutable_delta, lower);
-  mutable_delta = inside;
-  mutable_delta.Clamp(lower, upper);
-  EXPECT_EQ(mutable_delta, inside);
-  mutable_delta = over;
-  mutable_delta.Clamp(lower, upper);
-  EXPECT_EQ(mutable_delta, upper);
 }
 
 TEST(TimeDeltaTest, CanBeInititializedFromLargeInt) {

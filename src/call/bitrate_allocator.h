@@ -13,16 +13,17 @@
 
 #include <stdint.h>
 
-#include <map>
-#include <memory>
-#include <string>
-#include <utility>
+#include <optional>
 #include <vector>
 
 #include "api/call/bitrate_allocation.h"
+#include "api/field_trials_view.h"
 #include "api/sequence_checker.h"
 #include "api/transport/network_types.h"
+#include "api/units/data_rate.h"
+#include "api/units/data_size.h"
 #include "rtc_base/system/no_unique_address.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
@@ -37,6 +38,8 @@ class BitrateAllocatorObserver {
   // Returns the amount of protection used by the BitrateAllocatorObserver
   // implementation, as bitrate in bps.
   virtual uint32_t OnBitrateUpdated(BitrateAllocationUpdate update) = 0;
+  // Returns the bitrate consumed (vs allocated) by BitrateAllocatorObserver
+  virtual std::optional<DataRate> GetUsedRate() const = 0;
 
  protected:
   virtual ~BitrateAllocatorObserver() {}
@@ -44,6 +47,12 @@ class BitrateAllocatorObserver {
 
 // Struct describing parameters for how a media stream should get bitrate
 // allocated to it.
+
+enum class TrackRateElasticity {
+  kCanContributeUnusedRate,
+  kCanConsumeExtraRate,
+  kCanContributeAndConsume
+};
 
 struct MediaStreamAllocationConfig {
   // Minimum bitrate supported by track. 0 equals no min bitrate.
@@ -61,6 +70,7 @@ struct MediaStreamAllocationConfig {
   // observers. If an observer has twice the bitrate_priority of other
   // observers, it should be allocated twice the bitrate above its min.
   double bitrate_priority;
+  std::optional<TrackRateElasticity> rate_elasticity;
 };
 
 // Interface used for mocking
@@ -86,6 +96,7 @@ struct AllocatableTrack {
   BitrateAllocatorObserver* observer;
   MediaStreamAllocationConfig config;
   int64_t allocated_bitrate_bps;
+  std::optional<DataRate> last_used_bitrate;
   double media_ratio;  // Part of the total bitrate used for media [0.0, 1.0].
 
   uint32_t LastAllocatedBitrate() const;
@@ -110,13 +121,18 @@ class BitrateAllocator : public BitrateAllocatorInterface {
     virtual ~LimitObserver() = default;
   };
 
-  explicit BitrateAllocator(LimitObserver* limit_observer);
+  // `upper_elastic_rate_limit` specifies the rate ceiling an observer can
+  // reach when unused bits are added. A value of zero disables borrowing of
+  // unused rates.
+  BitrateAllocator(LimitObserver* limit_observer,
+                   DataRate upper_elastic_rate_limit);
   ~BitrateAllocator() override;
 
   void UpdateStartRate(uint32_t start_rate_bps);
 
   // Allocate target_bitrate across the registered BitrateAllocatorObservers.
   void OnNetworkEstimateChanged(TargetTransferRate msg);
+  void OnTransportOverheadChanged(DataSize transport_overhead);
 
   // Set the configuration used by the bandwidth management.
   // `observer` updates bitrates if already in use.
@@ -128,6 +144,11 @@ class BitrateAllocator : public BitrateAllocatorInterface {
   void AddObserver(BitrateAllocatorObserver* observer,
                    MediaStreamAllocationConfig config) override;
 
+  // Checks and recomputes bitrate allocation if necessary (when an
+  // elastic/audio bitrate increases significantly). Returns whether there is an
+  // active contributing and active consuming stream.
+  bool RecomputeAllocationIfNeeded();
+
   // Removes a previously added observer, but will not trigger a new bitrate
   // allocation.
   void RemoveObserver(BitrateAllocatorObserver* observer) override;
@@ -138,6 +159,9 @@ class BitrateAllocator : public BitrateAllocatorInterface {
 
  private:
   using AllocatableTrack = bitrate_allocator_impl::AllocatableTrack;
+
+  void ReallocateAndNotifyObservers(std::optional<double> cwnd_reduce_ratio)
+      RTC_RUN_ON(&sequenced_checker_);
 
   // Calculates the minimum requested send bitrate and max padding bitrate and
   // calls LimitObserver::OnAllocationLimitsChanged.
@@ -155,16 +179,21 @@ class BitrateAllocator : public BitrateAllocatorInterface {
   std::vector<AllocatableTrack> allocatable_tracks_
       RTC_GUARDED_BY(&sequenced_checker_);
   uint32_t last_target_bps_ RTC_GUARDED_BY(&sequenced_checker_);
-  uint32_t last_stable_target_bps_ RTC_GUARDED_BY(&sequenced_checker_);
   uint32_t last_non_zero_bitrate_bps_ RTC_GUARDED_BY(&sequenced_checker_);
   uint8_t last_fraction_loss_ RTC_GUARDED_BY(&sequenced_checker_);
   int64_t last_rtt_ RTC_GUARDED_BY(&sequenced_checker_);
-  int64_t last_bwe_period_ms_ RTC_GUARDED_BY(&sequenced_checker_);
+  DataSize transport_overhead_ RTC_GUARDED_BY(&sequenced_checker_) =
+      DataSize::Zero();
   // Number of mute events based on too low BWE, not network up/down.
   int num_pause_events_ RTC_GUARDED_BY(&sequenced_checker_);
   int64_t last_bwe_log_time_ RTC_GUARDED_BY(&sequenced_checker_);
   BitrateAllocationLimits current_limits_ RTC_GUARDED_BY(&sequenced_checker_);
+  const DataRate upper_elastic_rate_limit_ RTC_GUARDED_BY(&sequenced_checker_);
 };
+
+// TODO(b/350555527): Remove after experiment
+DataRate GetElasticRateAllocationFieldTrialParameter(
+    const FieldTrialsView& field_trials);
 
 }  // namespace webrtc
 #endif  // CALL_BITRATE_ALLOCATOR_H_

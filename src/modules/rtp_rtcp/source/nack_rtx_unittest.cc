@@ -8,37 +8,53 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <list>
+#include <map>
 #include <memory>
 #include <set>
+#include <span>
 
 #include "absl/algorithm/container.h"
 #include "api/call/transport.h"
+#include "api/environment/environment.h"
+#include "api/frame_transformer_interface.h"
+#include "api/rtp_headers.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_frame_type.h"
+#include "call/rtp_packet_sink_interface.h"
 #include "call/rtp_stream_receiver_controller.h"
+#include "call/rtp_stream_receiver_controller_interface.h"
 #include "call/rtx_receive_stream.h"
 #include "modules/rtp_rtcp/include/receive_statistics.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "modules/rtp_rtcp/source/rtp_rtcp_impl2.h"
+#include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
 #include "modules/rtp_rtcp/source/rtp_sender_video.h"
 #include "rtc_base/rate_limiter.h"
-#include "rtc_base/thread.h"
-#include "test/explicit_key_value_config.h"
+#include "system_wrappers/include/clock.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 
 namespace webrtc {
 
-const int kVideoNackListSize = 30;
-const uint32_t kTestSsrc = 3456;
-const uint32_t kTestRtxSsrc = kTestSsrc + 1;
-const uint16_t kTestSequenceNumber = 2345;
-const uint32_t kTestNumberOfPackets = 1350;
-const int kTestNumberOfRtxPackets = 149;
-const int kNumFrames = 30;
-const int kPayloadType = 123;
-const int kRtxPayloadType = 98;
-const int64_t kMaxRttMs = 1000;
+constexpr int kVideoNackListSize = 30;
+constexpr uint32_t kTestSsrc = 3456;
+constexpr uint32_t kTestRtxSsrc = kTestSsrc + 1;
+constexpr uint16_t kTestSequenceNumber = 2345;
+constexpr uint32_t kTestNumberOfPackets = 1350;
+constexpr int kTestNumberOfRtxPackets = 149;
+constexpr int kNumFrames = 30;
+constexpr int kPayloadType = 123;
+constexpr int kRtxPayloadType = 98;
+constexpr int64_t kMaxRttMs = 1000;
 
 class VerifyingMediaStream : public RtpPacketSinkInterface {
  public:
@@ -53,16 +69,17 @@ class VerifyingMediaStream : public RtpPacketSinkInterface {
   std::list<uint16_t> sequence_numbers_;
 };
 
-class RtxLoopBackTransport : public webrtc::Transport {
+class RtxLoopBackTransport : public Transport {
  public:
-  explicit RtxLoopBackTransport(uint32_t rtx_ssrc)
+  RtxLoopBackTransport(TaskQueueBase* network_thread, uint32_t rtx_ssrc)
       : count_(0),
         packet_loss_(0),
         consecutive_drop_start_(0),
         consecutive_drop_end_(0),
         rtx_ssrc_(rtx_ssrc),
         count_rtx_ssrc_(0),
-        module_(NULL) {}
+        module_(nullptr),
+        stream_receiver_controller_(network_thread) {}
 
   void SetSendModule(RtpRtcpInterface* rtpRtcpModule) {
     module_ = rtpRtcpModule;
@@ -76,8 +93,8 @@ class RtxLoopBackTransport : public webrtc::Transport {
     packet_loss_ = 0;
   }
 
-  bool SendRtp(rtc::ArrayView<const uint8_t> data,
-               const PacketOptions& options) override {
+  bool SendRtp(std::span<const uint8_t> data,
+               const PacketOptions& /* options */) override {
     count_++;
     RtpPacketReceived packet;
     if (!packet.Parse(data))
@@ -101,7 +118,8 @@ class RtxLoopBackTransport : public webrtc::Transport {
     return true;
   }
 
-  bool SendRtcp(rtc::ArrayView<const uint8_t> data) override {
+  bool SendRtcp(std::span<const uint8_t> data,
+                const PacketOptions& /* options */) override {
     module_->IncomingRtcpPacket(data);
     return true;
   }
@@ -119,47 +137,60 @@ class RtxLoopBackTransport : public webrtc::Transport {
 class RtpRtcpRtxNackTest : public ::testing::Test {
  protected:
   RtpRtcpRtxNackTest()
-      : rtp_rtcp_module_(nullptr),
-        transport_(kTestRtxSsrc),
-        rtx_stream_(&media_stream_, rtx_associated_payload_types_, kTestSsrc),
-        fake_clock(123456),
-        retransmission_rate_limiter_(&fake_clock, kMaxRttMs) {}
+      : fake_clock_(123456),
+        env_(CreateTestEnvironment({.time = &fake_clock_})),
+        transport_(main_thread_.task_queue(), kTestRtxSsrc),
+        rtx_stream_(env_,
+                    &media_stream_,
+                    rtx_associated_payload_types_,
+                    kTestSsrc),
+        retransmission_rate_limiter_(&fake_clock_, kMaxRttMs) {}
   ~RtpRtcpRtxNackTest() override {}
 
   void SetUp() override {
-    RtpRtcpInterface::Configuration configuration;
-    configuration.audio = false;
-    configuration.clock = &fake_clock;
-    receive_statistics_ = ReceiveStatistics::Create(&fake_clock);
-    configuration.receive_statistics = receive_statistics_.get();
-    configuration.outgoing_transport = &transport_;
-    configuration.retransmission_rate_limiter = &retransmission_rate_limiter_;
-    configuration.local_media_ssrc = kTestSsrc;
-    configuration.rtx_send_ssrc = kTestRtxSsrc;
-    rtp_rtcp_module_ = ModuleRtpRtcpImpl2::Create(configuration);
-    test::ExplicitKeyValueConfig field_trials("");
-    RTPSenderVideo::Config video_config;
-    video_config.clock = &fake_clock;
-    video_config.rtp_sender = rtp_rtcp_module_->RtpSender();
-    video_config.field_trials = &field_trials;
-    rtp_sender_video_ = std::make_unique<RTPSenderVideo>(video_config);
-    rtp_rtcp_module_->SetRTCPStatus(RtcpMode::kCompound);
-    rtp_rtcp_module_->SetStorePacketsStatus(true, 600);
-    EXPECT_EQ(0, rtp_rtcp_module_->SetSendingStatus(true));
-    rtp_rtcp_module_->SetSequenceNumber(kTestSequenceNumber);
-    rtp_rtcp_module_->SetStartTimestamp(111111);
-
-    // Used for NACK processing.
-    rtp_rtcp_module_->SetRemoteSSRC(kTestSsrc);
-
-    rtp_rtcp_module_->SetRtxSendPayloadType(kRtxPayloadType, kPayloadType);
-    transport_.SetSendModule(rtp_rtcp_module_.get());
+    CreateSendModule(kRtxOff);
     media_receiver_ = transport_.stream_receiver_controller_.CreateReceiver(
         kTestSsrc, &media_stream_);
 
     for (size_t n = 0; n < sizeof(payload_data); n++) {
       payload_data[n] = n % 10;
     }
+  }
+
+  // Creates the RTP module, which sends RTX with `rtx_mode`, and the
+  // RTPSenderVideo that uses it.
+  void CreateSendModule(RtxMode rtx_mode) {
+    // `rtp_sender_video_` uses the module, which uses `receive_statistics_`,
+    // so they are deleted in that order before being replaced.
+    rtp_sender_video_ = nullptr;
+    rtp_rtcp_module_ = nullptr;
+    RtpRtcpInterface::Configuration configuration;
+    configuration.audio = false;
+    receive_statistics_ = ReceiveStatistics::Create(&fake_clock_);
+    configuration.receive_statistics = receive_statistics_.get();
+    configuration.outgoing_transport = &transport_;
+    configuration.retransmission_rate_limiter = &retransmission_rate_limiter_;
+    configuration.local_media_ssrc = kTestSsrc;
+    configuration.rtx_send_ssrc = kTestRtxSsrc;
+    configuration.rtx_mode = rtx_mode;
+    configuration.rtx_payload_types = {{kPayloadType, kRtxPayloadType}};
+    configuration.rtp_state = RtpState{.start_timestamp = 111111};
+    configuration.rtcp_mode = RtcpMode::kCompound;
+    rtp_rtcp_module_ =
+        ModuleRtpRtcpImpl2::CreateSendModule(env_, configuration);
+    RTPSenderVideo::Config video_config;
+    video_config.clock = &fake_clock_;
+    video_config.rtp_sender = rtp_rtcp_module_->RtpSender();
+    video_config.field_trials = &env_.field_trials();
+    rtp_sender_video_ = std::make_unique<RTPSenderVideo>(video_config);
+    rtp_rtcp_module_->SetStorePacketsStatus(true, 600);
+    EXPECT_EQ(0, rtp_rtcp_module_->SetSendingStatus(true));
+    rtp_rtcp_module_->SetSequenceNumber(kTestSequenceNumber);
+
+    // Used for NACK processing.
+    rtp_rtcp_module_->SetRemoteSSRC(kTestSsrc);
+
+    transport_.SetSendModule(rtp_rtcp_module_.get());
   }
 
   int BuildNackList(uint16_t* nack_list) {
@@ -198,7 +229,7 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
   void RunRtxTest(RtxMode rtx_method, int loss) {
     rtx_receiver_ = transport_.stream_receiver_controller_.CreateReceiver(
         kTestRtxSsrc, &rtx_stream_);
-    rtp_rtcp_module_->SetRtxSendStatus(rtx_method);
+    CreateSendModule(rtx_method);
     transport_.DropEveryNthPacket(loss);
     uint32_t timestamp = 3000;
     uint16_t nack_list[kVideoNackListSize];
@@ -207,23 +238,26 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
       EXPECT_TRUE(rtp_rtcp_module_->OnSendingRtpFrame(timestamp, timestamp / 90,
                                                       kPayloadType, false));
       video_header.frame_type = VideoFrameType::kVideoFrameDelta;
-      EXPECT_TRUE(rtp_sender_video_->SendVideo(
-          kPayloadType, VideoCodecType::kVideoCodecGeneric, timestamp,
+      EXPECT_TRUE(rtp_sender_video_->SendVideoFrame(
+          kPayloadType, VideoCodecType::kVideoCodecGeneric,
+          RtpTimestampWithOffset{timestamp},
           /*capture_time=*/Timestamp::Millis(timestamp / 90), payload_data,
           sizeof(payload_data), video_header, TimeDelta::Zero(), {}));
       // Min required delay until retransmit = 5 + RTT ms (RTT = 0).
-      fake_clock.AdvanceTimeMilliseconds(5);
+      fake_clock_.AdvanceTimeMilliseconds(5);
       int length = BuildNackList(nack_list);
       if (length > 0)
         rtp_rtcp_module_->SendNACK(nack_list, length);
-      fake_clock.AdvanceTimeMilliseconds(28);  //  33ms - 5ms delay.
+      fake_clock_.AdvanceTimeMilliseconds(28);  //  33ms - 5ms delay.
       // Prepare next frame.
       timestamp += 3000;
     }
     media_stream_.sequence_numbers_.sort();
   }
 
-  rtc::AutoThread main_thread_;
+  test::RunLoop main_thread_;
+  SimulatedClock fake_clock_;
+  const Environment env_;
   std::unique_ptr<ReceiveStatistics> receive_statistics_;
   std::unique_ptr<ModuleRtpRtcpImpl2> rtp_rtcp_module_;
   std::unique_ptr<RTPSenderVideo> rtp_sender_video_;
@@ -233,7 +267,6 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
   VerifyingMediaStream media_stream_;
   RtxReceiveStream rtx_stream_;
   uint8_t payload_data[65000];
-  SimulatedClock fake_clock;
   RateLimiter retransmission_rate_limiter_;
   std::unique_ptr<RtpStreamReceiverInterface> media_receiver_;
   std::unique_ptr<RtpStreamReceiverInterface> rtx_receiver_;
@@ -258,13 +291,14 @@ TEST_F(RtpRtcpRtxNackTest, LongNackList) {
     EXPECT_TRUE(rtp_rtcp_module_->OnSendingRtpFrame(timestamp, timestamp / 90,
                                                     kPayloadType, false));
     video_header.frame_type = VideoFrameType::kVideoFrameDelta;
-    EXPECT_TRUE(rtp_sender_video_->SendVideo(
-        kPayloadType, VideoCodecType::kVideoCodecGeneric, timestamp,
-        Timestamp::Millis(timestamp / 90), payload_data, sizeof(payload_data),
-        video_header, TimeDelta::Zero(), {}));
+    EXPECT_TRUE(rtp_sender_video_->SendVideoFrame(
+        kPayloadType, VideoCodecType::kVideoCodecGeneric,
+        RtpTimestampWithOffset{timestamp}, Timestamp::Millis(timestamp / 90),
+        payload_data, sizeof(payload_data), video_header, TimeDelta::Zero(),
+        {}));
     // Prepare next frame.
     timestamp += 3000;
-    fake_clock.AdvanceTimeMilliseconds(33);
+    fake_clock_.AdvanceTimeMilliseconds(33);
   }
   EXPECT_FALSE(transport_.expected_sequence_numbers_.empty());
   EXPECT_FALSE(media_stream_.sequence_numbers_.empty());

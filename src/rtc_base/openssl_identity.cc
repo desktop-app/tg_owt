@@ -10,28 +10,32 @@
 
 #include "rtc_base/openssl_identity.h"
 
+#include <openssl/bio.h>
+#include <openssl/bn.h>
+#include <openssl/err.h>
+#include <openssl/pem.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <ctime>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
-#if defined(WEBRTC_WIN)
-// Must be included first before openssl headers.
-#include "rtc_base/win32.h"  // NOLINT
-#endif                       // WEBRTC_WIN
-
-#include <openssl/bio.h>
-#include <openssl/err.h>
-#include <openssl/pem.h>
-#include <stdint.h>
-
 #include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/openssl.h"
+#include "rtc_base/openssl_certificate.h"
+#include "rtc_base/openssl_key_pair.h"
 #include "rtc_base/openssl_utility.h"
+#include "rtc_base/ssl_certificate.h"
+#include "rtc_base/ssl_identity.h"
 
-namespace rtc {
+namespace webrtc {
 
 OpenSSLIdentity::OpenSSLIdentity(
     std::unique_ptr<OpenSSLKeyPair> key_pair,
@@ -79,8 +83,11 @@ std::unique_ptr<OpenSSLIdentity> OpenSSLIdentity::CreateWithExpiration(
   time_t now = time(nullptr);
   params.not_before = now + kCertificateWindowInSeconds;
   params.not_after = now + certificate_lifetime;
-  if (params.not_before > params.not_after)
+  if (params.not_before > params.not_after) {
+    RTC_LOG(LS_ERROR)
+        << "Іdentity generated failed, not_before is after not_after.";
     return nullptr;
+  }
   return CreateInternal(params);
 }
 
@@ -113,7 +120,7 @@ std::unique_ptr<SSLIdentity> OpenSSLIdentity::CreateFromPEMChainStrings(
     absl::string_view private_key,
     absl::string_view certificate_chain) {
   BIO* bio = BIO_new_mem_buf(certificate_chain.data(),
-                             rtc::dchecked_cast<int>(certificate_chain.size()));
+                             dchecked_cast<int>(certificate_chain.size()));
   if (!bio)
     return nullptr;
   BIO_set_mem_eof_return(bio, 0);
@@ -122,12 +129,16 @@ std::unique_ptr<SSLIdentity> OpenSSLIdentity::CreateFromPEMChainStrings(
     X509* x509 =
         PEM_read_bio_X509(bio, nullptr, nullptr, const_cast<char*>("\0"));
     if (x509 == nullptr) {
-      uint32_t err = ERR_peek_error();
+      // Check the error that PEM_read_bio_X509() just added, not errors that
+      // may have been left in this thread's error queue by earlier operations.
+      uint32_t err = ERR_peek_last_error();
       if (ERR_GET_LIB(err) == ERR_LIB_PEM &&
           ERR_GET_REASON(err) == PEM_R_NO_START_LINE) {
+        ERR_clear_error();
         break;
       }
-      RTC_LOG(LS_ERROR) << "Failed to parse certificate from PEM string.";
+      RTC_LOG(LS_ERROR) << "Failed to parse certificate from PEM string: "
+                        << ERR_reason_error_string(err);
       BIO_free(bio);
       return nullptr;
     }
@@ -202,4 +213,4 @@ bool OpenSSLIdentity::operator!=(const OpenSSLIdentity& other) const {
   return !(*this == other);
 }
 
-}  // namespace rtc
+}  // namespace webrtc

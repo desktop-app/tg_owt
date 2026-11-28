@@ -10,6 +10,8 @@
 
 package org.webrtc;
 
+import org.jni_zero.NativeMethods;
+
 /** Java wrapper for a C++ MediaSourceInterface. */
 public class MediaSource {
   /** Tracks MediaSourceInterface.SourceState */
@@ -19,35 +21,31 @@ public class MediaSource {
     ENDED,
     MUTED;
 
-    @CalledByNative("State")
+    @CalledByNative
     static State fromNativeIndex(int nativeIndex) {
       return values()[nativeIndex];
     }
   }
 
+  final NativeLifecycleLock lifecycleLock;
   private final RefCountDelegate refCountDelegate;
-  private long nativeSource;
 
   public MediaSource(long nativeSource) {
     refCountDelegate = new RefCountDelegate(() -> JniCommon.nativeReleaseRef(nativeSource));
-    this.nativeSource = nativeSource;
+    this.lifecycleLock = new NativeLifecycleLock("MediaSource", nativeSource);
   }
 
   public State state() {
-    checkMediaSourceExists();
-    return nativeGetState(nativeSource);
+    return lifecycleLock.call(nativeSource -> MediaSourceJni.get().getState(nativeSource));
   }
 
   public void dispose() {
-    checkMediaSourceExists();
-    refCountDelegate.release();
-    nativeSource = 0;
+    lifecycleLock.dispose(nativeSource -> refCountDelegate.release());
   }
 
   /** Returns a pointer to webrtc::MediaSourceInterface. */
   protected long getNativeMediaSource() {
-    checkMediaSourceExists();
-    return nativeSource;
+    return lifecycleLock.getNativePointer();
   }
 
   /**
@@ -64,11 +62,8 @@ public class MediaSource {
     }
   }
 
-  private void checkMediaSourceExists() {
-    if (nativeSource == 0) {
-      throw new IllegalStateException("MediaSource has been disposed.");
-    }
+  @NativeMethods
+  interface Natives {
+    State getState(long pointer);
   }
-
-  private static native State nativeGetState(long pointer);
 }

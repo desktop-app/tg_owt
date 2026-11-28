@@ -10,12 +10,17 @@
 
 #include "sdk/android/src/jni/pc/stats_observer.h"
 
+#include <jni.h>
+
 #include <vector>
 
+#include "api/legacy_stats_types.h"
+#include "api/scoped_refptr.h"
 #include "sdk/android/generated_peerconnection_jni/StatsObserver_jni.h"
 #include "sdk/android/generated_peerconnection_jni/StatsReport_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
+#include "sdk/android/src/jni/jvm.h"
 
 namespace webrtc {
 namespace jni {
@@ -24,7 +29,7 @@ namespace {
 
 ScopedJavaLocalRef<jobject> NativeToJavaStatsReportValue(
     JNIEnv* env,
-    const rtc::scoped_refptr<StatsReport::Value>& value_ptr) {
+    const scoped_refptr<StatsReport::Value>& value_ptr) {
   // Should we use the '.name' enum value here instead of converting the
   // name to a string?
   return Java_Value_Constructor(
@@ -72,3 +77,6 @@ void StatsObserverJni::OnComplete(const StatsReports& reports) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(StatsObserver)
+DEFINE_JNI(StatsReport)

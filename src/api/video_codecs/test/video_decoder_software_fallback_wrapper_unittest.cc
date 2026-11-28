@@ -10,19 +10,21 @@
 
 #include "api/video_codecs/video_decoder_software_fallback_wrapper.h"
 
-#include <stdint.h>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
 
-#include "absl/types/optional.h"
+#include "absl/strings/string_view.h"
 #include "api/environment/environment.h"
-#include "api/environment/environment_factory.h"
 #include "api/video/encoded_image.h"
 #include "api/video/video_frame.h"
+#include "api/video/video_frame_type.h"
 #include "api/video_codecs/video_decoder.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
-#include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
-#include "test/explicit_key_value_config.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -32,9 +34,8 @@ class VideoDecoderSoftwareFallbackWrapperTest : public ::testing::Test {
   VideoDecoderSoftwareFallbackWrapperTest()
       : VideoDecoderSoftwareFallbackWrapperTest("") {}
   explicit VideoDecoderSoftwareFallbackWrapperTest(
-      const std::string& field_trials)
-      : field_trials_(field_trials),
-        env_(CreateEnvironment(&field_trials_)),
+      absl::string_view field_trials)
+      : env_(CreateTestEnvironment({.field_trials = field_trials})),
         fake_decoder_(new CountingFakeDecoder()),
         fallback_wrapper_(CreateVideoDecoderSoftwareFallbackWrapper(
             env_,
@@ -43,13 +44,13 @@ class VideoDecoderSoftwareFallbackWrapperTest : public ::testing::Test {
 
   class CountingFakeDecoder : public VideoDecoder {
    public:
-    bool Configure(const Settings& settings) override {
+    bool Configure(const Settings& /* settings */) override {
       ++configure_count_;
       return configure_return_value_;
     }
 
-    int32_t Decode(const EncodedImage& input_image,
-                   int64_t render_time_ms) override {
+    int32_t Decode(const EncodedImage& /* input_image */,
+                   int64_t /* render_time_ms */) override {
       ++decode_count_;
       return decode_return_code_;
     }
@@ -75,7 +76,6 @@ class VideoDecoderSoftwareFallbackWrapperTest : public ::testing::Test {
     int release_count_ = 0;
     int reset_count_ = 0;
   };
-  test::ExplicitKeyValueConfig field_trials_;
   const Environment env_;
   // `fake_decoder_` is owned and released by `fallback_wrapper_`.
   CountingFakeDecoder* fake_decoder_;
@@ -87,7 +87,7 @@ TEST_F(VideoDecoderSoftwareFallbackWrapperTest, InitializesDecoder) {
   EXPECT_EQ(1, fake_decoder_->configure_count_);
 
   EncodedImage encoded_image;
-  encoded_image._frameType = VideoFrameType::kVideoFrameKey;
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   fallback_wrapper_->Decode(encoded_image, -1);
   EXPECT_EQ(1, fake_decoder_->configure_count_)
       << "Initialized decoder should not be reinitialized.";
@@ -101,7 +101,7 @@ TEST_F(VideoDecoderSoftwareFallbackWrapperTest,
   EXPECT_EQ(1, fake_decoder_->configure_count_);
 
   EncodedImage encoded_image;
-  encoded_image._frameType = VideoFrameType::kVideoFrameKey;
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   fallback_wrapper_->Decode(encoded_image, -1);
   EXPECT_EQ(1, fake_decoder_->configure_count_)
       << "Should not have attempted reinitializing the fallback decoder on "
@@ -121,7 +121,7 @@ TEST_F(VideoDecoderSoftwareFallbackWrapperTest, IsSoftwareFallbackSticky) {
   EXPECT_EQ(1, fake_decoder_->decode_count_);
 
   // Software fallback should be sticky, fake_decoder_ shouldn't be used.
-  encoded_image._frameType = VideoFrameType::kVideoFrameKey;
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   fallback_wrapper_->Decode(encoded_image, -1);
   EXPECT_EQ(1, fake_decoder_->decode_count_)
       << "Decoder shouldn't be used after failure.";
@@ -180,15 +180,15 @@ TEST_F(VideoDecoderSoftwareFallbackWrapperTest, ForwardsReleaseCall) {
 TEST_F(VideoDecoderSoftwareFallbackWrapperTest,
        ForwardsRegisterDecodeCompleteCallback) {
   class FakeDecodedImageCallback : public DecodedImageCallback {
-    int32_t Decoded(VideoFrame& decodedImage) override { return 0; }
-    int32_t Decoded(webrtc::VideoFrame& decodedImage,
-                    int64_t decode_time_ms) override {
+    int32_t Decoded(VideoFrame& /* decodedImage */) override { return 0; }
+    int32_t Decoded(VideoFrame& /* decodedImage */,
+                    int64_t /* decode_time_ms */) override {
       RTC_DCHECK_NOTREACHED();
       return -1;
     }
-    void Decoded(webrtc::VideoFrame& decodedImage,
-                 absl::optional<int32_t> decode_time_ms,
-                 absl::optional<uint8_t> qp) override {
+    void Decoded(VideoFrame& /* decodedImage */,
+                 std::optional<int32_t> /* decode_time_ms */,
+                 std::optional<uint8_t> /* qp */) override {
       RTC_DCHECK_NOTREACHED();
     }
   } callback;
@@ -217,7 +217,7 @@ TEST_F(VideoDecoderSoftwareFallbackWrapperTest, FallbacksOnTooManyErrors) {
 
   fake_decoder_->decode_return_code_ = WEBRTC_VIDEO_CODEC_ERROR;
   EncodedImage encoded_image;
-  encoded_image._frameType = VideoFrameType::kVideoFrameKey;
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   // Doesn't fallback from a single error.
   fallback_wrapper_->Decode(encoded_image, -1);
   EXPECT_STREQ("fake-decoder", fallback_wrapper_->ImplementationName());
@@ -240,7 +240,7 @@ TEST_F(VideoDecoderSoftwareFallbackWrapperTest,
 
   fake_decoder_->decode_return_code_ = WEBRTC_VIDEO_CODEC_ERROR;
   EncodedImage encoded_image;
-  encoded_image._frameType = VideoFrameType::kVideoFrameDelta;
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameDelta);
 
   // Many decoded frames with the same error
   const int kNumFramesToEncode = 10;
@@ -257,7 +257,7 @@ TEST_F(VideoDecoderSoftwareFallbackWrapperTest,
   fallback_wrapper_->Configure({});
 
   EncodedImage encoded_image;
-  encoded_image._frameType = VideoFrameType::kVideoFrameKey;
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
 
   const int kNumFramesToEncode = 10;
   for (int i = 0; i < kNumFramesToEncode; ++i) {
@@ -292,7 +292,7 @@ TEST_F(ForcedSoftwareDecoderFallbackTest, UsesForcedFallback) {
   EXPECT_EQ(1, sw_fallback_decoder_->configure_count_);
 
   EncodedImage encoded_image;
-  encoded_image._frameType = VideoFrameType::kVideoFrameKey;
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   fallback_wrapper_->Decode(encoded_image, -1);
   EXPECT_EQ(1, sw_fallback_decoder_->configure_count_);
   EXPECT_EQ(1, sw_fallback_decoder_->decode_count_);

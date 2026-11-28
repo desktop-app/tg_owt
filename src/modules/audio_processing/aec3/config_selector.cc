@@ -11,6 +11,9 @@
 
 #include "modules/audio_processing/aec3/config_selector.h"
 
+#include <optional>
+
+#include "api/audio/echo_canceller3_config.h"
 #include "rtc_base/checks.h"
 
 namespace webrtc {
@@ -47,7 +50,7 @@ bool CompatibleConfigs(const EchoCanceller3Config& mono_config,
 
 ConfigSelector::ConfigSelector(
     const EchoCanceller3Config& config,
-    const absl::optional<EchoCanceller3Config>& multichannel_config,
+    const std::optional<EchoCanceller3Config>& multichannel_config,
     int num_render_input_channels)
     : config_(config), multichannel_config_(multichannel_config) {
   if (multichannel_config_.has_value()) {

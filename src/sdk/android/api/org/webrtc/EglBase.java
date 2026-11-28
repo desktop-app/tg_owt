@@ -132,7 +132,7 @@ public interface EglBase {
       }
       if (supportsPixelBuffer) {
         list.add(EGL10.EGL_SURFACE_TYPE);
-        list.add(EGL10.EGL_PBUFFER_BIT);
+        list.add(EGL10.EGL_PBUFFER_BIT | EGL10.EGL_WINDOW_BIT);
       }
       if (isRecordable) {
         list.add(EGL_RECORDABLE_ANDROID);
@@ -298,6 +298,8 @@ public interface EglBase {
 
   // Detach the current EGL context, so that it can be made current on another thread.
   void detachCurrent();
+
+  default void setDetachSurfaceOnRelease(boolean detach) {}
 
   void swapBuffers();
 

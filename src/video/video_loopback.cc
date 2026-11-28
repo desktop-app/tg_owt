@@ -9,26 +9,27 @@
  */
 #include "video/video_loopback.h"
 
-#include <stdio.h>
-
-#include <memory>
+#include <cstdio>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
-#include "absl/types/optional.h"
 #include "api/test/simulated_network.h"
 #include "api/test/video_quality_test_fixture.h"
 #include "api/transport/bitrate_settings.h"
+#include "api/units/data_rate.h"
+#include "api/units/time_delta.h"
+#include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_codec.h"
+#include "modules/video_coding/svc/scalability_mode_util.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "system_wrappers/include/field_trial.h"
-#include "test/field_trial.h"
+#include "rtc_base/string_encode.h"
 #include "test/gtest.h"
 #include "test/run_test.h"
-#include "test/test_flags.h"
 #include "video/video_quality_test.h"
 
 // Flags common with screenshare loopback, with different default values.
@@ -200,11 +201,71 @@ ABSL_FLAG(bool,
 
 ABSL_FLAG(bool, video, true, "Add video stream");
 
-// Video-specific flags.
 ABSL_FLAG(std::string,
           clip,
           "",
           "Name of the clip to show. If empty, using chroma generator.");
+
+ABSL_FLAG(std::string,
+          clips,
+          "",
+          "Comma-separated list of clips to switch between using "
+          "SwitchingFrameReader.");
+
+ABSL_FLAG(int,
+          camera_switching_interval_ms,
+          0,
+          "Interval in ms between camera switches when using "
+          "SwitchingFrameReader (defaults to 2000 ms if multiple clips are "
+          "provided).");
+
+ABSL_FLAG(std::string,
+          scalability_mode,
+          "",
+          "Scalability mode to use (e.g. 'L1T3').");
+
+ABSL_FLAG(bool,
+          synthetic_pendulum,
+          false,
+          "Use synthetic chaotic zoom/pan frame generator with double pendulum "
+          "physics.");
+
+ABSL_FLAG(std::string,
+          pendulum_image,
+          "",
+          "Path to YUV420 static image for synthetic pendulum capturer. If "
+          "empty, uses resources/difficult_photo_1850_1110.yuv.");
+
+ABSL_FLAG(int,
+          pendulum_image_width,
+          1850,
+          "Width of source image for synthetic pendulum capturer.");
+
+ABSL_FLAG(int,
+          pendulum_image_height,
+          1110,
+          "Height of source image for synthetic pendulum capturer.");
+
+ABSL_FLAG(double,
+          pendulum_min_zoom,
+          1.2,
+          "Minimum zoom factor for synthetic pendulum capturer (>= 1.0).");
+
+ABSL_FLAG(double,
+          pendulum_max_zoom,
+          3.0,
+          "Maximum zoom factor for synthetic pendulum capturer.");
+
+ABSL_FLAG(double,
+          pendulum_zoom_speed,
+          0.3,
+          "Zoom oscillation frequency in cycles/sec.");
+
+ABSL_FLAG(int,
+          pendulum_noise,
+          20,
+          "Luma white noise amplitude for synthetic pendulum capturer (0 to "
+          "disable).");
 
 namespace webrtc {
 namespace {
@@ -256,7 +317,7 @@ InterLayerPredMode InterLayerPred() {
   }
 }
 
-std::string Codec() {
+std::string CodecName() {
   return absl::GetFlag(FLAGS_codec);
 }
 
@@ -284,8 +345,10 @@ int AvgBurstLossLength() {
   return static_cast<int>(absl::GetFlag(FLAGS_avg_burst_loss_length));
 }
 
-int LinkCapacityKbps() {
-  return static_cast<int>(absl::GetFlag(FLAGS_link_capacity));
+DataRate LinkCapacity() {
+  int link_capacity_kbps = absl::GetFlag(FLAGS_link_capacity);
+  return link_capacity_kbps == 0 ? DataRate::Infinity()
+                                 : DataRate::KilobitsPerSec(link_capacity_kbps);
 }
 
 int QueueSize() {
@@ -352,13 +415,17 @@ std::string Clip() {
   return absl::GetFlag(FLAGS_clip);
 }
 
+std::optional<ScalabilityMode> GetScalabilityMode() {
+  return ScalabilityModeFromString(absl::GetFlag(FLAGS_scalability_mode));
+}
+
 }  // namespace
 
 void Loopback() {
   BuiltInNetworkBehaviorConfig pipe_config;
   pipe_config.loss_percent = LossPercent();
   pipe_config.avg_burst_loss_length = AvgBurstLossLength();
-  pipe_config.link_capacity_kbps = LinkCapacityKbps();
+  pipe_config.link_capacity = LinkCapacity();
   pipe_config.queue_length_packets = QueueSize();
   pipe_config.queue_delay_ms = AvgPropagationDelayMs();
   pipe_config.delay_standard_deviation_ms = StdPropagationDelayMs();
@@ -385,14 +452,46 @@ void Loopback() {
   params.video[0].max_bitrate_bps = MaxBitrateKbps() * 1000;
   params.video[0].suspend_below_min_bitrate =
       absl::GetFlag(FLAGS_suspend_below_min_bitrate);
-  params.video[0].codec = Codec();
+  params.video[0].codec = CodecName();
   params.video[0].num_temporal_layers = NumTemporalLayers();
   params.video[0].selected_tl = SelectedTL();
   params.video[0].min_transmit_bps = 0;
   params.video[0].ulpfec = absl::GetFlag(FLAGS_use_ulpfec);
   params.video[0].flexfec = absl::GetFlag(FLAGS_use_flexfec);
   params.video[0].automatic_scaling = NumStreams() < 2;
-  params.video[0].clip_path = Clip();
+
+  int interval_ms = absl::GetFlag(FLAGS_camera_switching_interval_ms);
+  std::string clips_flag = absl::GetFlag(FLAGS_clips);
+  std::vector<std::string> clips;
+  if (!clips_flag.empty()) {
+    tokenize(clips_flag, ',', &clips);
+  } else if (!Clip().empty()) {
+    std::vector<std::string> parsed;
+    tokenize(Clip(), ',', &parsed);
+    if (parsed.size() > 1 || interval_ms > 0) {
+      clips = std::move(parsed);
+    }
+  }
+
+  if (absl::GetFlag(FLAGS_synthetic_pendulum) || Clip() == "pendulum") {
+    params.video[0].pendulum = {
+        .image_path = absl::GetFlag(FLAGS_pendulum_image).empty()
+                          ? "resources/difficult_photo_1850_1110.yuv"
+                          : absl::GetFlag(FLAGS_pendulum_image),
+        .image_width = absl::GetFlag(FLAGS_pendulum_image_width),
+        .image_height = absl::GetFlag(FLAGS_pendulum_image_height),
+        .min_zoom = absl::GetFlag(FLAGS_pendulum_min_zoom),
+        .max_zoom = absl::GetFlag(FLAGS_pendulum_max_zoom),
+        .zoom_speed = absl::GetFlag(FLAGS_pendulum_zoom_speed),
+        .noise_level = absl::GetFlag(FLAGS_pendulum_noise),
+    };
+  } else if (!clips.empty()) {
+    params.video[0].clip_paths = std::move(clips);
+    params.video[0].camera_switching_interval =
+        TimeDelta::Millis(interval_ms > 0 ? interval_ms : 2000);
+  } else {
+    params.video[0].clip_path = Clip();
+  }
   params.video[0].capture_device_index = GetCaptureDevice();
   params.audio.enabled = absl::GetFlag(FLAGS_audio);
   params.audio.sync_video = absl::GetFlag(FLAGS_audio_video_sync);
@@ -411,6 +510,13 @@ void Loopback() {
   if (NumStreams() > 1 && Stream0().empty() && Stream1().empty()) {
     params.ss[0].infer_streams = true;
   }
+  std::optional<ScalabilityMode> scalability_mode = GetScalabilityMode();
+  if (scalability_mode.has_value()) {
+    // Either scalability mode OR spatial/temporal layer config, not both.
+    RTC_DCHECK_EQ(NumTemporalLayers(), 1);
+    RTC_DCHECK_EQ(NumSpatialLayers(), 1);
+    params.ss[0].scalability_mode = scalability_mode;
+  }
 
   std::vector<std::string> stream_descriptors;
   stream_descriptors.push_back(Stream0());
@@ -419,15 +525,16 @@ void Loopback() {
   SL_descriptors.push_back(SL0());
   SL_descriptors.push_back(SL1());
   SL_descriptors.push_back(SL2());
-  VideoQualityTest::FillScalabilitySettings(
+
+  VideoQualityTest fixture;
+  fixture.FillScalabilitySettings(
       &params, 0, stream_descriptors, NumStreams(), SelectedStream(),
       NumSpatialLayers(), SelectedSL(), InterLayerPred(), SL_descriptors);
 
-  auto fixture = std::make_unique<VideoQualityTest>(nullptr);
   if (DurationSecs()) {
-    fixture->RunWithAnalyzer(params);
+    fixture.RunWithAnalyzer(params);
   } else {
-    fixture->RunWithRenderers(params);
+    fixture.RunWithRenderers(params);
   }
 }
 
@@ -435,14 +542,16 @@ int RunLoopbackTest(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
   absl::ParseCommandLine(argc, argv);
 
-  rtc::LogMessage::SetLogToStderr(absl::GetFlag(FLAGS_logs));
+  if (absl::GetFlag(FLAGS_logs)) {
+    // Make sure log level is set, otherwise --logs does not work for release
+    // builds.
+    LoggingConfig config;
+    config.set_min_severity(LoggingSeverity::LS_INFO);
+    config.set_debug_severity(LoggingSeverity::LS_INFO);
+    InitializeLogging(std::move(config));
+  }
 
-  // InitFieldTrialsFromString stores the char*, so the char array must outlive
-  // the application.
-  const std::string field_trials = absl::GetFlag(FLAGS_force_fieldtrials);
-  webrtc::field_trial::InitFieldTrialsFromString(field_trials.c_str());
-
-  webrtc::test::RunTest(webrtc::Loopback);
+  test::RunTest(Loopback);
   return 0;
 }
 }  // namespace webrtc

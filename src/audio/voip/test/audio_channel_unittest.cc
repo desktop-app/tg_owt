@@ -10,25 +10,45 @@
 
 #include "audio/voip/audio_channel.h"
 
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <optional>
+#include <span>
+#include <utility>
+
 #include "absl/functional/any_invocable.h"
+#include "api/audio/audio_frame.h"
+#include "api/audio/audio_mixer.h"
+#include "api/audio_codecs/audio_decoder_factory.h"
+#include "api/audio_codecs/audio_encoder_factory.h"
+#include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
-#include "api/call/transport.h"
-#include "api/task_queue/task_queue_base.h"
-#include "api/task_queue/task_queue_factory.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
+#include "api/make_ref_counted.h"
+#include "api/scoped_refptr.h"
+#include "api/voip/voip_statistics.h"
 #include "audio/voip/test/mock_task_queue.h"
+#include "call/audio_sender.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
 #include "modules/audio_mixer/sine_wave_generator.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
-#include "rtc_base/logging.h"
+#include "system_wrappers/include/clock.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/mock_audio_encoder.h"
 #include "test/mock_transport.h"
 
 namespace webrtc {
 namespace {
 
-using ::testing::Invoke;
+using ::testing::FloatEq;
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::Unused;
@@ -44,8 +64,12 @@ class AudioChannelTest : public ::testing::Test {
   const SdpAudioFormat kPcmuFormat = {"pcmu", 8000, 1};
 
   AudioChannelTest()
-      : fake_clock_(kStartTime), wave_generator_(1000.0, kAudioLevel) {
-    task_queue_factory_ = std::make_unique<MockTaskQueueFactory>(&task_queue_);
+      : fake_clock_(kStartTime),
+        wave_generator_(1000.0, kAudioLevel),
+        env_(CreateEnvironment(
+            CreateTestFieldTrialsPtr(),
+            &fake_clock_,
+            std::make_unique<MockTaskQueueFactory>(&task_queue_))) {
     audio_mixer_ = AudioMixerImpl::Create();
     encoder_factory_ = CreateBuiltinAudioEncoderFactory();
     decoder_factory_ = CreateBuiltinAudioDecoderFactory();
@@ -53,26 +77,25 @@ class AudioChannelTest : public ::testing::Test {
     // By default, run the queued task immediately.
     ON_CALL(task_queue_, PostTaskImpl)
         .WillByDefault(WithArg<0>(
-            [](absl::AnyInvocable<void() &&> task) { std::move(task)(); }));
+            [](absl::AnyInvocable<void()&&> task) { std::move(task)(); }));
   }
 
   void SetUp() override { audio_channel_ = CreateAudioChannel(kLocalSsrc); }
 
   void TearDown() override { audio_channel_ = nullptr; }
 
-  rtc::scoped_refptr<AudioChannel> CreateAudioChannel(uint32_t ssrc) {
+  scoped_refptr<AudioChannel> CreateAudioChannel(uint32_t ssrc) {
     // Use same audio mixer here for simplicity sake as we are not checking
     // audio activity of RTP in our testcases. If we need to do test on audio
     // signal activity then we need to assign audio mixer for each channel.
     // Also this uses the same transport object for different audio channel to
     // simplify network routing logic.
-    rtc::scoped_refptr<AudioChannel> audio_channel =
-        rtc::make_ref_counted<AudioChannel>(
-            &transport_, ssrc, task_queue_factory_.get(), audio_mixer_.get(),
-            decoder_factory_);
-    audio_channel->SetEncoder(kPcmuPayload, kPcmuFormat,
-                              encoder_factory_->MakeAudioEncoder(
-                                  kPcmuPayload, kPcmuFormat, absl::nullopt));
+    scoped_refptr<AudioChannel> audio_channel = make_ref_counted<AudioChannel>(
+        env_, &transport_, ssrc, audio_mixer_.get(), decoder_factory_);
+    audio_channel->SetEncoder(
+        kPcmuPayload, kPcmuFormat,
+        encoder_factory_->Create(env_, kPcmuFormat,
+                                 {.payload_type = kPcmuPayload}));
     audio_channel->SetReceiveCodecs({{kPcmuPayload, kPcmuFormat}});
     audio_channel->StartSend();
     audio_channel->StartPlay();
@@ -93,22 +116,22 @@ class AudioChannelTest : public ::testing::Test {
   SineWaveGenerator wave_generator_;
   NiceMock<MockTransport> transport_;
   NiceMock<MockTaskQueue> task_queue_;
-  std::unique_ptr<TaskQueueFactory> task_queue_factory_;
-  rtc::scoped_refptr<AudioMixer> audio_mixer_;
-  rtc::scoped_refptr<AudioDecoderFactory> decoder_factory_;
-  rtc::scoped_refptr<AudioEncoderFactory> encoder_factory_;
-  rtc::scoped_refptr<AudioChannel> audio_channel_;
+  const Environment env_;
+  scoped_refptr<AudioMixer> audio_mixer_;
+  scoped_refptr<AudioDecoderFactory> decoder_factory_;
+  scoped_refptr<AudioEncoderFactory> encoder_factory_;
+  scoped_refptr<AudioChannel> audio_channel_;
 };
 
 // Validate RTP packet generation by feeding audio frames with sine wave.
 // Resulted RTP packet is looped back into AudioChannel and gets decoded into
 // audio frame to see if it has some signal to indicate its validity.
 TEST_F(AudioChannelTest, PlayRtpByLocalLoop) {
-  auto loop_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto loop_rtp = [&](std::span<const uint8_t> packet, Unused) {
     audio_channel_->ReceivedRTPPacket(packet);
     return true;
   };
-  EXPECT_CALL(transport_, SendRtp).WillOnce(Invoke(loop_rtp));
+  EXPECT_CALL(transport_, SendRtp).WillOnce(loop_rtp);
 
   auto audio_sender = audio_channel_->GetAudioSender();
   audio_sender->SendAudioData(GetAudioFrame(0));
@@ -129,11 +152,11 @@ TEST_F(AudioChannelTest, PlayRtpByLocalLoop) {
 // Validate assigned local SSRC is resulted in RTP packet.
 TEST_F(AudioChannelTest, VerifyLocalSsrcAsAssigned) {
   RtpPacketReceived rtp;
-  auto loop_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto loop_rtp = [&](std::span<const uint8_t> packet, Unused) {
     rtp.Parse(packet);
     return true;
   };
-  EXPECT_CALL(transport_, SendRtp).WillOnce(Invoke(loop_rtp));
+  EXPECT_CALL(transport_, SendRtp).WillOnce(loop_rtp);
 
   auto audio_sender = audio_channel_->GetAudioSender();
   audio_sender->SendAudioData(GetAudioFrame(0));
@@ -144,11 +167,11 @@ TEST_F(AudioChannelTest, VerifyLocalSsrcAsAssigned) {
 
 // Check metrics after processing an RTP packet.
 TEST_F(AudioChannelTest, TestIngressStatistics) {
-  auto loop_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto loop_rtp = [&](std::span<const uint8_t> packet, Unused) {
     audio_channel_->ReceivedRTPPacket(packet);
     return true;
   };
-  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(Invoke(loop_rtp));
+  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(loop_rtp);
 
   auto audio_sender = audio_channel_->GetAudioSender();
   audio_sender->SendAudioData(GetAudioFrame(0));
@@ -158,7 +181,7 @@ TEST_F(AudioChannelTest, TestIngressStatistics) {
   audio_mixer_->Mix(/*number_of_channels=*/1, &audio_frame);
   audio_mixer_->Mix(/*number_of_channels=*/1, &audio_frame);
 
-  absl::optional<IngressStatistics> ingress_stats =
+  std::optional<IngressStatistics> ingress_stats =
       audio_channel_->GetIngressStatistics();
   EXPECT_TRUE(ingress_stats);
   EXPECT_EQ(ingress_stats->neteq_stats.total_samples_received, 160ULL);
@@ -221,16 +244,16 @@ TEST_F(AudioChannelTest, TestIngressStatistics) {
 
 // Check ChannelStatistics metric after processing RTP and RTCP packets.
 TEST_F(AudioChannelTest, TestChannelStatistics) {
-  auto loop_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  auto loop_rtp = [&](std::span<const uint8_t> packet, Unused) {
     audio_channel_->ReceivedRTPPacket(packet);
     return true;
   };
-  auto loop_rtcp = [&](rtc::ArrayView<const uint8_t> packet) {
+  auto loop_rtcp = [&](std::span<const uint8_t> packet, Unused) {
     audio_channel_->ReceivedRTCPPacket(packet);
     return true;
   };
-  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(Invoke(loop_rtp));
-  EXPECT_CALL(transport_, SendRtcp).WillRepeatedly(Invoke(loop_rtcp));
+  EXPECT_CALL(transport_, SendRtp).WillRepeatedly(loop_rtp);
+  EXPECT_CALL(transport_, SendRtcp).WillRepeatedly(loop_rtcp);
 
   // Simulate microphone giving audio frame (10 ms). This will trigger transport
   // to send RTP as handled in loop_rtp above.
@@ -249,7 +272,7 @@ TEST_F(AudioChannelTest, TestChannelStatistics) {
   // in loop_rtcp above.
   audio_channel_->SendRTCPReportForTesting(kRtcpSr);
 
-  absl::optional<ChannelStatistics> channel_stats =
+  std::optional<ChannelStatistics> channel_stats =
       audio_channel_->GetChannelStatistics();
   EXPECT_TRUE(channel_stats);
 
@@ -287,10 +310,10 @@ TEST_F(AudioChannelTest, RttIsAvailableAfterChangeOfRemoteSsrc) {
   auto ac_2 = CreateAudioChannel(kAc2Ssrc);
   auto ac_3 = CreateAudioChannel(kAc3Ssrc);
 
-  auto send_recv_rtp = [&](rtc::scoped_refptr<AudioChannel> rtp_sender,
-                           rtc::scoped_refptr<AudioChannel> rtp_receiver) {
+  auto send_recv_rtp = [&](scoped_refptr<AudioChannel> rtp_sender,
+                           scoped_refptr<AudioChannel> rtp_receiver) {
     // Setup routing logic via transport_.
-    auto route_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+    auto route_rtp = [&](std::span<const uint8_t> packet, Unused) {
       rtp_receiver->ReceivedRTPPacket(packet);
       return true;
     };
@@ -309,10 +332,10 @@ TEST_F(AudioChannelTest, RttIsAvailableAfterChangeOfRemoteSsrc) {
     ON_CALL(transport_, SendRtp).WillByDefault(Return(true));
   };
 
-  auto send_recv_rtcp = [&](rtc::scoped_refptr<AudioChannel> rtcp_sender,
-                            rtc::scoped_refptr<AudioChannel> rtcp_receiver) {
+  auto send_recv_rtcp = [&](scoped_refptr<AudioChannel> rtcp_sender,
+                            scoped_refptr<AudioChannel> rtcp_receiver) {
     // Setup routing logic via transport_.
-    auto route_rtcp = [&](rtc::ArrayView<const uint8_t> packet) {
+    auto route_rtcp = [&](std::span<const uint8_t> packet, Unused) {
       rtcp_receiver->ReceivedRTCPPacket(packet);
       return true;
     };
@@ -331,7 +354,7 @@ TEST_F(AudioChannelTest, RttIsAvailableAfterChangeOfRemoteSsrc) {
   send_recv_rtcp(audio_channel_, ac_2);
   send_recv_rtcp(ac_2, audio_channel_);
 
-  absl::optional<ChannelStatistics> channel_stats =
+  std::optional<ChannelStatistics> channel_stats =
       audio_channel_->GetChannelStatistics();
   ASSERT_TRUE(channel_stats);
   EXPECT_EQ(channel_stats->remote_ssrc, kAc2Ssrc);
@@ -349,6 +372,95 @@ TEST_F(AudioChannelTest, RttIsAvailableAfterChangeOfRemoteSsrc) {
   EXPECT_EQ(channel_stats->remote_ssrc, kAc3Ssrc);
   ASSERT_TRUE(channel_stats->remote_rtcp);
   EXPECT_GT(channel_stats->remote_rtcp->round_trip_time, 0.0);
+}
+
+TEST_F(AudioChannelTest, RtcpReportBlockUpdatesEncoderPacketLossFraction) {
+  auto mock_encoder = std::make_unique<NiceMock<MockAudioEncoder>>();
+  ON_CALL(*mock_encoder, SampleRateHz()).WillByDefault(Return(8000));
+  ON_CALL(*mock_encoder, NumChannels()).WillByDefault(Return(1));
+  ON_CALL(*mock_encoder, RtpTimestampRateHz()).WillByDefault(Return(8000));
+
+  constexpr uint8_t kFractionLostRaw = 51;
+  EXPECT_CALL(*mock_encoder,
+              OnReceivedUplinkPacketLossFraction(
+                  FloatEq(static_cast<float>(kFractionLostRaw) / 256.0f)))
+      .Times(1);
+
+  audio_channel_->SetEncoder(kPcmuPayload, kPcmuFormat,
+                             std::move(mock_encoder));
+
+  // Report block for an unrelated SSRC should be ignored.
+  rtcp::ReportBlock unrelated_block;
+  unrelated_block.SetMediaSsrc(kLocalSsrc + 1);
+  unrelated_block.SetFractionLost(128);
+  rtcp::ReceiverReport unrelated_rr;
+  unrelated_rr.SetSenderSsrc(0xdeadbeef);
+  unrelated_rr.AddReportBlock(unrelated_block);
+  audio_channel_->ReceivedRTCPPacket(unrelated_rr.Build());
+
+  // Report block matching local SSRC should update encoder packet loss.
+  rtcp::ReportBlock local_block;
+  local_block.SetMediaSsrc(kLocalSsrc);
+  local_block.SetFractionLost(kFractionLostRaw);
+  rtcp::ReceiverReport local_rr;
+  local_rr.SetSenderSsrc(0xdeadbeef);
+  local_rr.AddReportBlock(local_block);
+  audio_channel_->ReceivedRTCPPacket(local_rr.Build());
+}
+
+TEST_F(AudioChannelTest, OpusInbandFecEnabledUponRtcpPacketLossReport) {
+  constexpr int kOpusPayload = 111;
+  const SdpAudioFormat kOpusFormat = {
+      "opus", 48000, 2, {{"minptime", "10"}, {"useinbandfec", "1"}}};
+
+  audio_channel_->SetEncoder(
+      kOpusPayload, kOpusFormat,
+      encoder_factory_->Create(env_, kOpusFormat,
+                               {.payload_type = kOpusPayload}));
+  audio_channel_->SetReceiveCodecs({{kOpusPayload, kOpusFormat}});
+
+  EXPECT_CALL(transport_, SendRtp)
+      .WillRepeatedly([&](std::span<const uint8_t> packet, Unused) {
+        audio_channel_->ReceivedRTPPacket(packet);
+        return true;
+      });
+
+  int frame_order = 0;
+  auto make_48khz_frame = [&]() {
+    auto frame = std::make_unique<AudioFrame>();
+    frame->sample_rate_hz_ = 48000;
+    frame->samples_per_channel_ = 480;
+    frame->num_channels_ = 1;
+    frame->timestamp_ = frame->samples_per_channel_ * frame_order++;
+    wave_generator_.GenerateNextFrame(frame.get());
+    return frame;
+  };
+
+  AudioSender* audio_sender = audio_channel_->GetAudioSender();
+  for (int i = 0; i < 10; ++i) {
+    audio_sender->SendAudioData(make_48khz_frame());
+    fake_clock_.AdvanceTimeMilliseconds(10);
+  }
+  EXPECT_EQ(
+      audio_channel_->GetIngressStatistics().neteq_stats.fec_packets_received,
+      0ULL);
+
+  // Report ~20% packet loss (51 / 256) via RTCP Receiver Report.
+  rtcp::ReportBlock report_block;
+  report_block.SetMediaSsrc(kLocalSsrc);
+  report_block.SetFractionLost(51);
+  rtcp::ReceiverReport rr;
+  rr.SetSenderSsrc(0xdeadbeef);
+  rr.AddReportBlock(report_block);
+  audio_channel_->ReceivedRTCPPacket(rr.Build());
+
+  for (int i = 0; i < 10; ++i) {
+    audio_sender->SendAudioData(make_48khz_frame());
+    fake_clock_.AdvanceTimeMilliseconds(10);
+  }
+  EXPECT_GT(
+      audio_channel_->GetIngressStatistics().neteq_stats.fec_packets_received,
+      0ULL);
 }
 
 }  // namespace

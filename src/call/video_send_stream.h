@@ -14,10 +14,11 @@
 #include <stdint.h>
 
 #include <map>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/adaptation/resource.h"
 #include "api/call/transport.h"
 #include "api/crypto/crypto_options.h"
@@ -25,18 +26,21 @@
 #include "api/rtp_parameters.h"
 #include "api/rtp_sender_interface.h"
 #include "api/scoped_refptr.h"
+#include "api/units/data_rate.h"
+#include "api/video/encoded_image.h"
 #include "api/video/video_content_type.h"
 #include "api/video/video_frame.h"
-#include "api/video/video_sink_interface.h"
 #include "api/video/video_source_interface.h"
 #include "api/video/video_stream_encoder_settings.h"
 #include "api/video_codecs/scalability_mode.h"
+#include "api/video_codecs/video_encoder_factory.h"
 #include "call/rtp_config.h"
 #include "common_video/frame_counts.h"
 #include "common_video/include/quality_limitation_reason.h"
 #include "modules/rtp_rtcp/include/report_block_data.h"
 #include "modules/rtp_rtcp/include/rtcp_statistics.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "rtc_base/checks.h"
 #include "video/config/video_encoder_config.h"
 
 namespace webrtc {
@@ -72,7 +76,7 @@ class VideoSendStream {
     // If `type` is kRtx or kFlexfec this value is present. The referenced SSRC
     // is the kMedia stream that this stream is performing retransmissions or
     // FEC for. If `type` is kMedia, this value is null.
-    absl::optional<uint32_t> referenced_media_ssrc;
+    std::optional<uint32_t> referenced_media_ssrc;
     FrameCounts frame_counts;
     int width = 0;
     int height = 0;
@@ -87,21 +91,25 @@ class VideoSendStream {
     RtcpPacketTypeCounter rtcp_packet_type_counts;
     // A snapshot of the most recent Report Block with additional data of
     // interest to statistics. Used to implement RTCRemoteInboundRtpStreamStats.
-    absl::optional<ReportBlockData> report_block_data;
+    std::optional<ReportBlockData> report_block_data;
     double encode_frame_rate = 0.0;
     int frames_encoded = 0;
-    absl::optional<uint64_t> qp_sum;
+    std::optional<uint64_t> qp_sum;
+    EncodedImage::Psnr psnr_sum;
+    uint64_t psnr_measurements = 0;
     uint64_t total_encode_time_ms = 0;
-    uint64_t total_encoded_bytes_target = 0;
     uint32_t huge_frames_sent = 0;
-    absl::optional<ScalabilityMode> scalability_mode;
+    std::optional<ScalabilityMode> scalability_mode;
+    // The target bitrate is what we tell the encoder to produce. What the
+    // encoder actually produces is the sum of encoded bytes.
+    std::optional<DataRate> target_bitrate;
   };
 
   struct Stats {
     Stats();
     ~Stats();
     std::string ToString(int64_t time_ms) const;
-    absl::optional<std::string> encoder_implementation_name;
+    std::optional<std::string> encoder_implementation_name;
     double input_frame_rate = 0;
     int encode_frame_rate = 0;
     int avg_encode_time_ms = 0;
@@ -109,8 +117,6 @@ class VideoSendStream {
     uint32_t frames_encoded = 0;
     // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-totalencodetime
     uint64_t total_encode_time_ms = 0;
-    // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-totalencodedbytestarget
-    uint64_t total_encoded_bytes_target = 0;
     uint32_t frames = 0;
     uint32_t frames_dropped_by_capturer = 0;
     uint32_t frames_dropped_by_bad_timestamp = 0;
@@ -118,8 +124,11 @@ class VideoSendStream {
     uint32_t frames_dropped_by_rate_limiter = 0;
     uint32_t frames_dropped_by_congestion_window = 0;
     uint32_t frames_dropped_by_encoder = 0;
-    // Bitrate the encoder is currently configured to use due to bandwidth
-    // limitations.
+    // Metric only used by legacy getStats()'s BWE.
+    // - Similar to `StreamStats::target_bitrate` except this is for the whole
+    //   stream as opposed to being per substream (per SSRC).
+    // - Unlike what you would expect, it is not equal to the sum of all
+    //   substream targets and may sometimes over-report e.g. webrtc:392424845.
     int target_media_bitrate_bps = 0;
     // Bitrate the encoder is actually producing.
     int media_bitrate_bps = 0;
@@ -145,7 +154,7 @@ class VideoSendStream {
         webrtc::VideoContentType::UNSPECIFIED;
     uint32_t frames_sent = 0;
     uint32_t huge_frames_sent = 0;
-    absl::optional<bool> power_efficient_encoder;
+    std::optional<bool> power_efficient_encoder;
   };
 
   struct Config {
@@ -194,17 +203,17 @@ class VideoSendStream {
     // An optional custom frame encryptor that allows the entire frame to be
     // encrypted in whatever way the caller chooses. This is not required by
     // default.
-    rtc::scoped_refptr<webrtc::FrameEncryptorInterface> frame_encryptor;
+    scoped_refptr<webrtc::FrameEncryptorInterface> frame_encryptor;
 
     // An optional encoder selector provided by the user.
     // Overrides VideoEncoderFactory::GetEncoderSelector().
-    // Owned by RtpSenderBase.
-    VideoEncoderFactory::EncoderSelectorInterface* encoder_selector = nullptr;
+    scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>
+        encoder_selector;
 
     // Per PeerConnection cryptography options.
     CryptoOptions crypto_options;
 
-    rtc::scoped_refptr<webrtc::FrameTransformerInterface> frame_transformer;
+    scoped_refptr<webrtc::FrameTransformerInterface> frame_transformer;
 
    private:
     // Access to the copy constructor is private to force use of the Copy()
@@ -231,12 +240,13 @@ class VideoSendStream {
   // TODO(https://crbug.com/webrtc/11565): When the ResourceAdaptationProcessor
   // is moved to Call this method could be deleted altogether in favor of
   // Call-level APIs only.
-  virtual void AddAdaptationResource(rtc::scoped_refptr<Resource> resource) = 0;
-  virtual std::vector<rtc::scoped_refptr<Resource>>
-  GetAdaptationResources() = 0;
+  virtual void AddAdaptationResource(scoped_refptr<Resource> resource) = 0;
+  // Returns the resources previously passed to AddAdaptationResource(). The
+  // resources the stream creates internally are not included.
+  virtual std::vector<scoped_refptr<Resource>> GetAdaptationResources() = 0;
 
   virtual void SetSource(
-      rtc::VideoSourceInterface<webrtc::VideoFrame>* source,
+      VideoSourceInterface<webrtc::VideoFrame>* source,
       const DegradationPreference& degradation_preference) = 0;
 
   // Set which streams to send. Must have at least as many SSRCs as configured
@@ -248,6 +258,12 @@ class VideoSendStream {
                                        SetParametersCallback callback) = 0;
 
   virtual Stats GetStats() = 0;
+
+  // TODO: webrtc:40644448 - Make this pure virtual.
+  virtual void SetStats(const Stats& stats) { RTC_CHECK_NOTREACHED(); }
+
+  // Sets the list of CSRCs to be included in every packet.
+  virtual void SetCsrcs(std::span<const uint32_t> csrcs) = 0;
 
   virtual void GenerateKeyFrame(const std::vector<std::string>& rids) = 0;
 

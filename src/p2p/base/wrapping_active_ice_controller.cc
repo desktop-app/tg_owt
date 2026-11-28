@@ -16,29 +16,26 @@
 
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
+#include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
 #include "p2p/base/basic_ice_controller.h"
 #include "p2p/base/connection.h"
 #include "p2p/base/ice_agent_interface.h"
+#include "p2p/base/ice_controller_factory_interface.h"
 #include "p2p/base/ice_controller_interface.h"
 #include "p2p/base/ice_switch_reason.h"
 #include "p2p/base/ice_transport_internal.h"
 #include "p2p/base/transport_description.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/thread.h"
-#include "rtc_base/time_utils.h"
 
-namespace {
-using ::webrtc::SafeTask;
-using ::webrtc::TimeDelta;
-}  // unnamed namespace
-
-namespace cricket {
+namespace webrtc {
 
 WrappingActiveIceController::WrappingActiveIceController(
     IceAgentInterface* ice_agent,
     std::unique_ptr<IceControllerInterface> wrapped)
-    : network_thread_(rtc::Thread::Current()),
+    : network_thread_(TaskQueueBase::Current()),
       wrapped_(std::move(wrapped)),
       agent_(*ice_agent) {
   RTC_DCHECK(ice_agent != nullptr);
@@ -48,7 +45,7 @@ WrappingActiveIceController::WrappingActiveIceController(
     IceAgentInterface* ice_agent,
     IceControllerFactoryInterface* wrapped_factory,
     const IceControllerFactoryArgs& wrapped_factory_args)
-    : network_thread_(rtc::Thread::Current()), agent_(*ice_agent) {
+    : network_thread_(Thread::Current()), agent_(*ice_agent) {
   RTC_DCHECK(ice_agent != nullptr);
   if (wrapped_factory) {
     wrapped_ = wrapped_factory->Create(wrapped_factory_args);
@@ -123,7 +120,7 @@ void WrappingActiveIceController::SelectAndPingConnection() {
   agent_.UpdateConnectionStates();
 
   IceControllerInterface::PingResult result =
-      wrapped_->SelectConnectionToPing(agent_.GetLastPingSentMs());
+      wrapped_->GetConnectionToPing(agent_.GetLastPingSent());
   HandlePingResult(result);
 }
 
@@ -250,4 +247,4 @@ const Connection* WrappingActiveIceController::FindNextPingableConnection() {
   return wrapped_->FindNextPingableConnection();
 }
 
-}  // namespace cricket
+}  // namespace webrtc

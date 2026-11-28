@@ -11,23 +11,24 @@
 #ifndef AUDIO_VOIP_AUDIO_EGRESS_H_
 #define AUDIO_VOIP_AUDIO_EGRESS_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <string>
+#include <optional>
 
 #include "api/audio_codecs/audio_format.h"
+#include "api/environment/environment.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_base.h"
-#include "api/task_queue/task_queue_factory.h"
 #include "audio/audio_level.h"
-#include "audio/utility/audio_frame_operations.h"
 #include "call/audio_sender.h"
 #include "modules/audio_coding/include/audio_coding_module.h"
-#include "modules/rtp_rtcp/include/report_block_data.h"
+#include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
 #include "modules/rtp_rtcp/source/rtp_sender_audio.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/system/no_unique_address.h"
-#include "rtc_base/time_utils.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
@@ -46,9 +47,7 @@ namespace webrtc {
 // smaller footprint.
 class AudioEgress : public AudioSender, public AudioPacketizationCallback {
  public:
-  AudioEgress(RtpRtcpInterface* rtp_rtcp,
-              Clock* clock,
-              TaskQueueFactory* task_queue_factory);
+  AudioEgress(const Environment& env, RtpRtcpInterface* rtp_rtcp);
   ~AudioEgress() override;
 
   // Set the encoder format and payload type for AudioCodingModule.
@@ -73,9 +72,12 @@ class AudioEgress : public AudioSender, public AudioPacketizationCallback {
   // Enable or disable Mute state.
   void SetMute(bool mute);
 
+  // Updates uplink packet loss fraction (`[0.0, 1.0]`) on the encoder.
+  void OnReceivedUplinkPacketLossFraction(float packet_loss_fraction);
+
   // Retrieve current encoder format info. This returns encoder format set
   // by SetEncoder() and if encoder is not set, this will return nullopt.
-  absl::optional<SdpAudioFormat> GetEncoderFormat() const {
+  std::optional<SdpAudioFormat> GetEncoderFormat() const {
     MutexLock lock(&lock_);
     return encoder_format_;
   }
@@ -120,7 +122,7 @@ class AudioEgress : public AudioSender, public AudioPacketizationCallback {
   mutable Mutex lock_;
 
   // Current encoder format selected by caller.
-  absl::optional<SdpAudioFormat> encoder_format_ RTC_GUARDED_BY(lock_);
+  std::optional<SdpAudioFormat> encoder_format_ RTC_GUARDED_BY(lock_);
 
   // Synchronization is handled internally by RtpRtcp.
   RtpRtcpInterface* const rtp_rtcp_;

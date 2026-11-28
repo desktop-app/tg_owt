@@ -13,10 +13,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <optional>
 #include <utility>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "api/ref_counted_base.h"
 #include "api/scoped_refptr.h"
 #include "api/units/time_delta.h"
@@ -46,18 +45,16 @@ class RtpPacketToSend : public RtpPacket {
   ~RtpPacketToSend();
 
   // Time in local time base as close as it can to frame capture time.
-  webrtc::Timestamp capture_time() const { return capture_time_; }
-  void set_capture_time(webrtc::Timestamp time) { capture_time_ = time; }
+  class Timestamp capture_time() const { return capture_time_; }
+  void set_capture_time(class Timestamp time) { capture_time_ = time; }
 
   void set_packet_type(RtpPacketMediaType type);
 
-  absl::optional<RtpPacketMediaType> packet_type() const {
-    return packet_type_;
-  }
+  std::optional<RtpPacketMediaType> packet_type() const { return packet_type_; }
 
   enum class OriginalType { kAudio, kVideo };
   // Original type does not change if packet type is changed to kRetransmission.
-  absl::optional<OriginalType> original_packet_type() const {
+  std::optional<OriginalType> original_packet_type() const {
     return original_packet_type_;
   }
 
@@ -67,43 +64,54 @@ class RtpPacketToSend : public RtpPacket {
   void set_retransmitted_sequence_number(uint16_t sequence_number) {
     retransmitted_sequence_number_ = sequence_number;
   }
-  absl::optional<uint16_t> retransmitted_sequence_number() const {
+  std::optional<uint16_t> retransmitted_sequence_number() const {
     return retransmitted_sequence_number_;
   }
+
+  // If this is a retransmission, indicates the SSRC of the original
+  // media packet that this packet represents.
+  void set_original_ssrc(uint32_t ssrc) { original_ssrc_ = ssrc; }
+  std::optional<uint32_t> original_ssrc() const { return original_ssrc_; }
 
   void set_allow_retransmission(bool allow_retransmission) {
     allow_retransmission_ = allow_retransmission;
   }
   bool allow_retransmission() const { return allow_retransmission_; }
 
+  // Indicates if packet sending is allowed. If false, sending should be
+  // skipped (e.g. flushed packets on keyframe).
+  // TODO(bugs.webrtc.org/564720400): Either remove or make permanent.
+  void set_allow_sending(bool allow_sending) { allow_sending_ = allow_sending; }
+  bool allow_sending() const { return allow_sending_; }
+
   // An application can attach arbitrary data to an RTP packet using
   // `additional_data`. The additional data does not affect WebRTC processing.
-  rtc::scoped_refptr<rtc::RefCountedBase> additional_data() const {
+  scoped_refptr<RefCountedBase> additional_data() const {
     return additional_data_;
   }
-  void set_additional_data(rtc::scoped_refptr<rtc::RefCountedBase> data) {
+  void set_additional_data(scoped_refptr<RefCountedBase> data) {
     additional_data_ = std::move(data);
   }
 
-  void set_packetization_finish_time(webrtc::Timestamp time) {
+  void set_packetization_finish_time(class Timestamp time) {
     SetExtension<VideoTimingExtension>(
         VideoSendTiming::GetDeltaCappedMs(time - capture_time_),
         VideoTimingExtension::kPacketizationFinishDeltaOffset);
   }
 
-  void set_pacer_exit_time(webrtc::Timestamp time) {
+  void set_pacer_exit_time(class Timestamp time) {
     SetExtension<VideoTimingExtension>(
         VideoSendTiming::GetDeltaCappedMs(time - capture_time_),
         VideoTimingExtension::kPacerExitDeltaOffset);
   }
 
-  void set_network_time(webrtc::Timestamp time) {
+  void set_network_time(class Timestamp time) {
     SetExtension<VideoTimingExtension>(
         VideoSendTiming::GetDeltaCappedMs(time - capture_time_),
         VideoTimingExtension::kNetworkTimestampDeltaOffset);
   }
 
-  void set_network2_time(webrtc::Timestamp time) {
+  void set_network2_time(class Timestamp time) {
     SetExtension<VideoTimingExtension>(
         VideoSendTiming::GetDeltaCappedMs(time - capture_time_),
         VideoTimingExtension::kNetwork2TimestampDeltaOffset);
@@ -114,6 +122,12 @@ class RtpPacketToSend : public RtpPacket {
     is_first_packet_of_frame_ = is_first_packet;
   }
   bool is_first_packet_of_frame() const { return is_first_packet_of_frame_; }
+
+  // Indicates if packet is the last packet of a video frame.
+  void set_last_packet_of_frame(bool is_last_packet) {
+    is_last_packet_of_frame_ = is_last_packet;
+  }
+  bool is_last_packet_of_frame() const { return is_last_packet_of_frame_; }
 
   // Indicates if packet contains payload for a video key-frame.
   void set_is_key_frame(bool is_key_frame) { is_key_frame_ = is_key_frame; }
@@ -133,22 +147,40 @@ class RtpPacketToSend : public RtpPacket {
   void set_time_in_send_queue(TimeDelta time_in_send_queue) {
     time_in_send_queue_ = time_in_send_queue;
   }
-  absl::optional<TimeDelta> time_in_send_queue() const {
+  std::optional<TimeDelta> time_in_send_queue() const {
     return time_in_send_queue_;
   }
+  // A sequence number guaranteed to be monotically increasing by one for all
+  // packets where transport feedback is expected.
+  std::optional<int64_t> transport_sequence_number() const {
+    return transport_sequence_number_;
+  }
+  void set_transport_sequence_number(int64_t transport_sequence_number) {
+    transport_sequence_number_ = transport_sequence_number;
+  }
+  // Transport is capable of handling explicit congestion notification and the
+  // RTP packet should be sent as ect(1)
+  // https://www.rfc-editor.org/rfc/rfc9331.html
+  bool send_as_ect1() const { return send_as_ect1_; }
+  void set_send_as_ect1() { send_as_ect1_ = true; }
 
  private:
-  webrtc::Timestamp capture_time_ = webrtc::Timestamp::Zero();
-  absl::optional<RtpPacketMediaType> packet_type_;
-  absl::optional<OriginalType> original_packet_type_;
+  class Timestamp capture_time_ = Timestamp::Zero();
+  std::optional<RtpPacketMediaType> packet_type_;
+  std::optional<OriginalType> original_packet_type_;
+  std::optional<uint32_t> original_ssrc_;
+  std::optional<int64_t> transport_sequence_number_;
   bool allow_retransmission_ = false;
-  absl::optional<uint16_t> retransmitted_sequence_number_;
-  rtc::scoped_refptr<rtc::RefCountedBase> additional_data_;
+  std::optional<uint16_t> retransmitted_sequence_number_;
+  scoped_refptr<RefCountedBase> additional_data_;
   bool is_first_packet_of_frame_ = false;
+  bool is_last_packet_of_frame_ = false;
   bool is_key_frame_ = false;
   bool fec_protect_packet_ = false;
   bool is_red_ = false;
-  absl::optional<TimeDelta> time_in_send_queue_;
+  bool send_as_ect1_ = false;
+  bool allow_sending_ = true;
+  std::optional<TimeDelta> time_in_send_queue_;
 };
 
 }  // namespace webrtc

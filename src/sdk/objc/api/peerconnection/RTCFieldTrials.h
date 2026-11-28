@@ -10,13 +10,13 @@
 
 #import <Foundation/Foundation.h>
 
-#import "RTCMacros.h"
+#import "sdk/objc/base/RTCMacros.h"
 
-/** The only valid value for the following if set is kRTCFieldTrialEnabledValue. */
+/** The only valid value for the following if set is kRTCFieldTrialEnabledValue.
+ */
 RTC_EXTERN NSString *const kRTCFieldTrialAudioForceABWENoTWCCKey;
 RTC_EXTERN NSString *const kRTCFieldTrialFlexFec03AdvertisedKey;
 RTC_EXTERN NSString *const kRTCFieldTrialFlexFec03Key;
-RTC_EXTERN NSString *const kRTCFieldTrialH264HighProfileKey;
 RTC_EXTERN NSString *const kRTCFieldTrialMinimizeResamplingOnMobileKey;
 RTC_EXTERN NSString *const kRTCFieldTrialUseNWPathMonitor;
 
@@ -27,4 +27,7 @@ RTC_EXTERN NSString *const kRTCFieldTrialEnabledValue;
  * values. See above for valid keys and values. Must be called before any other
  * call into WebRTC. See: webrtc/system_wrappers/include/field_trial.h
  */
-RTC_EXTERN void RTCInitFieldTrialDictionary(NSDictionary<NSString *, NSString *> *fieldTrials);
+// TODO: bugs.webrtc.org/42220378 - Delete after January 1, 2026.
+RTC_OBJC_DEPRECATED("Pass field trials when building PeerConnectionFactory")
+RTC_EXTERN void RTCInitFieldTrialDictionary(
+    NSDictionary<NSString *, NSString *> *fieldTrials);

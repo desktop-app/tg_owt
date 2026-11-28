@@ -10,22 +10,20 @@
 
 #include "modules/congestion_controller/goog_cc/trendline_estimator.h"
 
-#include <math.h>
-
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
-#include "absl/strings/match.h"
-#include "absl/types/optional.h"
 #include "api/field_trials_view.h"
 #include "api/network_state_predictor.h"
-#include "modules/remote_bitrate_estimator/test/bwe_test_logging.h"
+#include "api/transport/bandwidth_usage.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/experiments/struct_parameters_parser.h"
 #include "rtc_base/logging.h"
@@ -41,9 +39,9 @@ constexpr double kDefaultTrendlineThresholdGain = 4.0;
 const char kBweWindowSizeInPacketsExperiment[] =
     "WebRTC-BweWindowSizeInPackets";
 
-size_t ReadTrendlineFilterWindowSize(const FieldTrialsView* key_value_config) {
+size_t ReadTrendlineFilterWindowSize(const FieldTrialsView& key_value_config) {
   std::string experiment_string =
-      key_value_config->Lookup(kBweWindowSizeInPacketsExperiment);
+      key_value_config.Lookup(kBweWindowSizeInPacketsExperiment);
   size_t window_size;
   int parsed_values =
       sscanf(experiment_string.c_str(), "Enabled-%zu", &window_size);
@@ -57,7 +55,7 @@ size_t ReadTrendlineFilterWindowSize(const FieldTrialsView* key_value_config) {
   return TrendlineEstimatorSettings::kDefaultTrendlineWindowSize;
 }
 
-absl::optional<double> LinearFitSlope(
+std::optional<double> LinearFitSlope(
     const std::deque<TrendlineEstimator::PacketTiming>& packets) {
   RTC_DCHECK(packets.size() >= 2);
   // Compute the "center of mass".
@@ -79,11 +77,11 @@ absl::optional<double> LinearFitSlope(
     denominator += (x - x_avg) * (x - x_avg);
   }
   if (denominator == 0)
-    return absl::nullopt;
+    return std::nullopt;
   return numerator / denominator;
 }
 
-absl::optional<double> ComputeSlopeCap(
+std::optional<double> ComputeSlopeCap(
     const std::deque<TrendlineEstimator::PacketTiming>& packets,
     const TrendlineEstimatorSettings& settings) {
   RTC_DCHECK(1 <= settings.beginning_packets &&
@@ -104,7 +102,7 @@ absl::optional<double> ComputeSlopeCap(
       late = packets[i];
   }
   if (late.arrival_time_ms - early.arrival_time_ms < 1) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return (late.raw_delay_ms - early.raw_delay_ms) /
              (late.arrival_time_ms - early.arrival_time_ms) +
@@ -118,16 +116,12 @@ constexpr int kDeltaCounterMax = 1000;
 
 }  // namespace
 
-constexpr char TrendlineEstimatorSettings::kKey[];
-
 TrendlineEstimatorSettings::TrendlineEstimatorSettings(
-    const FieldTrialsView* key_value_config) {
-  if (absl::StartsWith(
-          key_value_config->Lookup(kBweWindowSizeInPacketsExperiment),
-          "Enabled")) {
+    const FieldTrialsView& key_value_config) {
+  if (key_value_config.IsEnabled(kBweWindowSizeInPacketsExperiment)) {
     window_size = ReadTrendlineFilterWindowSize(key_value_config);
   }
-  Parser()->Parse(key_value_config->Lookup(TrendlineEstimatorSettings::kKey));
+  Parser()->Parse(key_value_config.Lookup(TrendlineEstimatorSettings::kKey));
   if (window_size < 10 || 200 < window_size) {
     RTC_LOG(LS_WARNING) << "Window size must be between 10 and 200 packets";
     window_size = kDefaultTrendlineWindowSize;
@@ -166,7 +160,7 @@ std::unique_ptr<StructParametersParser> TrendlineEstimatorSettings::Parser() {
 }
 
 TrendlineEstimator::TrendlineEstimator(
-    const FieldTrialsView* key_value_config,
+    const FieldTrialsView& key_value_config,
     NetworkStatePredictor* network_state_predictor)
     : settings_(key_value_config),
       smoothing_coef_(kDefaultTrendlineSmoothingCoeff),
@@ -199,9 +193,9 @@ TrendlineEstimator::~TrendlineEstimator() {}
 
 void TrendlineEstimator::UpdateTrendline(double recv_delta_ms,
                                          double send_delta_ms,
-                                         int64_t send_time_ms,
+                                         int64_t /* send_time_ms */,
                                          int64_t arrival_time_ms,
-                                         size_t packet_size) {
+                                         size_t /* packet_size */) {
   const double delta_ms = recv_delta_ms - send_delta_ms;
   ++num_of_deltas_;
   num_of_deltas_ = std::min(num_of_deltas_, kDeltaCounterMax);
@@ -210,12 +204,8 @@ void TrendlineEstimator::UpdateTrendline(double recv_delta_ms,
 
   // Exponential backoff filter.
   accumulated_delay_ += delta_ms;
-  BWE_TEST_LOGGING_PLOT(1, "accumulated_delay_ms", arrival_time_ms,
-                        accumulated_delay_);
   smoothed_delay_ = smoothing_coef_ * smoothed_delay_ +
                     (1 - smoothing_coef_) * accumulated_delay_;
-  BWE_TEST_LOGGING_PLOT(1, "smoothed_delay_ms", arrival_time_ms,
-                        smoothed_delay_);
 
   // Maintain packet window
   delay_hist_.emplace_back(
@@ -242,7 +232,7 @@ void TrendlineEstimator::UpdateTrendline(double recv_delta_ms,
     //   trend < 0     ->  the delay decreases, queues are being emptied
     trend = LinearFitSlope(delay_hist_).value_or(trend);
     if (settings_.enable_cap) {
-      absl::optional<double> cap = ComputeSlopeCap(delay_hist_, settings_);
+      std::optional<double> cap = ComputeSlopeCap(delay_hist_, settings_);
       // We only use the cap to filter out overuse detections, not
       // to detect additional underuses.
       if (trend >= 0 && cap.has_value() && trend > cap.value()) {
@@ -250,7 +240,6 @@ void TrendlineEstimator::UpdateTrendline(double recv_delta_ms,
       }
     }
   }
-  BWE_TEST_LOGGING_PLOT(1, "trendline_slope", arrival_time_ms, trend);
 
   Detect(trend, send_delta_ms, arrival_time_ms);
 }
@@ -283,8 +272,6 @@ void TrendlineEstimator::Detect(double trend, double ts_delta, int64_t now_ms) {
   const double modified_trend =
       std::min(num_of_deltas_, kMinNumDeltas) * trend * threshold_gain_;
   prev_modified_trend_ = modified_trend;
-  BWE_TEST_LOGGING_PLOT(1, "T", now_ms, modified_trend);
-  BWE_TEST_LOGGING_PLOT(1, "threshold", now_ms, threshold_);
   if (modified_trend > threshold_) {
     if (time_over_using_ == -1) {
       // Initialize the timer. Assume that we've been
@@ -332,7 +319,7 @@ void TrendlineEstimator::UpdateThreshold(double modified_trend,
   const int64_t kMaxTimeDeltaMs = 100;
   int64_t time_delta_ms = std::min(now_ms - last_update_ms_, kMaxTimeDeltaMs);
   threshold_ += k * (fabs(modified_trend) - threshold_) * time_delta_ms;
-  threshold_ = rtc::SafeClamp(threshold_, 6.f, 600.f);
+  threshold_ = SafeClamp(threshold_, 6.f, 600.f);
   last_update_ms_ = now_ms;
 }
 

@@ -10,10 +10,21 @@
 
 #include "api/video_codecs/video_encoder.h"
 
-#include <string.h>
-
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <vector>
 
+#include "absl/container/inlined_vector.h"
+#include "api/fec_controller_override.h"
+#include "api/units/data_rate.h"
+#include "api/video/video_bitrate_allocation.h"
+#include "api/video/video_codec_constants.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video_codecs/video_codec.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/strings/string_builder.h"
 
@@ -58,21 +69,6 @@ VideoCodecH264 VideoEncoder::GetDefaultH264Settings() {
   return h264_settings;
 }
 
-VideoCodecH265 VideoEncoder::GetDefaultH265Settings() {
-  VideoCodecH265 h265_settings;
-  memset(&h265_settings, 0, sizeof(h265_settings));
-
-  // h265_settings.profile = kProfileBase;
-  h265_settings.frameDroppingOn = true;
-  h265_settings.keyFrameInterval = 3000;
-  h265_settings.spsData = nullptr;
-  h265_settings.spsLen = 0;
-  h265_settings.ppsData = nullptr;
-  h265_settings.ppsLen = 0;
-
-  return h265_settings;
-}
-
 VideoEncoder::ScalingSettings::ScalingSettings() = default;
 
 VideoEncoder::ScalingSettings::ScalingSettings(KOff) : ScalingSettings() {}
@@ -90,12 +86,6 @@ VideoEncoder::ScalingSettings::ScalingSettings(const ScalingSettings&) =
 
 VideoEncoder::ScalingSettings::~ScalingSettings() {}
 
-// static
-constexpr VideoEncoder::ScalingSettings::KOff
-    VideoEncoder::ScalingSettings::kOff;
-// static
-constexpr uint8_t VideoEncoder::EncoderInfo::kMaxFramerateFraction;
-
 bool VideoEncoder::ResolutionBitrateLimits::operator==(
     const ResolutionBitrateLimits& rhs) const {
   return frame_size_pixels == rhs.frame_size_pixels &&
@@ -112,6 +102,7 @@ VideoEncoder::EncoderInfo::EncoderInfo()
       implementation_name("unknown"),
       has_trusted_rate_controller(false),
       is_hardware_accelerated(true),
+      enable_cpu_overuse_detection(true),
       fps_allocation{absl::InlinedVector<uint8_t, kMaxTemporalStreams>(
           1,
           kMaxFramerateFraction)},
@@ -119,13 +110,16 @@ VideoEncoder::EncoderInfo::EncoderInfo()
       preferred_pixel_formats{VideoFrameBuffer::Type::kI420} {}
 
 VideoEncoder::EncoderInfo::EncoderInfo(const EncoderInfo&) = default;
+VideoEncoder::EncoderInfo::EncoderInfo(EncoderInfo&&) = default;
+VideoEncoder::EncoderInfo& VideoEncoder::EncoderInfo::operator=(
+    const EncoderInfo&) = default;
+VideoEncoder::EncoderInfo& VideoEncoder::EncoderInfo::operator=(EncoderInfo&&) =
+    default;
 
 VideoEncoder::EncoderInfo::~EncoderInfo() = default;
 
 std::string VideoEncoder::EncoderInfo::ToString() const {
-  char string_buf[2048];
-  rtc::SimpleStringBuilder oss(string_buf);
-
+  StringBuilder oss;
   oss << "EncoderInfo { "
          "ScalingSettings { ";
   if (scaling_settings.thresholds) {
@@ -145,6 +139,7 @@ std::string VideoEncoder::EncoderInfo::ToString() const {
          ", has_trusted_rate_controller = "
       << has_trusted_rate_controller
       << ", is_hardware_accelerated = " << is_hardware_accelerated
+      << ", enable_cpu_overuse_detection = " << enable_cpu_overuse_detection
       << ", fps_allocation = [";
   size_t num_spatial_layer_with_fps_allocation = 0;
   for (size_t i = 0; i < kMaxSpatialLayers; ++i) {
@@ -165,11 +160,11 @@ std::string VideoEncoder::EncoderInfo::ToString() const {
     if (!fractions.empty()) {
       first = false;
       oss << "[ ";
-      for (size_t i = 0; i < fractions.size(); ++i) {
-        if (i > 0) {
+      for (size_t j = 0; j < fractions.size(); ++j) {
+        if (j > 0) {
           oss << ", ";
         }
-        oss << (static_cast<double>(fractions[i]) / kMaxFramerateFraction);
+        oss << (static_cast<double>(fractions[j]) / kMaxFramerateFraction);
       }
       oss << "] ";
     }
@@ -201,6 +196,13 @@ std::string VideoEncoder::EncoderInfo::ToString() const {
   if (is_qp_trusted.has_value()) {
     oss << ", is_qp_trusted = " << is_qp_trusted.value();
   }
+  if (max_pixels_per_frame.has_value()) {
+    oss << ", max_pixels_per_frame = " << max_pixels_per_frame.value();
+  }
+  if (mapped_resolution.has_value()) {
+    oss << ", mapped_resolution = " << mapped_resolution->width << " x "
+        << mapped_resolution->height;
+  }
   oss << "}";
   return oss.str();
 }
@@ -225,7 +227,9 @@ bool VideoEncoder::EncoderInfo::operator==(const EncoderInfo& rhs) const {
   if (supports_native_handle != rhs.supports_native_handle ||
       implementation_name != rhs.implementation_name ||
       has_trusted_rate_controller != rhs.has_trusted_rate_controller ||
-      is_hardware_accelerated != rhs.is_hardware_accelerated) {
+      is_hardware_accelerated != rhs.is_hardware_accelerated ||
+      enable_cpu_overuse_detection != rhs.enable_cpu_overuse_detection ||
+      max_pixels_per_frame != rhs.max_pixels_per_frame) {
     return false;
   }
 
@@ -243,7 +247,7 @@ bool VideoEncoder::EncoderInfo::operator==(const EncoderInfo& rhs) const {
   return true;
 }
 
-absl::optional<VideoEncoder::ResolutionBitrateLimits>
+std::optional<VideoEncoder::ResolutionBitrateLimits>
 VideoEncoder::EncoderInfo::GetEncoderBitrateLimitsForResolution(
     int frame_size_pixels) const {
   std::vector<ResolutionBitrateLimits> bitrate_limits =
@@ -272,11 +276,11 @@ VideoEncoder::EncoderInfo::GetEncoderBitrateLimitsForResolution(
     }
 
     if (bitrate_limits[i].frame_size_pixels >= frame_size_pixels) {
-      return absl::optional<ResolutionBitrateLimits>(bitrate_limits[i]);
+      return std::optional<ResolutionBitrateLimits>(bitrate_limits[i]);
     }
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 VideoEncoder::RateControlParameters::RateControlParameters()
@@ -313,14 +317,12 @@ bool VideoEncoder::RateControlParameters::operator!=(
 VideoEncoder::RateControlParameters::~RateControlParameters() = default;
 
 void VideoEncoder::SetFecControllerOverride(
-    FecControllerOverride* fec_controller_override) {}
+    FecControllerOverride* /* fec_controller_override */) {}
 
 int32_t VideoEncoder::InitEncode(const VideoCodec* codec_settings,
                                  int32_t number_of_cores,
                                  size_t max_payload_size) {
-  const VideoEncoder::Capabilities capabilities(/* loss_notification= */ false);
-  const VideoEncoder::Settings settings(capabilities, number_of_cores,
-                                        max_payload_size);
+  const VideoEncoder::Settings settings(number_of_cores, max_payload_size);
   // In theory, this and the other version of InitEncode() could end up calling
   // each other in a loop until we get a stack overflow.
   // In practice, any subclass of VideoEncoder would overload at least one
@@ -338,11 +340,11 @@ int VideoEncoder::InitEncode(const VideoCodec* codec_settings,
                     settings.max_payload_size);
 }
 
-void VideoEncoder::OnPacketLossRateUpdate(float packet_loss_rate) {}
+void VideoEncoder::OnPacketLossRateUpdate(float /* packet_loss_rate */) {}
 
-void VideoEncoder::OnRttUpdate(int64_t rtt_ms) {}
+void VideoEncoder::OnRttUpdate(int64_t /* rtt_ms */) {}
 
 void VideoEncoder::OnLossNotification(
-    const LossNotification& loss_notification) {}
+    const LossNotification& /* loss_notification */) {}
 
 }  // namespace webrtc

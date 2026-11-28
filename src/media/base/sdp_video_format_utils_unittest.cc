@@ -10,20 +10,21 @@
 
 #include "media/base/sdp_video_format_utils.h"
 
-#include <string.h>
-
 #include <map>
-#include <utility>
+#include <optional>
 
-#include "rtc_base/string_to_number.h"
+#include "api/rtp_parameters.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 namespace {
 // Max frame rate for VP8 and VP9 video.
-const char kVPxFmtpMaxFrameRate[] = "max-fr";
+constexpr char kVPxFmtpMaxFrameRate[] = "max-fr";
 // Max frame size for VP8 and VP9 video.
-const char kVPxFmtpMaxFrameSize[] = "max-fs";
+constexpr char kVPxFmtpMaxFrameSize[] = "max-fs";
+// Nonstandard per-layer PLI for video.
+constexpr char kCodecParamPerLayerPictureLossIndication[] =
+    "x-google-per-layer-pli";
 }  // namespace
 
 TEST(SdpVideoFormatUtilsTest, TestH264GenerateProfileLevelIdForAnswerEmpty) {
@@ -103,7 +104,7 @@ TEST(SdpVideoFormatUtilsTest, H265GenerateProfileTierLevelNoEmpty) {
 
 TEST(SdpVideoFormatUtilsTest, MaxFrameRateIsMissingOrInvalid) {
   CodecParameterMap params;
-  absl::optional<int> empty = ParseSdpForVPxMaxFrameRate(params);
+  std::optional<int> empty = ParseSdpForVPxMaxFrameRate(params);
   EXPECT_FALSE(empty);
   params[kVPxFmtpMaxFrameRate] = "-1";
   EXPECT_FALSE(ParseSdpForVPxMaxFrameRate(params));
@@ -123,7 +124,7 @@ TEST(SdpVideoFormatUtilsTest, MaxFrameRateIsSpecified) {
 
 TEST(SdpVideoFormatUtilsTest, MaxFrameSizeIsMissingOrInvalid) {
   CodecParameterMap params;
-  absl::optional<int> empty = ParseSdpForVPxMaxFrameSize(params);
+  std::optional<int> empty = ParseSdpForVPxMaxFrameSize(params);
   EXPECT_FALSE(empty);
   params[kVPxFmtpMaxFrameSize] = "-1";
   EXPECT_FALSE(ParseSdpForVPxMaxFrameSize(params));
@@ -139,6 +140,17 @@ TEST(SdpVideoFormatUtilsTest, MaxFrameSizeIsSpecified) {
   EXPECT_EQ(ParseSdpForVPxMaxFrameSize(params), 1920 * 1080);
   params[kVPxFmtpMaxFrameSize] = "32400";  // 3840 x 2160 / (16^2)
   EXPECT_EQ(ParseSdpForVPxMaxFrameSize(params), 3840 * 2160);
+}
+
+TEST(SdpVideoFormatUtilsTest, PerLayerPictureLossIndication) {
+  CodecParameterMap params;
+  EXPECT_FALSE(SupportsPerLayerPictureLossIndication(params));
+  params[kCodecParamPerLayerPictureLossIndication] = "wrong";
+  EXPECT_FALSE(SupportsPerLayerPictureLossIndication(params));
+  params[kCodecParamPerLayerPictureLossIndication] = "0";
+  EXPECT_FALSE(SupportsPerLayerPictureLossIndication(params));
+  params[kCodecParamPerLayerPictureLossIndication] = "1";
+  EXPECT_TRUE(SupportsPerLayerPictureLossIndication(params));
 }
 
 }  // namespace webrtc

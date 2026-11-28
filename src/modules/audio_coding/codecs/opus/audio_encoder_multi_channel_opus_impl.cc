@@ -20,15 +20,28 @@
 #include "modules/audio_coding/codecs/opus/audio_encoder_multi_channel_opus_impl.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/match.h"
+#include "api/audio_codecs/audio_encoder.h"
+#include "api/audio_codecs/audio_format.h"
+#include "api/audio_codecs/opus/audio_encoder_multi_channel_opus_config.h"
+#include "api/audio_codecs/opus/audio_encoder_opus_config.h"
+#include "api/units/time_delta.h"
 #include "modules/audio_coding/codecs/opus/audio_coder_opus_common.h"
-#include "rtc_base/arraysize.h"
+#include "modules/audio_coding/codecs/opus/opus_interface.h"
+#include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/string_to_number.h"
 
 namespace webrtc {
@@ -86,11 +99,11 @@ int GetFrameSizeMs(const SdpAudioFormat& format) {
 int CalculateDefaultBitrate(int max_playback_rate, size_t num_channels) {
   const int bitrate = [&] {
     if (max_playback_rate <= 8000) {
-      return kOpusBitrateNbBps * rtc::dchecked_cast<int>(num_channels);
+      return kOpusBitrateNbBps * dchecked_cast<int>(num_channels);
     } else if (max_playback_rate <= 16000) {
-      return kOpusBitrateWbBps * rtc::dchecked_cast<int>(num_channels);
+      return kOpusBitrateWbBps * dchecked_cast<int>(num_channels);
     } else {
-      return kOpusBitrateFbBps * rtc::dchecked_cast<int>(num_channels);
+      return kOpusBitrateFbBps * dchecked_cast<int>(num_channels);
     }
   }();
   RTC_DCHECK_GE(bitrate, AudioEncoderMultiChannelOpusConfig::kMinBitrateBps);
@@ -101,12 +114,12 @@ int CalculateDefaultBitrate(int max_playback_rate, size_t num_channels) {
 // out how invalid it is and accurately log invalid values.
 int CalculateBitrate(int max_playback_rate_hz,
                      size_t num_channels,
-                     absl::optional<std::string> bitrate_param) {
+                     std::optional<std::string> bitrate_param) {
   const int default_bitrate =
       CalculateDefaultBitrate(max_playback_rate_hz, num_channels);
 
   if (bitrate_param) {
-    const auto bitrate = rtc::StringToNumber<int>(*bitrate_param);
+    const auto bitrate = StringToNumber<int>(*bitrate_param);
     if (bitrate) {
       const int chosen_bitrate =
           std::max(AudioEncoderOpusConfig::kMinBitrateBps,
@@ -128,27 +141,27 @@ int CalculateBitrate(int max_playback_rate_hz,
 
 std::unique_ptr<AudioEncoder>
 AudioEncoderMultiChannelOpusImpl::MakeAudioEncoder(
-    const AudioEncoderMultiChannelOpusConfig& config,
+    AudioEncoderMultiChannelOpusConfig config,
     int payload_type) {
   if (!config.IsOk()) {
     RTC_DCHECK_NOTREACHED();
     return nullptr;
   }
-  return std::make_unique<AudioEncoderMultiChannelOpusImpl>(config,
+  return std::make_unique<AudioEncoderMultiChannelOpusImpl>(std::move(config),
                                                             payload_type);
 }
 
 AudioEncoderMultiChannelOpusImpl::AudioEncoderMultiChannelOpusImpl(
-    const AudioEncoderMultiChannelOpusConfig& config,
+    AudioEncoderMultiChannelOpusConfig config,
     int payload_type)
     : payload_type_(payload_type), inst_(nullptr) {
   RTC_DCHECK(0 <= payload_type && payload_type <= 127);
 
-  RTC_CHECK(RecreateEncoderInstance(config));
+  RTC_CHECK(RecreateEncoderInstance(std::move(config)));
 }
 
 AudioEncoderMultiChannelOpusImpl::~AudioEncoderMultiChannelOpusImpl() {
-  RTC_CHECK_EQ(0, WebRtcOpus_EncoderFree(inst_));
+  RTC_CHECK_EQ(WebRtcOpus_EncoderFree(inst_), 0);
 }
 
 size_t AudioEncoderMultiChannelOpusImpl::SufficientOutputBufferSize() const {
@@ -162,10 +175,10 @@ size_t AudioEncoderMultiChannelOpusImpl::SufficientOutputBufferSize() const {
 }
 
 void AudioEncoderMultiChannelOpusImpl::Reset() {
-  RTC_CHECK(RecreateEncoderInstance(config_));
+  RTC_CHECK(RecreateEncoderInstance());
 }
 
-absl::optional<std::pair<TimeDelta, TimeDelta>>
+std::optional<std::pair<TimeDelta, TimeDelta>>
 AudioEncoderMultiChannelOpusImpl::GetFrameLengthRange() const {
   return {{TimeDelta::Millis(config_.frame_size_ms),
            TimeDelta::Millis(config_.frame_size_ms)}};
@@ -175,57 +188,62 @@ AudioEncoderMultiChannelOpusImpl::GetFrameLengthRange() const {
 // settings, save the config, and return true. Otherwise, do nothing and return
 // false.
 bool AudioEncoderMultiChannelOpusImpl::RecreateEncoderInstance(
-    const AudioEncoderMultiChannelOpusConfig& config) {
+    AudioEncoderMultiChannelOpusConfig config) {
   if (!config.IsOk())
     return false;
-  config_ = config;
+  config_ = std::move(config);
+  return RecreateEncoderInstance();
+}
+
+bool AudioEncoderMultiChannelOpusImpl::RecreateEncoderInstance() {
   if (inst_)
-    RTC_CHECK_EQ(0, WebRtcOpus_EncoderFree(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_EncoderFree(inst_), 0);
   input_buffer_.clear();
   input_buffer_.reserve(Num10msFramesPerPacket() * SamplesPer10msFrame());
   RTC_CHECK_EQ(
-      0, WebRtcOpus_MultistreamEncoderCreate(
-             &inst_, config.num_channels,
-             config.application ==
-                     AudioEncoderMultiChannelOpusConfig::ApplicationMode::kVoip
-                 ? 0
-                 : 1,
-             config.num_streams, config.coupled_streams,
-             config.channel_mapping.data()));
-  const int bitrate = GetBitrateBps(config);
-  RTC_CHECK_EQ(0, WebRtcOpus_SetBitRate(inst_, bitrate));
+      WebRtcOpus_MultistreamEncoderCreate(
+          &inst_, config_.num_channels,
+          config_.application ==
+                  AudioEncoderMultiChannelOpusConfig::ApplicationMode::kVoip
+              ? 0
+              : 1,
+          config_.num_streams, config_.coupled_streams,
+          config_.channel_mapping.data()),
+      0);
+  const int bitrate = GetBitrateBps(config_);
+  RTC_CHECK_EQ(WebRtcOpus_SetBitRate(inst_, bitrate), 0);
   RTC_LOG(LS_VERBOSE) << "Set Opus bitrate to " << bitrate << " bps.";
-  if (config.fec_enabled) {
-    RTC_CHECK_EQ(0, WebRtcOpus_EnableFec(inst_));
+  if (config_.fec_enabled) {
+    RTC_CHECK_EQ(WebRtcOpus_EnableFec(inst_), 0);
     RTC_LOG(LS_VERBOSE) << "Opus enable FEC";
   } else {
-    RTC_CHECK_EQ(0, WebRtcOpus_DisableFec(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_DisableFec(inst_), 0);
     RTC_LOG(LS_VERBOSE) << "Opus disable FEC";
   }
   RTC_CHECK_EQ(
-      0, WebRtcOpus_SetMaxPlaybackRate(inst_, config.max_playback_rate_hz));
+      WebRtcOpus_SetMaxPlaybackRate(inst_, config_.max_playback_rate_hz), 0);
   RTC_LOG(LS_VERBOSE) << "Set Opus playback rate to "
-                      << config.max_playback_rate_hz << " hz.";
+                      << config_.max_playback_rate_hz << " hz.";
 
   // Use the DEFAULT complexity.
   RTC_CHECK_EQ(
-      0, WebRtcOpus_SetComplexity(inst_, AudioEncoderOpusConfig().complexity));
+      WebRtcOpus_SetComplexity(inst_, AudioEncoderOpusConfig().complexity), 0);
   RTC_LOG(LS_VERBOSE) << "Set Opus coding complexity to "
                       << AudioEncoderOpusConfig().complexity;
 
-  if (config.dtx_enabled) {
-    RTC_CHECK_EQ(0, WebRtcOpus_EnableDtx(inst_));
+  if (config_.dtx_enabled) {
+    RTC_CHECK_EQ(WebRtcOpus_EnableDtx(inst_), 0);
     RTC_LOG(LS_VERBOSE) << "Opus enable DTX";
   } else {
-    RTC_CHECK_EQ(0, WebRtcOpus_DisableDtx(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_DisableDtx(inst_), 0);
     RTC_LOG(LS_VERBOSE) << "Opus disable DTX";
   }
 
-  if (config.cbr_enabled) {
-    RTC_CHECK_EQ(0, WebRtcOpus_EnableCbr(inst_));
+  if (config_.cbr_enabled) {
+    RTC_CHECK_EQ(WebRtcOpus_EnableCbr(inst_), 0);
     RTC_LOG(LS_VERBOSE) << "Opus enable CBR";
   } else {
-    RTC_CHECK_EQ(0, WebRtcOpus_DisableCbr(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_DisableCbr(inst_), 0);
     RTC_LOG(LS_VERBOSE) << "Opus disable CBR";
   }
   num_channels_to_encode_ = NumChannels();
@@ -235,11 +253,11 @@ bool AudioEncoderMultiChannelOpusImpl::RecreateEncoderInstance(
   return true;
 }
 
-absl::optional<AudioEncoderMultiChannelOpusConfig>
+std::optional<AudioEncoderMultiChannelOpusConfig>
 AudioEncoderMultiChannelOpusImpl::SdpToConfig(const SdpAudioFormat& format) {
   if (!absl::EqualsIgnoreCase(format.name, "multiopus") ||
       format.clockrate_hz != 48000) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   AudioEncoderMultiChannelOpusConfig config;
@@ -264,25 +282,25 @@ AudioEncoderMultiChannelOpusImpl::SdpToConfig(const SdpAudioFormat& format) {
 
   auto num_streams = GetFormatParameter<int>(format, "num_streams");
   if (!num_streams.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   config.num_streams = *num_streams;
 
   auto coupled_streams = GetFormatParameter<int>(format, "coupled_streams");
   if (!coupled_streams.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   config.coupled_streams = *coupled_streams;
 
   auto channel_mapping =
       GetFormatParameter<std::vector<unsigned char>>(format, "channel_mapping");
   if (!channel_mapping.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   config.channel_mapping = *channel_mapping;
 
   if (!config.IsOk()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return config;
 }
@@ -299,10 +317,10 @@ AudioCodecInfo AudioEncoderMultiChannelOpusImpl::QueryAudioEncoder(
 }
 
 size_t AudioEncoderMultiChannelOpusImpl::Num10msFramesPerPacket() const {
-  return static_cast<size_t>(rtc::CheckedDivExact(config_.frame_size_ms, 10));
+  return static_cast<size_t>(CheckedDivExact(config_.frame_size_ms, 10));
 }
 size_t AudioEncoderMultiChannelOpusImpl::SamplesPer10msFrame() const {
-  return rtc::CheckedDivExact(48000, 100) * config_.num_channels;
+  return CheckedDivExact(48000, 100) * config_.num_channels;
 }
 int AudioEncoderMultiChannelOpusImpl::SampleRateHz() const {
   return 48000;
@@ -322,12 +340,12 @@ int AudioEncoderMultiChannelOpusImpl::GetTargetBitrate() const {
 
 AudioEncoder::EncodedInfo AudioEncoderMultiChannelOpusImpl::EncodeImpl(
     uint32_t rtp_timestamp,
-    rtc::ArrayView<const int16_t> audio,
-    rtc::Buffer* encoded) {
+    std::span<const int16_t> audio,
+    Buffer* encoded) {
   if (input_buffer_.empty())
     first_timestamp_in_buffer_ = rtp_timestamp;
 
-  input_buffer_.insert(input_buffer_.end(), audio.cbegin(), audio.cend());
+  input_buffer_.insert(input_buffer_.end(), audio.begin(), audio.end());
   if (input_buffer_.size() <
       (Num10msFramesPerPacket() * SamplesPer10msFrame())) {
     return EncodedInfo();
@@ -337,12 +355,12 @@ AudioEncoder::EncodedInfo AudioEncoderMultiChannelOpusImpl::EncodeImpl(
 
   const size_t max_encoded_bytes = SufficientOutputBufferSize();
   EncodedInfo info;
-  info.encoded_bytes = encoded->AppendData(
-      max_encoded_bytes, [&](rtc::ArrayView<uint8_t> encoded) {
+  info.encoded_bytes =
+      encoded->AppendData(max_encoded_bytes, [&](std::span<uint8_t> encoded) {
         int status = WebRtcOpus_Encode(
             inst_, &input_buffer_[0],
-            rtc::CheckedDivExact(input_buffer_.size(), config_.num_channels),
-            rtc::saturated_cast<int16_t>(max_encoded_bytes), encoded.data());
+            CheckedDivExact(input_buffer_.size(), config_.num_channels),
+            saturated_cast<int16_t>(max_encoded_bytes), encoded.data());
 
         RTC_CHECK_GE(status, 0);  // Fails only if fed invalid data.
 

@@ -14,13 +14,12 @@
 #include <stddef.h>
 
 #include <memory>
-#include <string>
 
 #include "absl/strings/string_view.h"
 #include "rtc_base/file_rotating_stream.h"
 #include "rtc_base/logging.h"
 
-namespace rtc {
+namespace webrtc {
 
 // Log sink that uses a FileRotatingStream to write to disk.
 // Init() must be called before adding this sink.
@@ -39,14 +38,7 @@ class FileRotatingLogSink : public LogSink {
 
   // Writes the message to the current file. It will spill over to the next
   // file if needed.
-  void OnLogMessage(const std::string& message) override;
-  void OnLogMessage(absl::string_view message) override;
-  void OnLogMessage(const std::string& message,
-                    LoggingSeverity sev,
-                    const char* tag) override;
-  void OnLogMessage(absl::string_view message,
-                    LoggingSeverity sev,
-                    const char* tag) override;
+  void OnLogMessage(const LogLineRef& line) override;
 
   // Deletes any existing files in the directory and creates a new log file.
   virtual bool Init();
@@ -75,6 +67,7 @@ class CallSessionFileRotatingLogSink : public FileRotatingLogSink {
       const CallSessionFileRotatingLogSink&) = delete;
 };
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // RTC_BASE_LOG_SINKS_H_
