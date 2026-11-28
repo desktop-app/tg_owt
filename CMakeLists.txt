@@ -150,6 +150,7 @@ endif()
 
 if (APPLE)
     target_link_libraries(tg_owt PUBLIC tg_owt::libsdkmacos)
+    target_link_options(tg_owt INTERFACE "SHELL:-weak_framework ScreenCaptureKit")
 endif()
 
 link_openssl(tg_owt)
