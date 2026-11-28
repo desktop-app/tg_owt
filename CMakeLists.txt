@@ -638,6 +638,16 @@ PRIVATE
     api/video/adapted_video_track_source.h
     api/video/builtin_video_bitrate_allocator_factory.cc
     api/video/color_space.cc
+    api/video/corruption_detection/corruption_detection_settings_generator.cc
+    api/video/corruption_detection/corruption_detection_settings_generator.h
+    api/video/corruption_detection/frame_instrumentation_data.cc
+    api/video/corruption_detection/frame_instrumentation_data.h
+    api/video/corruption_detection/frame_instrumentation_data_reader.cc
+    api/video/corruption_detection/frame_instrumentation_data_reader.h
+    api/video/corruption_detection/frame_instrumentation_evaluation.cc
+    api/video/corruption_detection/frame_instrumentation_evaluation.h
+    api/video/corruption_detection/frame_instrumentation_generator_factory.cc
+    api/video/corruption_detection/frame_instrumentation_generator_factory.h
     api/video/encoded_frame.cc
     api/video/encoded_image.cc
     api/video/hdr_metadata.cc
@@ -681,6 +691,8 @@ PRIVATE
     api/video_codecs/av1_profile.h
     api/video_codecs/builtin_video_decoder_factory.cc
     api/video_codecs/builtin_video_encoder_factory.cc
+    api/video_codecs/encoder_speed_controller.cc
+    api/video_codecs/encoder_speed_controller.h
     api/video_codecs/h264_profile_level_id.cc
     api/video_codecs/h264_profile_level_id.h
     api/video_codecs/h265_profile_tier_level.cc
@@ -702,6 +714,8 @@ PRIVATE
     api/video_codecs/video_decoder_factory_template_open_h264_adapter.h
     api/video_codecs/video_decoder_software_fallback_wrapper.cc
     api/video_codecs/video_encoder.cc
+    api/video_codecs/video_encoder_factory.cc
+    api/video_codecs/video_encoder_factory.h
     api/video_codecs/video_encoder_factory_template.h
     api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h
     api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h
@@ -1469,23 +1483,6 @@ PRIVATE
     modules/video_capture/video_capture_impl.cc
     modules/video_capture/video_capture_options.cc
     modules/video_capture/video_capture_options.h
-    modules/video_coding/deprecated/decoding_state.cc
-    modules/video_coding/deprecated/decoding_state.h
-    modules/video_coding/deprecated/event_wrapper.cc
-    modules/video_coding/deprecated/event_wrapper.h
-    modules/video_coding/deprecated/frame_buffer.cc
-    modules/video_coding/deprecated/frame_buffer.h
-    modules/video_coding/deprecated/jitter_buffer.cc
-    modules/video_coding/deprecated/jitter_buffer.h
-    modules/video_coding/deprecated/jitter_buffer_common.h
-    modules/video_coding/deprecated/packet.cc
-    modules/video_coding/deprecated/packet.h
-    modules/video_coding/deprecated/receiver.cc
-    modules/video_coding/deprecated/receiver.h
-    modules/video_coding/deprecated/session_info.cc
-    modules/video_coding/deprecated/session_info.h
-    modules/video_coding/deprecated/stream_generator.cc
-    modules/video_coding/deprecated/stream_generator.h
     modules/video_coding/chain_diff_calculator.cc
     modules/video_coding/chain_diff_calculator.h
     modules/video_coding/decoder_database.cc
@@ -1501,8 +1498,6 @@ PRIVATE
     modules/video_coding/h264_sprop_parameter_sets.h
     modules/video_coding/h264_sps_pps_tracker.cc
     modules/video_coding/h264_sps_pps_tracker.h
-    modules/video_coding/h265_vps_sps_pps_tracker.cc
-    modules/video_coding/h265_vps_sps_pps_tracker.h
     modules/video_coding/h26x_packet_buffer.cc
     modules/video_coding/h26x_packet_buffer.h
     modules/video_coding/include/video_codec_initializer.h
@@ -1514,8 +1509,6 @@ PRIVATE
     modules/video_coding/include/video_error_codes_utils.h
     modules/video_coding/video_coding_defines.cc
     modules/video_coding/internal_defines.h
-    modules/video_coding/loss_notification_controller.cc
-    modules/video_coding/loss_notification_controller.h
     modules/video_coding/media_opt_util.cc
     modules/video_coding/media_opt_util.h
     modules/video_coding/nack_requester.cc
@@ -1549,30 +1542,22 @@ PRIVATE
     modules/video_coding/codecs/h264/h264_color_space.cc
     modules/video_coding/codecs/h264/h264_decoder_impl.cc
     modules/video_coding/codecs/h264/h264_encoder_impl.cc
-    modules/video_coding/codecs/multiplex/augmented_video_frame_buffer.cc
-    modules/video_coding/codecs/multiplex/multiplex_decoder_adapter.cc
-    modules/video_coding/codecs/multiplex/multiplex_encoded_image_packer.cc
-    modules/video_coding/codecs/multiplex/multiplex_encoder_adapter.cc
     modules/video_coding/codecs/interface/libvpx_interface.cc
     modules/video_coding/codecs/interface/libvpx_interface.h
     modules/video_coding/timing/decode_time_percentile_filter.cc
     modules/video_coding/timing/decode_time_percentile_filter.h
-    modules/video_coding/timing/frame_delay_variation_kalman_filter.cc
-    modules/video_coding/timing/frame_delay_variation_kalman_filter.h
-    modules/video_coding/timing/jitter_estimator.cc
-    modules/video_coding/timing/jitter_estimator.h
-    modules/video_coding/timing/inter_frame_delay_variation_calculator.cc
-    modules/video_coding/timing/inter_frame_delay_variation_calculator.h
-    modules/video_coding/timing/rtt_filter.cc
-    modules/video_coding/timing/rtt_filter.h
-    modules/video_coding/timing/timestamp_extrapolator.cc
-    modules/video_coding/timing/timestamp_extrapolator.h
     modules/video_coding/timing/timing.cc
     modules/video_coding/timing/timing.h
     modules/video_coding/utility/bandwidth_quality_scaler.cc
     modules/video_coding/utility/bandwidth_quality_scaler.h
+    modules/video_coding/utility/cbr_layer_rate_tracker.cc
+    modules/video_coding/utility/cbr_layer_rate_tracker.h
     modules/video_coding/utility/decoded_frames_history.cc
+    modules/video_coding/utility/encoder_speed_controller_impl.cc
+    modules/video_coding/utility/encoder_speed_controller_impl.h
     modules/video_coding/utility/frame_dropper.cc
+    modules/video_coding/utility/frame_sampler.cc
+    modules/video_coding/utility/frame_sampler.h
     modules/video_coding/utility/framerate_controller_deprecated.cc
     modules/video_coding/utility/ivf_defines.h
     modules/video_coding/utility/ivf_file_reader.cc
@@ -1616,6 +1601,8 @@ PRIVATE
     modules/video_coding/svc/scalable_video_controller.h
     modules/video_coding/svc/scalable_video_controller_no_layering.cc
     modules/video_coding/svc/scalable_video_controller_no_layering.h
+    modules/video_coding/svc/simulcast_to_svc_converter.cc
+    modules/video_coding/svc/simulcast_to_svc_converter.h
     modules/video_coding/svc/svc_rate_allocator.cc
     modules/video_coding/svc/svc_rate_allocator.h
     net/dcsctp/common/internal_types.h
@@ -1902,8 +1889,6 @@ PRIVATE
     common_video/h265/h265_sps_parser.h
     common_video/h265/h265_vps_parser.cc
     common_video/h265/h265_vps_parser.h
-    common_video/h265/legacy_bit_buffer.cc
-    common_video/h265/legacy_bit_buffer.h
     common_video/include/bitrate_adjuster.h
     common_video/include/quality_limitation_reason.h
     common_video/include/video_frame_buffer.h
@@ -2027,8 +2012,6 @@ PRIVATE
     video/adaptation/overuse_frame_detector.h
     video/adaptation/pixel_limit_resource.cc
     video/adaptation/pixel_limit_resource.h
-    video/adaptation/quality_rampup_experiment_helper.cc
-    video/adaptation/quality_rampup_experiment_helper.h
     video/adaptation/quality_scaler_resource.cc
     video/adaptation/quality_scaler_resource.h
     video/adaptation/video_stream_encoder_resource.cc
@@ -2041,10 +2024,38 @@ PRIVATE
     video/config/simulcast.h
     video/config/video_encoder_config.cc
     video/config/video_encoder_config.h
+    video/corruption_detection/corruption_classifier.cc
+    video/corruption_detection/corruption_classifier.h
+    video/corruption_detection/frame_instrumentation_generator_impl.cc
+    video/corruption_detection/frame_instrumentation_generator_impl.h
+    video/corruption_detection/frame_selector.cc
+    video/corruption_detection/frame_selector.h
+    video/corruption_detection/generic_mapping_functions.cc
+    video/corruption_detection/generic_mapping_functions.h
+    video/corruption_detection/halton_frame_sampler.cc
+    video/corruption_detection/halton_frame_sampler.h
+    video/corruption_detection/halton_sequence.cc
+    video/corruption_detection/halton_sequence.h
+    video/corruption_detection/utils.cc
+    video/corruption_detection/utils.h
+    video/corruption_detection/video_frame_sampler.cc
+    video/corruption_detection/video_frame_sampler.h
     video/render/incoming_video_stream.cc
     video/render/incoming_video_stream.h
     video/render/video_render_frames.cc
     video/render/video_render_frames.h
+    video/timing/default_video_jitter_timing.cc
+    video/timing/default_video_jitter_timing.h
+    video/timing/frame_delay_variation_kalman_filter.cc
+    video/timing/frame_delay_variation_kalman_filter.h
+    video/timing/inter_frame_delay_variation_calculator.cc
+    video/timing/inter_frame_delay_variation_calculator.h
+    video/timing/jitter_estimator.cc
+    video/timing/jitter_estimator.h
+    video/timing/rtt_filter.cc
+    video/timing/rtt_filter.h
+    video/timing/timestamp_extrapolator.cc
+    video/timing/timestamp_extrapolator.h
     video/buffered_frame_decryptor.cc
     video/buffered_frame_decryptor.h
     video/call_stats2.cc
@@ -2062,8 +2073,16 @@ PRIVATE
     video/frame_dumping_decoder.h
     video/frame_dumping_encoder.cc
     video/frame_dumping_encoder.h
+    video/null_video_decoder.cc
+    video/null_video_decoder.h
+    video/quality_convergence_controller.cc
+    video/quality_convergence_controller.h
+    video/quality_convergence_monitor.cc
+    video/quality_convergence_monitor.h
     video/quality_limitation_reason_tracker.cc
     video/quality_limitation_reason_tracker.h
+    video/rate_utilization_tracker.cc
+    video/rate_utilization_tracker.h
     video/receive_statistics_proxy.cc
     video/receive_statistics_proxy.h
     video/report_block_stats.cc
@@ -2533,7 +2552,6 @@ if ((NOT is_x86) AND (NOT is_x64))
         common_audio/fir_filter_sse.cc
         common_audio/fir_filter_sse.h
         common_audio/resampler/sinc_resampler_sse.cc
-        modules/video_processing/util/denoiser_filter_sse2.cc
         common_audio/third_party/ooura/fft_size_128/ooura_fft_sse2.cc
         common_audio/third_party/ooura/fft_size_128/ooura_fft_tables_neon_sse2.h
     )
@@ -2571,7 +2589,6 @@ else()
         common_audio/signal_processing/cross_correlation_neon.c
         common_audio/signal_processing/downsample_fast_neon.c
         common_audio/signal_processing/min_max_operations_neon.c
-        modules/video_processing/util/denoiser_filter_neon.cc
         common_audio/third_party/ooura/fft_size_128/ooura_fft_neon.cc
     )
 endif()
