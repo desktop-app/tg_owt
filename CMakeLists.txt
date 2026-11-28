@@ -583,6 +583,9 @@ PRIVATE
     api/rtp_sender_interface.cc
     api/rtp_transceiver_interface.cc
     api/sctp_transport_interface.cc
+    api/sframe/sframe_decryptor_interface.h
+    api/sframe/sframe_encryptor_interface.h
+    api/sframe/sframe_types.h
     api/webrtc_sdp.cc
     api/webrtc_sdp.h
     api/webrtc_sdp_planb.cc
@@ -1454,6 +1457,22 @@ PRIVATE
     modules/rtp_rtcp/source/rtp_packet_to_send.cc
     modules/rtp_rtcp/source/rtp_video_header.cc
     modules/rtp_rtcp/source/rtp_video_header.h
+    modules/sframe/sframe_context_factory.cc
+    modules/sframe/sframe_context_factory.h
+    modules/sframe/sframe_decrypt_error_reporter.cc
+    modules/sframe/sframe_decrypt_error_reporter.h
+    modules/sframe/sframe_decryption_config.h
+    modules/sframe/sframe_decryptor.cc
+    modules/sframe/sframe_decryptor.h
+    modules/sframe/sframe_decryptor_handle.cc
+    modules/sframe/sframe_decryptor_handle.h
+    modules/sframe/sframe_encryption_config.h
+    modules/sframe/sframe_encryptor.cc
+    modules/sframe/sframe_encryptor.h
+    modules/sframe/sframe_media_decryptor_interface.h
+    modules/sframe/sframe_media_encryptor_interface.h
+    modules/sframe/synchronized_sframe_encryptor.cc
+    modules/sframe/synchronized_sframe_encryptor.h
     modules/video_capture/device_info_impl.cc
     modules/video_capture/linux/camera_portal.cc
     modules/video_capture/linux/camera_portal.h
