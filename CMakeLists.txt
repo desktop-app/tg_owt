@@ -484,7 +484,15 @@ PRIVATE
     api/adaptation/resource.cc
     api/adaptation/resource.h
     api/audio/audio_frame.cc
+    api/audio/audio_processing.cc
+    api/audio/audio_processing.h
+    api/audio/audio_processing_statistics.cc
+    api/audio/audio_processing_statistics.h
+    api/audio/builtin_audio_processing_builder.cc
+    api/audio/builtin_audio_processing_builder.h
     api/audio/channel_layout.cc
+    api/audio/create_audio_device_module.cc
+    api/audio/create_audio_device_module.h
     api/audio/echo_canceller3_config.cc
     api/audio/echo_canceller3_factory.cc
     api/audio_codecs/L16/audio_decoder_L16.cc
@@ -499,8 +507,6 @@ PRIVATE
     api/audio_codecs/g711/audio_encoder_g711.cc
     api/audio_codecs/g722/audio_decoder_g722.cc
     api/audio_codecs/g722/audio_encoder_g722.cc
-    api/audio_codecs/ilbc/audio_decoder_ilbc.cc
-    api/audio_codecs/ilbc/audio_encoder_ilbc.cc
     api/audio_codecs/opus/audio_decoder_multi_channel_opus.cc
     api/audio_codecs/opus/audio_decoder_opus.cc
     api/audio_codecs/opus/audio_encoder_multi_channel_opus.cc
@@ -558,6 +564,8 @@ PRIVATE
     api/media_types.cc
     api/neteq/custom_neteq_factory.cc
     api/neteq/default_neteq_controller_factory.cc
+    api/neteq/default_neteq_factory.cc
+    api/neteq/default_neteq_factory.h
     api/neteq/neteq.cc
     api/neteq/tick_timer.cc
     api/peer_connection_interface.cc
@@ -877,7 +885,6 @@ PRIVATE
     media/sctp/sctp_transport_factory.h
     system_wrappers/source/clock.cc
     system_wrappers/source/metrics.cc
-    modules/audio_coding/acm2/acm_receiver.cc
     modules/audio_coding/acm2/acm_remixing.cc
     modules/audio_coding/acm2/acm_resampler.cc
     modules/audio_coding/acm2/audio_coding_module.cc
@@ -893,6 +900,8 @@ PRIVATE
     modules/audio_coding/audio_network_adaptor/event_log_writer.cc
     modules/audio_coding/audio_network_adaptor/fec_controller_plr_based.cc
     modules/audio_coding/audio_network_adaptor/frame_length_controller.cc
+    modules/audio_coding/audio_network_adaptor/frame_length_controller_v2.cc
+    modules/audio_coding/audio_network_adaptor/frame_length_controller_v2.h
     modules/audio_coding/codecs/cng/audio_encoder_cng.cc
     modules/audio_coding/codecs/cng/webrtc_cng.cc
     modules/audio_coding/codecs/g711/g711_interface.c
@@ -908,9 +917,6 @@ PRIVATE
     modules/third_party/g722/g722_decode.c
     modules/third_party/g722/g722_encode.c
     modules/third_party/fft/fft.c
-    modules/third_party/portaudio/pa_ringbuffer.c
-    modules/audio_coding/codecs/ilbc/audio_decoder_ilbc.cc
-    modules/audio_coding/codecs/ilbc/audio_encoder_ilbc.cc
     modules/audio_coding/codecs/isac/main/source/filter_functions.c
     modules/audio_coding/codecs/isac/main/source/isac_vad.c
     modules/audio_coding/codecs/isac/main/source/pitch_estimator.c
@@ -929,75 +935,6 @@ PRIVATE
     modules/audio_coding/codecs/pcm16b/audio_encoder_pcm16b.cc
     modules/audio_coding/codecs/pcm16b/pcm16b_common.cc
     modules/audio_coding/codecs/red/audio_encoder_copy_red.cc
-    modules/audio_coding/codecs/ilbc/abs_quant.c
-    modules/audio_coding/codecs/ilbc/abs_quant_loop.c
-    modules/audio_coding/codecs/ilbc/augmented_cb_corr.c
-    modules/audio_coding/codecs/ilbc/bw_expand.c
-    modules/audio_coding/codecs/ilbc/cb_construct.c
-    modules/audio_coding/codecs/ilbc/cb_mem_energy.c
-    modules/audio_coding/codecs/ilbc/cb_mem_energy_augmentation.c
-    modules/audio_coding/codecs/ilbc/cb_mem_energy_calc.c
-    modules/audio_coding/codecs/ilbc/cb_search.c
-    modules/audio_coding/codecs/ilbc/cb_search_core.c
-    modules/audio_coding/codecs/ilbc/cb_update_best_index.c
-    modules/audio_coding/codecs/ilbc/chebyshev.c
-    modules/audio_coding/codecs/ilbc/comp_corr.c
-    modules/audio_coding/codecs/ilbc/constants.c
-    modules/audio_coding/codecs/ilbc/create_augmented_vec.c
-    modules/audio_coding/codecs/ilbc/decode.c
-    modules/audio_coding/codecs/ilbc/decode_residual.c
-    modules/audio_coding/codecs/ilbc/decoder_interpolate_lsf.c
-    modules/audio_coding/codecs/ilbc/do_plc.c
-    modules/audio_coding/codecs/ilbc/encode.c
-    modules/audio_coding/codecs/ilbc/energy_inverse.c
-    modules/audio_coding/codecs/ilbc/enh_upsample.c
-    modules/audio_coding/codecs/ilbc/enhancer.c
-    modules/audio_coding/codecs/ilbc/enhancer_interface.c
-    modules/audio_coding/codecs/ilbc/filtered_cb_vecs.c
-    modules/audio_coding/codecs/ilbc/frame_classify.c
-    modules/audio_coding/codecs/ilbc/gain_dequant.c
-    modules/audio_coding/codecs/ilbc/gain_quant.c
-    modules/audio_coding/codecs/ilbc/get_cd_vec.c
-    modules/audio_coding/codecs/ilbc/get_lsp_poly.c
-    modules/audio_coding/codecs/ilbc/get_sync_seq.c
-    modules/audio_coding/codecs/ilbc/hp_input.c
-    modules/audio_coding/codecs/ilbc/hp_output.c
-    modules/audio_coding/codecs/ilbc/ilbc.c
-    modules/audio_coding/codecs/ilbc/index_conv_dec.c
-    modules/audio_coding/codecs/ilbc/index_conv_enc.c
-    modules/audio_coding/codecs/ilbc/init_decode.c
-    modules/audio_coding/codecs/ilbc/init_encode.c
-    modules/audio_coding/codecs/ilbc/interpolate.c
-    modules/audio_coding/codecs/ilbc/interpolate_samples.c
-    modules/audio_coding/codecs/ilbc/lpc_encode.c
-    modules/audio_coding/codecs/ilbc/lsf_check.c
-    modules/audio_coding/codecs/ilbc/lsf_interpolate_to_poly_dec.c
-    modules/audio_coding/codecs/ilbc/lsf_interpolate_to_poly_enc.c
-    modules/audio_coding/codecs/ilbc/lsf_to_lsp.c
-    modules/audio_coding/codecs/ilbc/lsf_to_poly.c
-    modules/audio_coding/codecs/ilbc/lsp_to_lsf.c
-    modules/audio_coding/codecs/ilbc/my_corr.c
-    modules/audio_coding/codecs/ilbc/nearest_neighbor.c
-    modules/audio_coding/codecs/ilbc/pack_bits.c
-    modules/audio_coding/codecs/ilbc/poly_to_lsf.c
-    modules/audio_coding/codecs/ilbc/poly_to_lsp.c
-    modules/audio_coding/codecs/ilbc/refiner.c
-    modules/audio_coding/codecs/ilbc/simple_interpolate_lsf.c
-    modules/audio_coding/codecs/ilbc/simple_lpc_analysis.c
-    modules/audio_coding/codecs/ilbc/simple_lsf_dequant.c
-    modules/audio_coding/codecs/ilbc/simple_lsf_quant.c
-    modules/audio_coding/codecs/ilbc/smooth.c
-    modules/audio_coding/codecs/ilbc/smooth_out_data.c
-    modules/audio_coding/codecs/ilbc/sort_sq.c
-    modules/audio_coding/codecs/ilbc/split_vq.c
-    modules/audio_coding/codecs/ilbc/state_construct.c
-    modules/audio_coding/codecs/ilbc/state_search.c
-    modules/audio_coding/codecs/ilbc/swap_bytes.c
-    modules/audio_coding/codecs/ilbc/unpack_bits.c
-    modules/audio_coding/codecs/ilbc/vq3.c
-    modules/audio_coding/codecs/ilbc/vq4.c
-    modules/audio_coding/codecs/ilbc/window32_w32.c
-    modules/audio_coding/codecs/ilbc/xcorr_coef.c
     modules/audio_coding/neteq/reorder_optimizer.cc
     modules/audio_coding/neteq/reorder_optimizer.h
     modules/audio_coding/neteq/underrun_optimizer.cc
@@ -1011,7 +948,8 @@ PRIVATE
     modules/audio_coding/neteq/cross_correlation.cc
     modules/audio_coding/neteq/decision_logic.cc
     modules/audio_coding/neteq/decoder_database.cc
-    modules/audio_coding/neteq/default_neteq_factory.cc
+    modules/audio_coding/neteq/delay_constraints.cc
+    modules/audio_coding/neteq/delay_constraints.h
     modules/audio_coding/neteq/delay_manager.cc
     modules/audio_coding/neteq/dsp_helper.cc
     modules/audio_coding/neteq/dtmf_buffer.cc
@@ -1020,7 +958,6 @@ PRIVATE
     modules/audio_coding/neteq/expand_uma_logger.cc
     modules/audio_coding/neteq/histogram.cc
     modules/audio_coding/neteq/merge.cc
-    modules/audio_coding/neteq/nack_tracker.cc
     modules/audio_coding/neteq/neteq_impl.cc
     modules/audio_coding/neteq/normal.cc
     modules/audio_coding/neteq/packet.cc
@@ -1119,7 +1056,8 @@ PRIVATE
     modules/audio_processing/aec3/fullband_erle_estimator.cc
     modules/audio_processing/aec3/matched_filter.cc
     modules/audio_processing/aec3/matched_filter_lag_aggregator.cc
-    modules/audio_processing/aec3/moving_average.cc
+    modules/audio_processing/aec3/moving_average_spectrum.cc
+    modules/audio_processing/aec3/moving_average_spectrum.h
     modules/audio_processing/aec3/multi_channel_content_detector.cc
     modules/audio_processing/aec3/multi_channel_content_detector.h
     modules/audio_processing/aec3/refined_filter_update_gain.cc
@@ -1146,10 +1084,6 @@ PRIVATE
     modules/audio_processing/aec3/transparent_mode.cc
     modules/audio_processing/aec3/transparent_mode.h
     modules/audio_processing/aec_dump/null_aec_dump_factory.cc
-    modules/audio_processing/aecm/aecm_core.cc
-    modules/audio_processing/aecm/aecm_core_c.cc
-    modules/audio_processing/aecm/aecm_core_neon.cc
-    modules/audio_processing/aecm/echo_control_mobile.cc
     modules/audio_processing/agc/agc.cc
     modules/audio_processing/agc/agc_manager_direct.cc
     modules/audio_processing/agc/legacy/analog_agc.cc
@@ -1182,6 +1116,10 @@ PRIVATE
     modules/audio_processing/agc2/saturation_protector_buffer.h
     modules/audio_processing/agc2/speech_level_estimator.cc
     modules/audio_processing/agc2/speech_level_estimator.h
+    modules/audio_processing/agc2/speech_level_estimator_experimental_impl.cc
+    modules/audio_processing/agc2/speech_level_estimator_experimental_impl.h
+    modules/audio_processing/agc2/speech_level_estimator_impl.cc
+    modules/audio_processing/agc2/speech_level_estimator_impl.h
     modules/audio_processing/agc2/speech_probability_buffer.cc
     modules/audio_processing/agc2/speech_probability_buffer.h
     modules/audio_processing/agc2/vad_wrapper.cc
@@ -1201,13 +1139,24 @@ PRIVATE
     modules/audio_processing/agc2/rnn_vad/rnn_gru.h
     modules/audio_processing/audio_processing_impl.cc
     modules/audio_processing/audio_processing_impl.h
-    modules/audio_processing/audio_processing_builder_impl.cc
     modules/audio_processing/capture_levels_adjuster/audio_samples_scaler.cc
     modules/audio_processing/capture_levels_adjuster/audio_samples_scaler.h
     modules/audio_processing/capture_levels_adjuster/capture_levels_adjuster.cc
     modules/audio_processing/capture_levels_adjuster/capture_levels_adjuster.h
-    modules/audio_processing/echo_control_mobile_impl.cc
-    modules/audio_processing/echo_control_mobile_impl.h
+    modules/audio_processing/capture_mixer/audio_content_analyzer.cc
+    modules/audio_processing/capture_mixer/audio_content_analyzer.h
+    modules/audio_processing/capture_mixer/capture_mixer.cc
+    modules/audio_processing/capture_mixer/capture_mixer.h
+    modules/audio_processing/capture_mixer/channel_content_remixer.cc
+    modules/audio_processing/capture_mixer/channel_content_remixer.h
+    modules/audio_processing/capture_mixer/dc_levels_estimator.cc
+    modules/audio_processing/capture_mixer/dc_levels_estimator.h
+    modules/audio_processing/capture_mixer/energy_estimator.cc
+    modules/audio_processing/capture_mixer/energy_estimator.h
+    modules/audio_processing/capture_mixer/remixing_logic.cc
+    modules/audio_processing/capture_mixer/remixing_logic.h
+    modules/audio_processing/capture_mixer/saturation_estimator.cc
+    modules/audio_processing/capture_mixer/saturation_estimator.h
     modules/audio_processing/echo_detector/circular_buffer.cc
     modules/audio_processing/echo_detector/circular_buffer.h
     modules/audio_processing/echo_detector/mean_variance_estimator.cc
@@ -1232,16 +1181,14 @@ PRIVATE
     modules/audio_processing/gain_controller2.h
     modules/audio_processing/high_pass_filter.cc
     modules/audio_processing/high_pass_filter.h
+    modules/audio_processing/post_filter.cc
+    modules/audio_processing/post_filter.h
     modules/audio_processing/include/aec_dump.cc
     modules/audio_processing/include/aec_dump.h
     modules/audio_processing/include/audio_frame_proxies.cc
     modules/audio_processing/include/audio_frame_proxies.h
-    modules/audio_processing/include/audio_processing.cc
     modules/audio_processing/include/audio_processing.h
-    modules/audio_processing/include/audio_processing_statistics.cc
     modules/audio_processing/include/audio_processing_statistics.h
-    modules/audio_processing/optionally_built_submodule_creators.cc
-    modules/audio_processing/optionally_built_submodule_creators.h
     modules/audio_processing/render_queue_item_verifier.h
     modules/audio_processing/residual_echo_detector.cc
     modules/audio_processing/residual_echo_detector.h
@@ -1262,17 +1209,7 @@ PRIVATE
     modules/audio_processing/rms_level.cc
     modules/audio_processing/splitting_filter.cc
     modules/audio_processing/three_band_filter_bank.cc
-    modules/audio_processing/transient/file_utils.cc
-    modules/audio_processing/transient/moving_moments.cc
-    modules/audio_processing/transient/transient_detector.cc
-    modules/audio_processing/transient/transient_suppressor_impl.cc
-    modules/audio_processing/transient/voice_probability_delay_unit.cc
-    modules/audio_processing/transient/voice_probability_delay_unit.h
-    modules/audio_processing/transient/wpd_node.cc
-    modules/audio_processing/transient/wpd_tree.cc
     modules/audio_processing/utility/cascaded_biquad_filter.cc
-    modules/audio_processing/utility/delay_estimator.cc
-    modules/audio_processing/utility/delay_estimator_wrapper.cc
     modules/audio_processing/utility/pffft_wrapper.cc
     modules/audio_processing/vad/gmm.cc
     modules/audio_processing/vad/pitch_based_vad.cc
@@ -1894,9 +1831,7 @@ PRIVATE
     common_audio/window_generator.cc
     common_audio/ring_buffer.c
     common_audio/signal_processing/auto_corr_to_refl_coef.c
-    common_audio/signal_processing/auto_correlation.c
-    common_audio/signal_processing/complex_fft.c
-    common_audio/signal_processing/complex_bit_reverse.c
+    common_audio/signal_processing/auto_correlation.cc
     common_audio/signal_processing/filter_ar_fast_q12.c
     common_audio/signal_processing/copy_set_operations.c
     common_audio/signal_processing/cross_correlation.c
@@ -1909,13 +1844,11 @@ PRIVATE
     common_audio/signal_processing/filter_ma_fast_q12.c
     common_audio/signal_processing/get_hanning_window.c
     common_audio/signal_processing/get_scaling_square.c
-    common_audio/signal_processing/ilbc_specific_functions.c
     common_audio/signal_processing/levinson_durbin.c
     common_audio/signal_processing/lpc_to_refl_coef.c
     common_audio/signal_processing/min_max_operations.c
     common_audio/signal_processing/min_max_operations_neon.c
     common_audio/signal_processing/randomization_functions.c
-    common_audio/signal_processing/real_fft.c
     common_audio/signal_processing/refl_coef_to_lpc.c
     common_audio/signal_processing/resample.c
     common_audio/signal_processing/resample_48khz.c
@@ -1926,7 +1859,7 @@ PRIVATE
     common_audio/signal_processing/spl_inl.c
     common_audio/signal_processing/spl_sqrt.c
     common_audio/signal_processing/splitting_filter.c
-    common_audio/signal_processing/sqrt_of_one_minus_x_squared.c
+    common_audio/signal_processing/vector_operations.c
     common_audio/signal_processing/vector_scaling_operations.c
     common_audio/third_party/spl_sqrt_floor/spl_sqrt_floor.c
     common_audio/third_party/ooura/fft_size_128/ooura_fft.cc
@@ -2188,6 +2121,8 @@ PRIVATE
     audio/channel_receive_frame_transformer_delegate.cc
     audio/channel_send.cc
     audio/channel_send_frame_transformer_delegate.cc
+    audio/nack_tracker.cc
+    audio/nack_tracker.h
     audio/remix_resample.cc
     audio/utility/audio_frame_operations.cc
     audio/utility/channel_mixer.cc
@@ -2598,7 +2533,6 @@ if ((NOT is_x86) AND (NOT is_x64))
         common_audio/fir_filter_sse.cc
         common_audio/fir_filter_sse.h
         common_audio/resampler/sinc_resampler_sse.cc
-        modules/audio_processing/utility/ooura_fft_sse2.cc
         modules/video_processing/util/denoiser_filter_sse2.cc
         common_audio/third_party/ooura/fft_size_128/ooura_fft_sse2.cc
         common_audio/third_party/ooura/fft_size_128/ooura_fft_tables_neon_sse2.h
@@ -2637,18 +2571,12 @@ else()
         common_audio/signal_processing/cross_correlation_neon.c
         common_audio/signal_processing/downsample_fast_neon.c
         common_audio/signal_processing/min_max_operations_neon.c
-        modules/audio_processing/utility/ooura_fft_neon.cc
         modules/video_processing/util/denoiser_filter_neon.cc
-        modules/audio_processing/aecm/aecm_core_neon.cc
         common_audio/third_party/ooura/fft_size_128/ooura_fft_neon.cc
     )
 endif()
 
-if (APPLE)
-    remove_target_sources(tg_owt ${webrtc_loc}
-        modules/audio_coding/codecs/isac/empty.cc
-    )
-else()
+if (NOT APPLE)
     remove_target_sources(tg_owt ${webrtc_loc}
         rtc_base/task_queue_gcd.cc
         rtc_base/task_queue_gcd.h
@@ -2657,7 +2585,6 @@ else()
         rtc_base/system/cocoa_threading.mm
         rtc_base/system/gcd_helpers.h
         rtc_base/system/gcd_helpers.m
-        modules/third_party/portaudio/pa_ringbuffer.c
         api/task_queue/default_task_queue_factory_gcd.cc
     )
 endif()
