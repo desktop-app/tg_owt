@@ -74,6 +74,15 @@ RtpPacketInfo::RtpPacketInfo(const RTPHeader& rtp_header,
   absolute_capture_time_ = extension.absolute_capture_time;
 }
 
-bool operator==(const RtpPacketInfo& lhs, const RtpPacketInfo& rhs) = default;
+// MSVC rejects a defaulted friend comparison defined in a namespace scope.
+bool operator==(const RtpPacketInfo& lhs, const RtpPacketInfo& rhs) {
+  return lhs.sequence_number_ == rhs.sequence_number_ &&
+         lhs.ssrc_ == rhs.ssrc_ && lhs.csrcs_ == rhs.csrcs_ &&
+         lhs.rtp_timestamp_ == rhs.rtp_timestamp_ &&
+         lhs.receive_time_ == rhs.receive_time_ &&
+         lhs.audio_level_ == rhs.audio_level_ &&
+         lhs.absolute_capture_time_ == rhs.absolute_capture_time_ &&
+         lhs.local_capture_clock_offset_ == rhs.local_capture_clock_offset_;
+}
 
 }  // namespace webrtc
