@@ -1,5 +1,5 @@
-#define PACKAGE_VERSION "2.5.0"
-#define PACKAGE_STRING "libsrtp2 2.5.0"
+#define PACKAGE_VERSION "2.8.0"
+#define PACKAGE_STRING "libsrtp2 2.8.0"
 
 #define GCM
 #define OPENSSL
