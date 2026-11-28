@@ -157,7 +157,6 @@ link_libabsl(tg_owt)
 link_libopenh264(tg_owt)
 link_libsrtp(tg_owt)
 link_libvpx(tg_owt)
-link_crc32c(tg_owt)
 link_dl(tg_owt)
 
 if (TG_OWT_BUILD_AUDIO_BACKENDS AND (UNIX AND NOT APPLE))
@@ -2672,10 +2671,6 @@ if (NOT SRTP_FOUND)
     list(APPEND export_targets libsrtp)
 else()
     target_compile_definitions(tg_owt PRIVATE WEBRTC_EXTERNAL_SRTP)
-endif()
-if (NOT Crc32c_FOUND)
-    include(cmake/libcrc32c.cmake)
-    list(APPEND export_targets libcrc32c)
 endif()
 
 export(
