@@ -40,7 +40,6 @@
 #include "modules/video_capture/linux/pipewire_video_sizes.h"
 #include "modules/video_capture/video_capture_defines.h"
 #include "modules/video_capture/video_capture_options.h"
-#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/sanitizer.h"
 #include "rtc_base/string_to_number.h"
@@ -48,22 +47,6 @@
 
 namespace webrtc {
 namespace videocapturemodule {
-
-// spa_pod_type_size() needs PipeWire 1.5.81, so size the checked types here.
-static uint32_t SpaValueTypeSize(uint32_t type) {
-  switch (type) {
-    case SPA_TYPE_Id:
-      return sizeof(uint32_t);
-    case SPA_TYPE_Fraction:
-      return sizeof(spa_fraction);
-  }
-  RTC_CHECK_NOTREACHED();
-}
-
-// Checks that the pod matches the expected type and is large enough to hold it.
-static bool SpaValueIsType(const spa_pod* val, uint32_t type) {
-  return val->type == type && val->size >= SpaValueTypeSize(type);
-}
 
 VideoType PipeWireRawFormatToVideoType(uint32_t id) {
   switch (id) {
@@ -206,7 +189,7 @@ void PipeWireNode::OnNodeParam(void* data,
   prop = spa_pod_object_find_prop(obj, prop, SPA_FORMAT_VIDEO_framerate);
   if (prop) {
     val = spa_pod_get_values(&prop->value, &n_items, &choice);
-    if (SpaValueIsType(val, SPA_TYPE_Fraction)) {
+    if (spa_pod_is_fraction(val)) {
       spa_fraction* fract;
 
       fract = static_cast<spa_fraction*>(SPA_POD_BODY(val));
@@ -286,7 +269,7 @@ bool PipeWireNode::ParseFormat(const spa_pod* param,
       return false;
 
     val = spa_pod_get_values(&prop->value, &n_items, &choice);
-    if (!SpaValueIsType(val, SPA_TYPE_Id))
+    if (!spa_pod_is_id(val))
       return false;
 
     if (choice != SPA_CHOICE_None || n_items < 1)
