@@ -75,6 +75,7 @@ include(cmake/external.cmake)
 include(cmake/libpffft.cmake)
 include(cmake/librnnoise.cmake)
 include(cmake/libyuv.cmake)
+include(cmake/libsframe.cmake)
 if (APPLE)
     include(cmake/libsdkmacos.cmake)
 endif()
@@ -137,6 +138,7 @@ PRIVATE
     tg_owt::librnnoise
     tg_owt::libyuv
 )
+target_link_libraries(tg_owt PUBLIC tg_owt::libsframe)
 
 if (is_x86 OR is_x64)
     target_link_libraries(tg_owt
@@ -2661,6 +2663,7 @@ list(APPEND export_targets
     libpffft
     librnnoise
     libyuv
+    libsframe
 )
 if (NOT absl_FOUND)
     include(cmake/libabsl.cmake)

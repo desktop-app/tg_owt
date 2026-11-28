@@ -2,7 +2,7 @@
 set(TG_OWT_OPENSSL_INCLUDE_PATH "" CACHE STRING "Include path for openssl.")
 function(link_openssl target_name)
     if (TG_OWT_PACKAGED_BUILD)
-        find_package(OpenSSL REQUIRED)
+        find_package(OpenSSL 3.0 REQUIRED)
         target_include_directories(${target_name} SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
         target_link_libraries(${target_name} PRIVATE ${OPENSSL_LIBRARIES})
     else()
