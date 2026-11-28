@@ -16,11 +16,11 @@
 #include <spa/buffer/buffer.h>
 #include <spa/buffer/meta.h>
 #include <spa/debug/types.h>
-#include <spa/param/format-types.h>
 #include <spa/param/format.h>
 #include <spa/param/param.h>
 #include <spa/param/video/format-utils.h>
 #include <spa/param/video/raw.h>
+#include <spa/param/video/type-info.h>
 #include <spa/pod/builder.h>
 #include <spa/pod/iter.h>
 #include <spa/pod/vararg.h>
