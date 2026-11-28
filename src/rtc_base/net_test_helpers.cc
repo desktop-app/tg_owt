@@ -10,6 +10,8 @@
 
 #include "rtc_base/net_test_helpers.h"
 
+#include <memory>
+
 #include "rtc_base/net_helpers.h"
 
 #if defined(WEBRTC_WIN)
