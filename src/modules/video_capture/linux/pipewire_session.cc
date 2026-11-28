@@ -40,6 +40,7 @@
 #include "modules/video_capture/linux/pipewire_video_sizes.h"
 #include "modules/video_capture/video_capture_defines.h"
 #include "modules/video_capture/video_capture_options.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/sanitizer.h"
 #include "rtc_base/string_to_number.h"
@@ -48,9 +49,20 @@
 namespace webrtc {
 namespace videocapturemodule {
 
+// spa_pod_type_size() needs PipeWire 1.5.81, so size the checked types here.
+static uint32_t SpaValueTypeSize(uint32_t type) {
+  switch (type) {
+    case SPA_TYPE_Id:
+      return sizeof(uint32_t);
+    case SPA_TYPE_Fraction:
+      return sizeof(spa_fraction);
+  }
+  RTC_CHECK_NOTREACHED();
+}
+
 // Checks that the pod matches the expected type and is large enough to hold it.
 static bool SpaValueIsType(const spa_pod* val, uint32_t type) {
-  return val->type == type && val->size >= spa_pod_type_size(type);
+  return val->type == type && val->size >= SpaValueTypeSize(type);
 }
 
 VideoType PipeWireRawFormatToVideoType(uint32_t id) {
