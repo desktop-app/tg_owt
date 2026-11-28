@@ -38,10 +38,12 @@ PRIVATE
     api/video_codec/RTCVideoEncoderVP8.mm
     api/video_codec/RTCVideoEncoderVP9.h
     api/video_codec/RTCVideoEncoderVP9.mm
-    api/video_codec/RTCWrappedNativeVideoDecoder.h
-    api/video_codec/RTCWrappedNativeVideoDecoder.mm
-    api/video_codec/RTCWrappedNativeVideoEncoder.h
-    api/video_codec/RTCWrappedNativeVideoEncoder.mm
+    api/video_codec/RTCNativeVideoDecoder.h
+    api/video_codec/RTCNativeVideoDecoder.mm
+    api/video_codec/RTCNativeVideoDecoderBuilder+Native.h
+    api/video_codec/RTCNativeVideoEncoder.h
+    api/video_codec/RTCNativeVideoEncoder.mm
+    api/video_codec/RTCNativeVideoEncoderBuilder+Native.h
     base/RTCSSLCertificateVerifier.h
     components/audio/RTCAudioDevice.h
     components/video_frame_buffer/RTCCVPixelBuffer.h
@@ -54,7 +56,7 @@ PRIVATE
     components/video_codec/RTCDefaultVideoDecoderFactory.h
     components/video_codec/RTCDefaultVideoDecoderFactory.m
     components/video_codec/RTCDefaultVideoEncoderFactory.h
-    components/video_codec/RTCDefaultVideoEncoderFactory.m
+    components/video_codec/RTCDefaultVideoEncoderFactory.mm
     components/video_codec/RTCVideoDecoderFactoryH264.h
     components/video_codec/RTCVideoDecoderFactoryH264.m
     components/video_codec/RTCVideoDecoderH264.h
@@ -97,6 +99,7 @@ PRIVATE
     base/RTCVideoDecoderFactory.h
     base/RTCVideoEncoder.h
     base/RTCVideoEncoderFactory.h
+    base/RTCVideoEncoderFactory.mm
     base/RTCVideoEncoderQpThresholds.h
     base/RTCVideoEncoderQpThresholds.m
     base/RTCVideoEncoderSettings.h
@@ -108,6 +111,8 @@ PRIVATE
     base/RTCYUVPlanarBuffer.h
     helpers/AVCaptureSession+DevicePosition.h
     helpers/AVCaptureSession+DevicePosition.mm
+    helpers/AudioTimeStamp+Nanoseconds.h
+    helpers/AudioTimeStamp+Nanoseconds.mm
     helpers/NSString+StdString.h
     helpers/NSString+StdString.mm
     helpers/RTCDispatcher+Private.h
@@ -186,6 +191,8 @@ PRIVATE
     api/peerconnection/RTCDataChannelConfiguration+Private.h
     api/peerconnection/RTCDataChannelConfiguration.h
     api/peerconnection/RTCDataChannelConfiguration.mm
+    api/peerconnection/RTCDtlsFingerprint.h
+    api/peerconnection/RTCDtlsFingerprint.mm
     api/peerconnection/RTCDtmfSender+Private.h
     api/peerconnection/RTCDtmfSender.h
     api/peerconnection/RTCDtmfSender.mm
@@ -250,6 +257,9 @@ PRIVATE
     api/peerconnection/RTCRtpSender+Private.h
     api/peerconnection/RTCRtpSender.h
     api/peerconnection/RTCRtpSender.mm
+    api/peerconnection/RTCRtpSource+Private.h
+    api/peerconnection/RTCRtpSource.h
+    api/peerconnection/RTCRtpSource.mm
     api/peerconnection/RTCRtpTransceiver+Private.h
     api/peerconnection/RTCRtpTransceiver.h
     api/peerconnection/RTCRtpTransceiver.mm
