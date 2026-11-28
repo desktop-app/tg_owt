@@ -2707,7 +2707,7 @@ install(
 install(
     DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/src/
     DESTINATION ${webrtc_includedir}
-    FILES_MATCHING PATTERN "*.h"
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.inc"
 )
 
 install(

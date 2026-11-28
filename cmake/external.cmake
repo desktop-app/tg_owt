@@ -87,25 +87,35 @@ function(link_libabsl target_name)
     endif()
     if (TG_OWT_PACKAGED_BUILD)
         find_package(absl)
+        # ABSL_REFACTOR_INLINE, used by rtc_base/ssl_fingerprint.h, is in 20260107 and later.
+        if (absl_FOUND AND (NOT absl_VERSION OR absl_VERSION VERSION_LESS 20260107))
+            set(absl_FOUND 0)
+        endif()
         set(absl_FOUND ${absl_FOUND} PARENT_SCOPE)
+        set(absl_VERSION ${absl_VERSION} PARENT_SCOPE)
         if (absl_FOUND)
             target_link_libraries(${target_name}
             ${scope}
+                absl::algorithm
                 absl::algorithm_container
+                absl::any_invocable
                 absl::bind_front
+                absl::bits
+                absl::cleanup
                 absl::config
                 absl::core_headers
+                absl::crc32c
                 absl::flat_hash_map
+                absl::flat_hash_set
                 absl::inlined_vector
-                absl::flags
-                absl::flags_parse
-                absl::flags_usage
                 absl::memory
+                absl::no_destructor
+                absl::nullability
                 absl::optional
+                absl::str_format
+                absl::string_view
                 absl::strings
                 absl::synchronization
-                absl::type_traits
-                absl::variant
             )
         endif()
     endif()

@@ -1,6 +1,6 @@
 include(CMakeFindDependencyMacro)
 if (@absl_FOUND@)
-    find_dependency(absl)
+    find_dependency(absl @absl_VERSION@)
 endif()
 if (@Crc32c_FOUND@)
     find_dependency(Crc32c)
