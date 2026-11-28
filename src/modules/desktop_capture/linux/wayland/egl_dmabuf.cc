@@ -924,7 +924,8 @@ bool EglDmaBuf::CreatePlatformDevice() {
 
 RTC_NO_SANITIZE("cfi-icall")
 void EglDmaBuf::EnumerateDrmDevices() {
-  if (!LoadDRM()) {
+  static const bool drm_loaded = LoadDRM();
+  if (!drm_loaded) {
     RTC_LOG(LS_ERROR) << "Unable to load libdrm library.";
     return;
   }
