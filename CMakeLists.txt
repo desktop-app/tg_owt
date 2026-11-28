@@ -1483,6 +1483,8 @@ PRIVATE
     modules/video_capture/linux/device_info_v4l2.h
     modules/video_capture/linux/pipewire_session.cc
     modules/video_capture/linux/pipewire_session.h
+    modules/video_capture/linux/pipewire_video_sizes.cc
+    modules/video_capture/linux/pipewire_video_sizes.h
     modules/video_capture/linux/video_capture_linux.cc
     modules/video_capture/linux/video_capture_pipewire.cc
     modules/video_capture/linux/video_capture_pipewire.h
@@ -2202,6 +2204,8 @@ PRIVATE
     modules/desktop_capture/desktop_geometry.h
     modules/desktop_capture/desktop_region.cc
     modules/desktop_capture/desktop_region.h
+    modules/desktop_capture/frame_texture.cc
+    modules/desktop_capture/frame_texture.h
     modules/desktop_capture/shared_desktop_frame.cc
     modules/desktop_capture/shared_desktop_frame.h
     modules/desktop_capture/shared_memory.cc
@@ -2335,8 +2339,12 @@ PRIVATE
     modules/desktop_capture/mac/desktop_frame_provider.mm
     modules/desktop_capture/mac/desktop_frame_utils.cc
     modules/desktop_capture/mac/desktop_frame_utils.h
+    modules/desktop_capture/mac/sck_picker_handle.h
+    modules/desktop_capture/mac/sck_picker_handle.mm
     modules/desktop_capture/mac/screen_capturer_mac.h
     modules/desktop_capture/mac/screen_capturer_mac.mm
+    modules/desktop_capture/mac/screen_capturer_sck.h
+    modules/desktop_capture/mac/screen_capturer_sck.mm
 
     modules/desktop_capture/mac/desktop_configuration.h
     modules/desktop_capture/mac/desktop_configuration_monitor.cc
@@ -2361,6 +2369,8 @@ PRIVATE
     modules/desktop_capture/win/dxgi_adapter_duplicator.h
     modules/desktop_capture/win/dxgi_context.cc
     modules/desktop_capture/win/dxgi_context.h
+    modules/desktop_capture/win/dxgi_desktop_frame.cc
+    modules/desktop_capture/win/dxgi_desktop_frame.h
     modules/desktop_capture/win/dxgi_duplicator_controller.cc
     modules/desktop_capture/win/dxgi_duplicator_controller.h
     modules/desktop_capture/win/dxgi_frame.cc
@@ -2457,16 +2467,13 @@ if (NOT TG_OWT_USE_PIPEWIRE)
     remove_target_sources(tg_owt ${webrtc_loc}
         modules/desktop_capture/linux/wayland/base_capturer_pipewire.cc
         modules/desktop_capture/linux/wayland/base_capturer_pipewire.h
-        modules/desktop_capture/linux/wayland/drm.sigs
         modules/desktop_capture/linux/wayland/egl_dmabuf.cc
         modules/desktop_capture/linux/wayland/egl_dmabuf.h
         modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.cc
         modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.h
-        modules/desktop_capture/linux/wayland/pipewire_stub_header.fragment
         modules/desktop_capture/linux/wayland/portal_request_response.h
         modules/desktop_capture/linux/wayland/restore_token_manager.cc
         modules/desktop_capture/linux/wayland/restore_token_manager.h
-        modules/desktop_capture/linux/wayland/scoped_glib.cc
         modules/desktop_capture/linux/wayland/scoped_glib.h
         modules/desktop_capture/linux/wayland/screen_capture_portal_interface.cc
         modules/desktop_capture/linux/wayland/screen_capture_portal_interface.h
@@ -2476,7 +2483,6 @@ if (NOT TG_OWT_USE_PIPEWIRE)
         modules/desktop_capture/linux/wayland/screencast_stream_utils.h
         modules/desktop_capture/linux/wayland/shared_screencast_stream.cc
         modules/desktop_capture/linux/wayland/shared_screencast_stream.h
-        modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc
         modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.h
         modules/desktop_capture/linux/wayland/xdg_session_details.h
 
@@ -2486,6 +2492,8 @@ if (NOT TG_OWT_USE_PIPEWIRE)
         modules/video_capture/linux/device_info_pipewire.h
         modules/video_capture/linux/pipewire_session.cc
         modules/video_capture/linux/pipewire_session.h
+        modules/video_capture/linux/pipewire_video_sizes.cc
+        modules/video_capture/linux/pipewire_video_sizes.h
         modules/video_capture/linux/video_capture_pipewire.cc
         modules/video_capture/linux/video_capture_pipewire.h
 
