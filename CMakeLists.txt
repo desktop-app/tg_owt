@@ -84,6 +84,11 @@ init_target(tg_owt)
 
 generate_field_trials(tg_owt)
 
+target_compile_definitions(tg_owt
+PRIVATE
+    WEBRTC_WITHOUT_RUST
+)
+
 if (TG_OWT_USE_PIPEWIRE)
     if (TG_OWT_DLOPEN_PIPEWIRE)
         include(cmake/generate_stubs.cmake)
@@ -218,27 +223,29 @@ PRIVATE
     rtc_base/async_tcp_socket.h
     rtc_base/async_udp_socket.cc
     rtc_base/async_udp_socket.h
+    rtc_base/base64.cc
+    rtc_base/base64.h
     rtc_base/bitrate_tracker.cc
     rtc_base/bitrate_tracker.h
     rtc_base/callback_list.cc
     rtc_base/callback_list.h
     rtc_base/crc32.cc
     rtc_base/crc32.h
-    rtc_base/crypt_string.cc
-    rtc_base/crypt_string.h
+    rtc_base/crypto_random.cc
+    rtc_base/crypto_random.h
     rtc_base/checks.cc
     rtc_base/checks.h
+    rtc_base/clock_aligner.cc
+    rtc_base/clock_aligner.h
     rtc_base/data_rate_limiter.cc
     rtc_base/data_rate_limiter.h
+    rtc_base/denormal_disabler.cc
+    rtc_base/denormal_disabler.h
     rtc_base/dscp.h
     rtc_base/file_rotating_stream.cc
     rtc_base/file_rotating_stream.h
     rtc_base/frequency_tracker.cc
     rtc_base/frequency_tracker.h
-    rtc_base/helpers.cc
-    rtc_base/helpers.h
-    rtc_base/http_common.cc
-    rtc_base/http_common.h
     rtc_base/ip_address.cc
     rtc_base/ip_address.h
     rtc_base/logging.cc
@@ -268,6 +275,8 @@ PRIVATE
     rtc_base/network_constants.h
     rtc_base/network_monitor.cc
     rtc_base/network_monitor.h
+    rtc_base/network_monitor_factory.cc
+    rtc_base/network_monitor_factory.h
     rtc_base/network_route.h
     rtc_base/null_socket_server.cc
     rtc_base/null_socket_server.h
@@ -296,12 +305,12 @@ PRIVATE
     rtc_base/openssl_utility.h
     rtc_base/physical_socket_server.cc
     rtc_base/physical_socket_server.h
-    rtc_base/proxy_info.cc
-    rtc_base/proxy_info.h
     rtc_base/rtc_certificate.cc
     rtc_base/rtc_certificate.h
     rtc_base/rtc_certificate_generator.cc
     rtc_base/rtc_certificate_generator.h
+    rtc_base/rtp_to_ntp_estimator.cc
+    rtc_base/rtp_to_ntp_estimator.h
     rtc_base/rate_limiter.cc
     rtc_base/rate_limiter.h
     rtc_base/socket.cc
@@ -344,6 +353,8 @@ PRIVATE
     rtc_base/byte_order.h
     rtc_base/copy_on_write_buffer.cc
     rtc_base/copy_on_write_buffer.h
+    rtc_base/cpu_info.cc
+    rtc_base/cpu_info.h
     rtc_base/event.cc
     rtc_base/event.h
     rtc_base/event_tracer.cc
@@ -365,9 +376,13 @@ PRIVATE
     rtc_base/rate_statistics.h
     rtc_base/rate_tracker.cc
     rtc_base/rate_tracker.h
+    rtc_base/ref_counter.cc
+    rtc_base/ref_counter.h
     rtc_base/swap_queue.h
     rtc_base/timestamp_aligner.cc
     rtc_base/timestamp_aligner.h
+    rtc_base/trace_categories.cc
+    rtc_base/trace_categories.h
     rtc_base/trace_event.h
     rtc_base/zero_memory.cc
     rtc_base/zero_memory.h
@@ -385,7 +400,6 @@ PRIVATE
     rtc_base/containers/flat_set.h
     rtc_base/containers/flat_tree.cc
     rtc_base/containers/flat_tree.h
-    rtc_base/containers/identity.h
     rtc_base/containers/invoke.h
     rtc_base/containers/move_only_int.h
     rtc_base/win/scoped_com_initializer.cc
@@ -403,25 +417,27 @@ PRIVATE
     rtc_base/strings/string_builder.h
     rtc_base/strings/string_format.cc
     rtc_base/strings/string_format.h
-    rtc_base/experiments/bandwidth_quality_scaler_settings.cc
-    rtc_base/experiments/bandwidth_quality_scaler_settings.h
     rtc_base/experiments/encoder_info_settings.cc
     rtc_base/experiments/encoder_info_settings.h
+    rtc_base/experiments/encoder_speed_experiment.cc
+    rtc_base/experiments/encoder_speed_experiment.h
     rtc_base/experiments/alr_experiment.cc
     rtc_base/experiments/balanced_degradation_settings.cc
-    rtc_base/experiments/cpu_speed_experiment.cc
+    rtc_base/experiments/corruption_detection_frame_selector_settings.cc
+    rtc_base/experiments/corruption_detection_frame_selector_settings.h
     rtc_base/experiments/field_trial_list.cc
     rtc_base/experiments/field_trial_parser.cc
     rtc_base/experiments/field_trial_units.cc
     rtc_base/experiments/keyframe_interval_settings.cc
     rtc_base/experiments/min_video_bitrate_experiment.cc
     rtc_base/experiments/normalize_simulcast_size_experiment.cc
-    rtc_base/experiments/quality_rampup_experiment.cc
     rtc_base/experiments/quality_scaler_settings.cc
     rtc_base/experiments/quality_scaling_experiment.cc
     rtc_base/experiments/rate_control_settings.cc
-    rtc_base/experiments/rtt_mult_experiment.cc
-    rtc_base/experiments/stable_target_rate_experiment.cc
+    rtc_base/experiments/retransmit_flushed_packets_settings.cc
+    rtc_base/experiments/retransmit_flushed_packets_settings.h
+    rtc_base/experiments/rfc8888_congestion_control_feedback_experiment.cc
+    rtc_base/experiments/rfc8888_congestion_control_feedback_experiment.h
     rtc_base/experiments/struct_parameters_parser.cc
     rtc_base/numerics/event_based_exponential_moving_average.cc
     rtc_base/numerics/event_rate_counter.cc
@@ -432,7 +448,6 @@ PRIVATE
     rtc_base/numerics/sample_stats.cc
     api/numerics/samples_stats_counter.cc
     api/numerics/samples_stats_counter.h
-    rtc_base/strings/audio_format_to_string.cc
     rtc_base/strings/string_builder.cc
     rtc_base/synchronization/mutex.h
     rtc_base/synchronization/yield.cc
@@ -447,15 +462,18 @@ PRIVATE
     rtc_base/system/gcd_helpers.h
     rtc_base/system/gcd_helpers.m
     rtc_base/system/no_cfi_icall.h
+    rtc_base/system/system_time.cc
+    rtc_base/system/system_time.h
     rtc_base/system_time.cc
     rtc_base/system_time.h
-    rtc_base/task_queue.cc
     rtc_base/task_queue_gcd.cc
     rtc_base/task_queue_gcd.h
     rtc_base/task_queue_stdlib.cc
     rtc_base/task_queue_stdlib.h
     rtc_base/task_queue_win.cc
     rtc_base/task_queue_win.h
+    rtc_base/text2pcap.cc
+    rtc_base/text2pcap.h
     rtc_base/ifaddrs_converter.cc
     rtc_base/ifaddrs_converter.h
     rtc_base/internal/default_socket_server.cc
@@ -463,8 +481,6 @@ PRIVATE
     rtc_base/mac_ifaddrs_converter.cc
     rtc_base/task_utils/repeating_task.cc
     rtc_base/task_utils/repeating_task.h
-    rtc_base/third_party/base64/base64.cc
-    rtc_base/third_party/sigslot/sigslot.cc
     api/adaptation/resource.cc
     api/adaptation/resource.h
     api/audio/audio_frame.cc
@@ -493,9 +509,13 @@ PRIVATE
     api/audio_codecs/opus/audio_encoder_opus_config.cc
     api/audio_codecs/opus_audio_decoder_factory.cc
     api/audio_codecs/opus_audio_encoder_factory.cc
+    api/environment/deprecated_global_field_trials.cc
+    api/environment/deprecated_global_field_trials.h
     api/environment/environment.h
     api/environment/environment_factory.cc
     api/environment/environment_factory.h
+    api/environment/force_test_environment.cc
+    api/environment/force_test_environment.h
     api/async_dns_resolver.h
     api/audio_options.cc
     api/call/transport.cc
@@ -516,6 +536,8 @@ PRIVATE
     api/field_trials_registry.h
     api/frame_transformer_factory.cc
     api/frame_transformer_factory.h
+    api/frame_transformer_interface.cc
+    api/frame_transformer_interface.h
     api/ice_transport_factory.cc
     api/jsep.cc
     api/jsep_ice_candidate.cc
@@ -532,7 +554,6 @@ PRIVATE
     api/peer_connection_interface.cc
     api/ref_count.h
     api/rtc_error.cc
-    api/rtc_event_log/rtc_event.cc
     api/rtc_event_log/rtc_event_log.cc
     api/rtc_event_log/rtc_event_log_factory.cc
     api/rtc_event_log_output_file.cc
@@ -543,7 +564,6 @@ PRIVATE
     api/rtp_sender_interface.cc
     api/rtp_transceiver_interface.cc
     api/sctp_transport_interface.cc
-    api/webrtc_key_value_config.h
     api/task_queue/default_task_queue_factory.h
     api/task_queue/default_task_queue_factory_gcd.cc
     api/task_queue/default_task_queue_factory_stdlib.cc
@@ -553,10 +573,11 @@ PRIVATE
     api/task_queue/task_queue_base.cc
     api/transport/bandwidth_estimation_settings.h
     api/transport/bitrate_settings.cc
-    api/transport/field_trial_based_config.cc
     api/transport/goog_cc_factory.cc
     api/transport/network_types.cc
     api/transport/stun.cc
+    api/transport/rtp/corruption_detection_message.cc
+    api/transport/rtp/corruption_detection_message.h
     api/transport/rtp/dependency_descriptor.cc
     api/transport/rtp/dependency_descriptor.h
     api/transport/rtp/rtp_source.h
@@ -828,15 +849,8 @@ PRIVATE
     media/sctp/dcsctp_transport.h
     media/sctp/sctp_transport_factory.cc
     media/sctp/sctp_transport_factory.h
-    system_wrappers/include/denormal_disabler.h
     system_wrappers/source/clock.cc
-    system_wrappers/source/cpu_features.cc
-    system_wrappers/source/cpu_info.cc
-    system_wrappers/source/denormal_disabler.cc
-    system_wrappers/source/field_trial.cc
     system_wrappers/source/metrics.cc
-    system_wrappers/source/rtp_to_ntp_estimator.cc
-    system_wrappers/source/sleep.cc
     modules/audio_coding/acm2/acm_receiver.cc
     modules/audio_coding/acm2/acm_remixing.cc
     modules/audio_coding/acm2/acm_resampler.cc
@@ -1248,9 +1262,23 @@ PRIVATE
     modules/congestion_controller/pcc/pcc_network_controller.cc
     modules/congestion_controller/pcc/rtt_tracker.cc
     modules/congestion_controller/pcc/utility_function.cc
+    modules/congestion_controller/ect1_policy.cc
+    modules/congestion_controller/ect1_policy.h
     modules/congestion_controller/receive_side_congestion_controller.cc
     modules/congestion_controller/remb_throttler.cc
     modules/congestion_controller/remb_throttler.h
+    modules/congestion_controller/scream/delay_based_congestion_control.cc
+    modules/congestion_controller/scream/delay_based_congestion_control.h
+    modules/congestion_controller/scream/loss_estimator.cc
+    modules/congestion_controller/scream/loss_estimator.h
+    modules/congestion_controller/scream/scream_feedback.cc
+    modules/congestion_controller/scream/scream_feedback.h
+    modules/congestion_controller/scream/scream_network_controller.cc
+    modules/congestion_controller/scream/scream_network_controller.h
+    modules/congestion_controller/scream/scream_v2.cc
+    modules/congestion_controller/scream/scream_v2.h
+    modules/congestion_controller/scream/scream_v2_parameters.cc
+    modules/congestion_controller/scream/scream_v2_parameters.h
     modules/congestion_controller/rtp/control_handler.cc
     modules/congestion_controller/rtp/transport_feedback_adapter.cc
     modules/congestion_controller/rtp/transport_feedback_demuxer.cc
@@ -1266,7 +1294,6 @@ PRIVATE
     modules/congestion_controller/goog_cc/inter_arrival_delta.cc
     modules/congestion_controller/goog_cc/inter_arrival_delta.h
     modules/congestion_controller/goog_cc/link_capacity_estimator.cc
-    modules/congestion_controller/goog_cc/loss_based_bandwidth_estimation.cc
     modules/congestion_controller/goog_cc/probe_bitrate_estimator.cc
     modules/congestion_controller/goog_cc/probe_controller.cc
     modules/congestion_controller/goog_cc/robust_throughput_estimator.cc
@@ -1284,7 +1311,6 @@ PRIVATE
     modules/rtp_rtcp/include/receive_statistics.h
     modules/rtp_rtcp/include/recovered_packet_receiver.h
     modules/rtp_rtcp/include/remote_ntp_time_estimator.h
-    modules/rtp_rtcp/include/rtp_rtcp.h
     modules/rtp_rtcp/source/active_decode_targets_helper.cc
     modules/rtp_rtcp/source/active_decode_targets_helper.h
     modules/rtp_rtcp/source/absolute_capture_time_interpolator.cc
@@ -1293,6 +1319,8 @@ PRIVATE
     modules/rtp_rtcp/source/absolute_capture_time_sender.h
     modules/rtp_rtcp/source/capture_clock_offset_updater.cc
     modules/rtp_rtcp/source/capture_clock_offset_updater.h
+    modules/rtp_rtcp/source/corruption_detection_extension.cc
+    modules/rtp_rtcp/source/corruption_detection_extension.h
     modules/rtp_rtcp/source/create_video_rtp_depacketizer.cc
     modules/rtp_rtcp/source/create_video_rtp_depacketizer.h
     modules/rtp_rtcp/source/dtmf_queue.cc
@@ -1315,6 +1343,8 @@ PRIVATE
     modules/rtp_rtcp/source/frame_object.h
     modules/rtp_rtcp/source/leb128.cc
     modules/rtp_rtcp/source/leb128.h
+    modules/rtp_rtcp/source/ntp_time_util.cc
+    modules/rtp_rtcp/source/ntp_time_util.h
     modules/rtp_rtcp/source/packet_loss_stats.cc
     modules/rtp_rtcp/source/packet_loss_stats.h
     modules/rtp_rtcp/source/packet_sequencer.cc
@@ -1328,6 +1358,8 @@ PRIVATE
     modules/rtp_rtcp/source/rtcp_receiver.h
     modules/rtp_rtcp/source/rtcp_sender.cc
     modules/rtp_rtcp/source/rtcp_sender.h
+    modules/rtp_rtcp/source/rtp_depacketizer_sframe.cc
+    modules/rtp_rtcp/source/rtp_depacketizer_sframe.h
     modules/rtp_rtcp/source/rtp_descriptor_authentication.cc
     modules/rtp_rtcp/source/rtp_descriptor_authentication.h
     modules/rtp_rtcp/source/rtp_format.cc
@@ -1349,9 +1381,9 @@ PRIVATE
     modules/rtp_rtcp/source/rtp_packetizer_av1.h
     modules/rtp_rtcp/source/rtp_packetizer_h265.cc
     modules/rtp_rtcp/source/rtp_packetizer_h265.h
+    modules/rtp_rtcp/source/rtp_packetizer_sframe.cc
+    modules/rtp_rtcp/source/rtp_packetizer_sframe.h
     modules/rtp_rtcp/source/rtp_rtcp_config.h
-    modules/rtp_rtcp/source/rtp_rtcp_impl.cc
-    modules/rtp_rtcp/source/rtp_rtcp_impl.h
     modules/rtp_rtcp/source/rtp_rtcp_impl2.cc
     modules/rtp_rtcp/source/rtp_rtcp_impl2.h
     modules/rtp_rtcp/source/rtp_packetizer_av1_test_helper.cc
@@ -1366,8 +1398,6 @@ PRIVATE
     modules/rtp_rtcp/source/rtp_sender_egress.h
     modules/rtp_rtcp/source/rtp_video_stream_receiver_frame_transformer_delegate.cc
     modules/rtp_rtcp/source/rtp_video_stream_receiver_frame_transformer_delegate.h
-    modules/rtp_rtcp/source/deprecated/deprecated_rtp_sender_egress.cc
-    modules/rtp_rtcp/source/deprecated/deprecated_rtp_sender_egress.h
     modules/rtp_rtcp/source/rtp_sender_video.cc
     modules/rtp_rtcp/source/rtp_sender_video.h
     modules/rtp_rtcp/source/rtp_sender_video_frame_transformer_delegate.cc
@@ -1378,8 +1408,6 @@ PRIVATE
     modules/rtp_rtcp/source/rtp_video_layers_allocation_extension.h
     modules/rtp_rtcp/source/source_tracker.cc
     modules/rtp_rtcp/source/source_tracker.h
-    modules/rtp_rtcp/source/time_util.cc
-    modules/rtp_rtcp/source/time_util.h
     modules/rtp_rtcp/source/tmmbr_help.cc
     modules/rtp_rtcp/source/tmmbr_help.h
     modules/rtp_rtcp/source/ulpfec_generator.cc
@@ -1412,6 +1440,8 @@ PRIVATE
     modules/rtp_rtcp/source/rtcp_packet/bye.cc
     modules/rtp_rtcp/source/rtcp_packet/common_header.cc
     modules/rtp_rtcp/source/rtcp_packet/compound_packet.cc
+    modules/rtp_rtcp/source/rtcp_packet/congestion_control_feedback.cc
+    modules/rtp_rtcp/source/rtcp_packet/congestion_control_feedback.h
     modules/rtp_rtcp/source/rtcp_packet/dlrr.cc
     modules/rtp_rtcp/source/rtcp_packet/extended_reports.cc
     modules/rtp_rtcp/source/rtcp_packet/fir.cc
@@ -1792,26 +1822,21 @@ PRIVATE
     call/bitrate_allocator.cc
     call/call.cc
     call/call_config.cc
-    call/create_call.cc
-    call/create_call.h
-    call/degraded_call.cc
     call/fake_network_pipe.cc
     call/flexfec_receive_stream.cc
     call/flexfec_receive_stream_impl.cc
+    call/payload_type_picker.cc
+    call/payload_type_picker.h
     call/receive_stream.h
-    call/receive_time_calculator.cc
     call/rtp_bitrate_configurator.cc
     call/rtp_config.cc
     call/rtp_demuxer.cc
     call/rtp_payload_params.cc
     call/rtp_stream_receiver_controller.cc
     call/rtp_transport_config.h
-    call/rtp_transport_controller_send_factory.h
-    call/rtp_transport_controller_send_factory_interface.h
     call/rtp_transport_controller_send.cc
     call/rtp_video_sender.cc
     call/rtx_receive_stream.cc
-    call/simulated_network.cc
     call/syncable.cc
     call/version.cc
     call/version.h
@@ -2004,11 +2029,10 @@ PRIVATE
     logging/rtc_event_log/events/rtc_event_audio_send_stream_config.cc
     logging/rtc_event_log/events/rtc_event_bwe_update_delay_based.cc
     logging/rtc_event_log/events/rtc_event_bwe_update_loss_based.cc
+    logging/rtc_event_log/events/rtc_event_bwe_update_scream.cc
+    logging/rtc_event_log/events/rtc_event_bwe_update_scream.h
     logging/rtc_event_log/events/rtc_event_dtls_transport_state.cc
     logging/rtc_event_log/events/rtc_event_dtls_writable_state.cc
-    logging/rtc_event_log/events/rtc_event_generic_ack_received.cc
-    logging/rtc_event_log/events/rtc_event_generic_packet_received.cc
-    logging/rtc_event_log/events/rtc_event_generic_packet_sent.cc
     logging/rtc_event_log/events/rtc_event_ice_candidate_pair.cc
     logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.cc
     logging/rtc_event_log/events/rtc_event_log_parse_status.h
@@ -2145,6 +2169,10 @@ PRIVATE
     audio/voip/audio_egress.cc
     modules/remote_bitrate_estimator/aimd_rate_control.cc
     modules/remote_bitrate_estimator/bwe_defines.cc
+    modules/remote_bitrate_estimator/congestion_control_feedback_generator.cc
+    modules/remote_bitrate_estimator/congestion_control_feedback_generator.h
+    modules/remote_bitrate_estimator/congestion_control_feedback_tracker.cc
+    modules/remote_bitrate_estimator/congestion_control_feedback_tracker.h
     modules/remote_bitrate_estimator/inter_arrival.cc
     modules/remote_bitrate_estimator/overuse_detector.cc
     modules/remote_bitrate_estimator/overuse_estimator.cc
@@ -2152,8 +2180,8 @@ PRIVATE
     modules/remote_bitrate_estimator/packet_arrival_map.h
     modules/remote_bitrate_estimator/remote_bitrate_estimator_abs_send_time.cc
     modules/remote_bitrate_estimator/remote_bitrate_estimator_single_stream.cc
-    modules/remote_bitrate_estimator/test/bwe_test_logging.cc
-    modules/remote_bitrate_estimator/remote_estimator_proxy.cc
+    modules/remote_bitrate_estimator/transport_sequence_number_feedback_generator.cc
+    modules/remote_bitrate_estimator/transport_sequence_number_feedback_generator.h
     sdk/media_constraints.cc
 
     # screen drawer
@@ -2521,8 +2549,6 @@ if (NOT WIN32)
     remove_target_sources(tg_owt ${webrtc_loc}
         rtc_base/win32.cc
         rtc_base/win32.h
-        rtc_base/win32_window.cc
-        rtc_base/win32_window.h
         rtc_base/task_queue_win.cc
         rtc_base/task_queue_win.h
         api/task_queue/default_task_queue_factory_win.cc
@@ -2600,7 +2626,6 @@ endif()
 if (APPLE)
     remove_target_sources(tg_owt ${webrtc_loc}
         modules/audio_coding/codecs/isac/empty.cc
-        modules/remote_bitrate_estimator/test/bwe_test_logging.cc
     )
 else()
     remove_target_sources(tg_owt ${webrtc_loc}
